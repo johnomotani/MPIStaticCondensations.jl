@@ -15,7 +15,7 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 360
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
@@ -31,10 +31,24 @@ jobs:
           - x64
     steps:
       - uses: actions/checkout@v6
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      - run: |
+          julia --project -O3 -e 'import Pkg; Pkg.add(["MPI", "MPIPreferences"]); using MPIPreferences; MPIPreferences.use_jll_binary("OpenMPI_jll")'
+          julia --project -O3 -e 'using MPI; MPI.install_mpiexecjl(; destdir="."); import Pkg; Pkg.add(["Combinatorics", "StableRNGs", "Test"]); Pkg.precompile()'
+          # Need to use openmpi so that we can use `--oversubscribe` to allow using more MPI ranks than physical cores
+          ./mpiexecjl -np 1 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 2 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 3 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 4 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 5 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 6 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 7 --oversubscribe julia --project -O3 test/runtests.jl
+          ./mpiexecjl -np 8 --oversubscribe julia --project -O3 test/runtests.jl
+          # Note: MPI.jl's default implementation is mpich, which has a similar option
+          # `--with-device=ch3:sock`, but that needs to be set when compiling mpich.
+        shell: bash

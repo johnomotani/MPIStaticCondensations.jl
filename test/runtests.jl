@@ -1,6 +1,14 @@
 using MPIStaticCondensations
 using Test
 
-@testset "MPIStaticCondensations.jl" begin
-    # Write your tests here.
+include("test_indices.jl")
+include("test_finite_element_matrices.jl")
+
+function runtests()
+    @testset "MPIStaticCondensations.jl" begin
+        test_indices()
+        test_finite_element_matrices()
+    end
 end
+
+runtests()
