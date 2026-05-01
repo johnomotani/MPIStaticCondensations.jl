@@ -75,32 +75,6 @@ using TimerOutputs
 
 import LinearAlgebra: lu!, ldiv!
 
-abstract type MPIStaticCondensation end
-
-struct MPIStaticCondensationSerialSparse{Tf,Ti,Ttimer} <: MPIStaticCondensation
-    local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
-    timer::Ttimer
-    check_lu::Bool
-end
-
-struct MPIStaticCondensationSerialDense{Tf,Ti,Ttimer} <: MPIStaticCondensation
-    local_block_solver::LU{Tf,Matrix{Tf},Vector{Ti}}
-    timer::Ttimer
-    check_lu::Bool
-end
-
-struct MPIStaticCondensationParallel{Tsolver<:MPISchurComplement,Ttimer} <: MPIStaticCondensation
-    local_block_solver::Tsolver
-    timer::Ttimer
-end
-
-# Each process participates in the solution of only one of the blocks in the
-# block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tsolver<:MPIStaticCondensation}
-    local_block_solver::Tsolver
-    local_block_indices::Vector{Int64}
-end
-
 macro sc_timeit(timer, name, expr)
     return quote
         if $(esc(timer)) === nothing
@@ -111,17 +85,233 @@ macro sc_timeit(timer, name, expr)
     end
 end
 
+abstract type MPIStaticCondensation end
+
+struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
+    local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
+    buffer::Vector{Tf}
+    timer::Ttimer
+    check_lu::Bool
+end
+
+struct MPIStaticCondensationSerialDense{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
+    local_block_solver::LU{Tf,Matrix{Tf},Vector{Ti}}
+    timer::Ttimer
+    check_lu::Bool
+end
+
+struct MPIStaticCondensationParallel{Tsolver<:MPISchurComplement,Tranget,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
+    local_block_solver::Tsolver
+    top_vector_indices::Tranget
+    bottom_vector_indices::Trangeb
+    timer::Ttimer
+end
+
+# Each process participates in the solution of only one of the blocks in the
+# block-diagonal solve, so only need to hold the solver and indices for that block.
+struct BlockDiagonalSolver{Tsolver<:MPIStaticCondensation,Ti<:Integer}
+    local_block_solver::Tsolver
+    local_block_indices::Vector{Ti}
+end
+
+struct Dimension{Ti<:Integer}
+    n::Ti
+    nelement::Ti
+    ngrid::Ti
+    nrank::Ti
+    irank::Ti
+    global_inds::Vector{Ti}
+    periodic::Bool
+    has_lower_boundary::Bool
+    has_upper_boundary::Bool
+    remove_boundaries::Bool
+
+    function Dimension(nelement::Integer, ngrid::Integer, nrank::Integer,
+                       irank::Integer, periodic::Bool, has_lower_boundary::Bool,
+                       has_upper_boundary::Bool, remove_boundaries::Bool)
+
+        if periodic && (has_lower_boundary || has_upper_boundary)
+            error("Cannot have boundaries when `periodic=true`. Got "
+                  * "`has_lower_boundary=$has_lower_boundary` and "
+                  * "`has_upper_boundary=$has_upper_boundary`.")
+        end
+        if nelement % nrank != 0
+            error("`nrank=$nrank` does not divide nelement=$nelement")
+        end
+
+        nelement_local = nelement ÷ nrank
+
+        # Assume a continuous-Galerkin finite element discretization where adjacent
+        # elements share a boundary point. `ngrid` counts the points in a single element,
+        # but two of these are shared (except at the ends of the grid).
+        n = nelement * (ngrid - 1) + 1
+        first_global_ind = irank * nelement_local * (ngrid - 1) + 1
+        last_global_ind = (irank + 1) * nelement_local * (ngrid - 1) + 1
+
+        if !has_lower_boundary
+            n -= 1
+            if irank == 0
+                first_global_ind += 1
+            end
+        end
+        if !has_upper_boundary
+            n -= 1
+            if irank == nrank - 1
+                last_global_ind -= 1
+            end
+        end
+
+        global_inds = collect(first_global_ind:last_global_ind)
+        if periodic && irank == nrank - 1
+            global_inds[end] = 1
+        end
+
+        return new(n, nelement, ngrid, nrank, irank, global_inds, periodic,
+                   has_lower_boundary, has_upper_boundary)
+    end
+end
+
+"""
+    create_dimension(nelement::Integer, ngrid::Integer, nrank::Integer,
+                     irank::Integer, periodic::Bool, remove_boundaries::Bool=false)
+
+Create a `Dimension` object for input to the `dimensions` argument of
+`mpi_static_condensation()`.
+
+Assume a continuous-Galerkin finite element discretization where there are `nelement`
+elements and `ngrid` points in each element. The points at the boundary between two
+elements are shared by both elements, so that the total number of grid points is
+`nelement * (ngrid - 1) + 1`. When `periodic=true`, the grid is periodic and the last grid
+point is a copy of the first. When the grid is distributed over different MPI blocks, the
+point on the boundary between the blocks is duplicated on both blocks.
+
+The number of shared-memory blocks that this dimension is divided into is given by
+`nrank`, and the rank of the block that this process belongs to is `irank`.
+
+`remove_boundaries=true` can be passed if the grid at the boundary in this dimension does
+not fit in to the sparsity pattern of the rest of the grid. In this case, the boundary
+points can be included in the 'bottom vector' part of the Schur complement split on the
+top level of the static-condensation solve, in order to ensure that the 'top vector' part
+can be split by removing any element boundary.
+"""
+function create_dimension(nelement::Integer, ngrid::Integer, nrank::Integer,
+                          irank::Integer, periodic::Bool, remove_boundaries::Bool=false)
+    # As this function creates the top-level Dimension, it always includes boundary
+    # points.
+    return Dimension(nelement, ngrid, nrank, irank, periodic, true, true,
+                     remove_boundaries)
+end
+
+function pick_dimension_to_split(dimensions::Vector{Dimension}, n_groups::Integer,
+                                 optimise_schur_complement_size::Bool)
+    distributed_dims = findall(d -> d.nrank > 1, dimensions)
+    if optimise_schur_complement_size
+        if !isempty(distributed_dims)
+            idim = argmax(d.n for d ∈ dimensions[distributed_dims])
+            return distributed_dims[idim]
+        else
+            return argmax(d.n for d ∈ dimensions)
+        end
+    else
+        if !isempty(distributed_dims)
+            distributed_dims_to_divide = findall(d.nelement % n_groups == 0
+                                                 for d ∈ dimensions[distributed_dims])
+            dims_to_divide = distributed_dims[distributed_dims_to_divide]
+            if !isempty(dims_to_divide)
+                idim = argmax(d.n for d ∈ dimensions[dims_to_divide])
+                return dims_to_divide[idim]
+            else
+                idim = argmax(d.n for d ∈ dimensions[distributed_dims])
+                return distributed_dims[idim]
+            end
+        else
+            dims_to_divide = findall(d.nelement % n_groups == 0 for d ∈ dimensions)
+            if !isempty(dims_to_divide)
+                idim = argmax(d.n for d ∈ dimensions[dims_to_divide])
+                return dims_to_divide[idim]
+            else
+                return argmax(d.n for d ∈ dimensions)
+            end
+        end
+    end
+    error("Case not handled - this should never happen")
+end
+
+function get_flattened_index(indices::Vector{<:Integer}, dimensions::Vector{Dimension})
+    flat_i = 0
+    for (i, dim) ∈ reverse(zip(indices, dimensions))
+        flat_i = flat_i * dim.n + i - 1
+    end
+    # So far constructed a 0-based index, so convert to 1-based.
+    flat_i += 1
+    return flat_i
+end
+
+function get_ind_slice(dimensions, dim_to_slice, slice_inds)
+    dimensions = copy(dimensions)
+    result_sizes = Tuple(i == dim_to_slice ? length(slice_inds) : dimensions[i].n for i ∈ length(dimensions))
+    inds = fill(typeof(slice_ind)(-1), prod(result_sizes))
+    slice_dim = popat!(dimensions, dim_to_slice)
+    for (flat_i, i) ∈ enumerate(CartesianIndices(result_sizes))
+        inds[flat_i] = 0
+        for (d, (dim, dim_i)) ∈ reverse(enumerate(zip(dimensions, i)))
+            if d == dim_to_slice
+                dim_global_ind = slice_inds[dim_i] - 1
+            else
+                dim_global_ind = dim.global_inds[dim_i] - 1
+            end
+            inds[flat_i] = dim.n * inds[flat_i] + dim_global_ind
+
+        end
+    end
+end
+
 """
 
 `comm` is divided into equally sized shared-memory blocks. `shared_comm` represents the
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
 members must be able to create shared-memory arrays.
+
+`allocate_shared_float`, `allocate_shared_int`, and `synchronize_shared` are as required
+by `mpi_schur_complement()`. `schur_tile_size` is passed to the `tile_size` argument of
+`mpi_schur_complement()`.
+
+`use_sparse` indicates whether to use a sparse-matrix solver as the lowest-level LU
+solver, and within the MPISchurComplement solvers.
+
+`optimize_schur_complement_size` sets the strategy used to pick which dimension to split
+at each level. The default strategy (`true`) splits the largest (according to value of
+`n`) dimension remaining at each level, in order to minimise the size of the Schur
+complement block. The alternative strategy (`false`) tries to optimise load balance by
+considering first dimensions whose remaining `nelement` value can be exactly divided by
+the group size (picking the largest of these), and only considering other dimensions if no
+dimension can be exactly divided. In either case, dimensions that are distributed over
+different shared-memory MPI blocks are divided first, until the locally-owned parts of all
+dimensions are contained within the same shared-memory MPI block. The two strategies will
+be equivalent as long as the largest dimension at each level is anyway exactly divisible,
+which may often be the case (e.g. if the number of processes is a power of 2, and
+`nelement` of the dimensions contain enough factors of 2).
+
+`timer` can be passed a `TimerOutput` object to collect run timings.
+
+`check_lu=true` can be passed to activate extra checks that all values are finite in
+matrices being factorized.
 """
-function mpi_static_condensation(comm::MPI.Comm, shared_comm::MPI.Comm; use_sparse=true,
+function mpi_static_condensation(dimensions::Vector{Dimension};
+                                 comm::MPI.Comm=MPI.COMM_WORLD,
+                                 shared_comm::MPI.Comm=MPI.COMM_SELF,
+                                 allocate_shared_float::Union{Function,Nothing}=nothing,
+                                 allocate_shared_int::Union{Function,Nothing}=nothing,
+                                 synchronize_shared::Union{Function,Nothing}=nothing,
+                                 schur_tile_size::Union{Nothing,Integer}=nothing,
+                                 use_sparse::Bool=true,
+                                 optimise_schur_complement_size::Bool=true,
+                                 optimise_schur_complement_size::Bool=true,
                                  timer::Union{Nothing,TimerOutput}=nothing,
-                                 schur_tile_size=nothing, check_lu=false)
+                                 check_lu::Bool=false)
 
     data_type = Float64
+    ind_type = Int64
 
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
@@ -135,14 +325,22 @@ function mpi_static_condensation(comm::MPI.Comm, shared_comm::MPI.Comm; use_spar
     n_blocks_factors = factor(Vector, n_blocks)
     shared_comm_size_factors = factor(Vector, shared_comm_size_factors)
 
+    n_levels = length(n_blocks_factors) + length(shared_comm_size_factors) + 1
+
+    if n_levels == 1
+        lowest_level_n = prod(d.n for d ∈ dimensions)
+    else
+        first_level_points = ind_type[]
+    end
+
     # Create lowest level solver
-    this_n = 42
-    identity = Matrix{Float64}(undef, this_n, this_n)
+    identity = Matrix{data_type}(undef, lowest_level_n, lowest_level_n)
     identity .= I
     if use_sparse
         lowest_level_solver =
-            MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu), timer,
-                                              check_lu)
+            MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu),
+                                              Vector{data_type}(undef, lowest_level_n),
+                                              timer, check_lu)
     else
         lowest_level_solver =
             MPIStaticCondensationSerialDense(lu(identity; check=check_lu), timer,
@@ -150,7 +348,7 @@ function mpi_static_condensation(comm::MPI.Comm, shared_comm::MPI.Comm; use_spar
     end
 
     this_level_solver = lowest_level_solver
-    for group_size ∈ reverse(shared_comm_size_factors)
+    for level ∈ 2:n_levels
         A_block_solver = BlockDiagonalSolver(this_level_solver, local_top_vector_entries)
 
         # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
@@ -170,8 +368,12 @@ function mpi_static_condensation(comm::MPI.Comm, shared_comm::MPI.Comm; use_spar
                                  skip_factorization=false,
                                  schur_tile_size=schur_tile_size, check_lu=check_lu,
                                  timer=timer)
-        this_level_solver = MPIStaticCondensationParallel(this_level_sc, timer)
+        this_level_solver =
+            MPIStaticCondensationParallel(this_level_sc, level_top_vector_entries,
+                                          level_bottom_vector_entries, timer)
     end
+
+    return this_level_solver
 end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
@@ -181,36 +383,95 @@ function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     return nothing
 end
 
-function ldiv!(block_diagonal_solver::BlockDiagonalSolver, v::AbstractVector)
+function ldiv!(x::AbstractVector, block_diagonal_solver::BlockDiagonalSolver, u::AbstractVector)
     solver = block_diagonal_solver.local_block_solver
     inds = block_diagonal_solver.local_block_indices
-    ldiv!(solver, @view(v[inds]))
+    @views ldiv!(x[inds], solver, u[inds])
+    return nothing
+end
+function ldiv!(block_diagonal_solver::BlockDiagonalSolver, u::AbstractVector)
+    solver = block_diagonal_solver.local_block_solver
+    inds = block_diagonal_solver.local_block_indices
+    @views ldiv!(solver, u[inds])
     return nothing
 end
 
 function lu!(solver::MPIStaticCondensationSerialSparse, A::AbstractMatrix)
-    # For simplicity assume non-zero pattern might change, so pass reuse_symbolic=false.
-    lu!(solver.local_block_solver, sparse(A); reuse_symbolic=false, check=solver.check_lu)
+    @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+        # For simplicity assume non-zero pattern might change, so pass reuse_symbolic=false.
+        lu!(solver.local_block_solver, sparse(A); reuse_symbolic=false, check=solver.check_lu)
+    end
     return nothing
 end
 
-function ldiv!(solver::MPIStaticCondensationSerialSparse, v::AbstractVector)
-    ldiv!(solver.local_block_solver, v)
+function ldiv!(X::AbstractVector, solver::MPIStaticCondensationSerialSparse, U::AbstractVector)
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        ldiv!(X, solver.local_block_solver, U)
+    end
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationSerialSparse, U::AbstractVector)
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        buffer = solver.buffer
+        buffer .= U
+        ldiv!(U, solver.local_block_solver, buffer)
+    end
     return nothing
 end
 
 function lu!(solver::MPIStaticCondensationSerialDense, A::AbstractMatrix)
-    # Re-use the arrays to avoid allocating.
-    mat_storage = solver.local_block_solver.factors
-    ipiv = solver.local_block_solver.ipiv
-    check = solver.check
-    mat_storage .= A
-    LAPACK.getrf!(mat_storage, ipiv; check=check)
+    @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+        # Re-use the arrays to avoid allocating.
+        mat_storage = solver.local_block_solver.factors
+        ipiv = solver.local_block_solver.ipiv
+        check = solver.check
+        mat_storage .= A
+        LAPACK.getrf!(mat_storage, ipiv; check=check)
+    end
     return nothing
 end
 
-function ldiv!(solver::MPIStaticCondensationSerialDense, v::AbstractVector)
-    ldiv!(solver.local_block_solver, v)
+function ldiv!(solver::MPIStaticCondensationSerialDense, U::AbstractVector)
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        ldiv!(solver.local_block_solver, U)
+    end
+    return nothing
+end
+function ldiv!(X::AbstractVector, solver::MPIStaticCondensationSerialDense, U::AbstractVector)
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        ldiv!(X, solver.local_block_solver, U)
+    end
+    return nothing
+end
+
+function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
+    @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+        update_schur_complement(solver.local_block_solver, a, b, c, d)
+    end
+    return nothing
+end
+
+function ldiv!(X::AbstractVector, solver::MPIStaticCondensationParallel, U::AbstractVector)
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        top_vector_indices = solver.top_vector_indices
+        bottom_vector_indices = solver.bottom_vector_indices
+        x = @view X[top_vector_indices]
+        u = @view U[top_vector_indices]
+        y = @view X[bottom_vector_indices]
+        v = @view U[bottom_vector_indices]
+        ldiv!(x, y, solver.local_block_solver, u, v)
+    end
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationParallel, U::AbstractVector)
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        # MPISchurComplement allows the RHS and solution vectors to be the same array.
+        top_vector_indices = solver.top_vector_indices
+        bottom_vector_indices = solver.bottom_vector_indices
+        u = @view U[top_vector_indices]
+        v = @view U[bottom_vector_indices]
+        ldiv!(u, v, solver, u, v)
+    end
     return nothing
 end
 
