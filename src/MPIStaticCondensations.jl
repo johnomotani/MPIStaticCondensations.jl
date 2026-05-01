@@ -214,7 +214,9 @@ function pick_dimension_to_split(dimensions::Vector{Dimension}, n_groups::Intege
         end
     else
         if !isempty(distributed_dims)
-            distributed_dims_to_divide = findall(d.nelement % n_groups == 0
+            # When dimensions are distributed, splits must be on block boundaries, not
+            # just on element boundaries.
+            distributed_dims_to_divide = findall(d.nrank % n_groups == 0
                                                  for d ∈ dimensions[distributed_dims])
             dims_to_divide = distributed_dims[distributed_dims_to_divide]
             if !isempty(dims_to_divide)
@@ -240,30 +242,110 @@ end
 function get_flattened_index(indices::Vector{<:Integer}, dimensions::Vector{Dimension})
     flat_i = 0
     for (i, dim) ∈ reverse(zip(indices, dimensions))
-        flat_i = flat_i * dim.n + i - 1
+        flat_i = flat_i * dim.n + dim.global_indices[i] - 1
     end
     # So far constructed a 0-based index, so convert to 1-based.
     flat_i += 1
     return flat_i
 end
 
-function get_ind_slice(dimensions, dim_to_slice, slice_inds)
+function get_ind_slice(dimensions::Vector{Dimension}, dim_to_slice::Integer,
+                       slice_inds::Union{UnitRange{<:Integer},Vector{<:Integer}})
     dimensions = copy(dimensions)
-    result_sizes = Tuple(i == dim_to_slice ? length(slice_inds) : dimensions[i].n for i ∈ length(dimensions))
+    result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dimensions[i].n for i ∈ length(dimensions))
     inds = fill(typeof(slice_ind)(-1), prod(result_sizes))
     slice_dim = popat!(dimensions, dim_to_slice)
-    for (flat_i, i) ∈ enumerate(CartesianIndices(result_sizes))
-        inds[flat_i] = 0
-        for (d, (dim, dim_i)) ∈ reverse(enumerate(zip(dimensions, i)))
-            if d == dim_to_slice
-                dim_global_ind = slice_inds[dim_i] - 1
-            else
-                dim_global_ind = dim.global_inds[dim_i] - 1
-            end
-            inds[flat_i] = dim.n * inds[flat_i] + dim_global_ind
+    for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
+        inds[local_flat_i] = get_flattened_index(i, dimensions)
+    end
+    return inds
+end
 
+function split_dimension(dimensions::Vector{Dimension}, n_groups::Integer,
+                         optimize_schur_complement_size::Bool)
+    ind_type = typeof(n_groups)
+    new_dimensions = copy(dimensions)
+    bottom_vector_indices = ind_type[]
+
+    if any(d.remove_boundaries for d ∈ new_dimensions)
+        for i_dim ∈ 1:length(new_dimensions)
+            d = new_dimensions[i_dim]
+            if d.remove_boundaries
+                if d.has_lower_boundary
+                    if d.irank == 0
+                        bottom_vector_indices =
+                            vcat(bottom_vector_indices,
+                                 get_ind_slice(new_dimensions, i_dim, 1:1))
+                    end
+                    d = Dimension(d.ngrid, d.nrank, d.irank, d.periodic, false,
+                                  d.has_upper_boundary, false)
+                    new_dimensions[i_dim] = d
+                end
+                if d.has_upper_boundary
+                    if d.irank == d.nrank - 1
+                        last_ind = length(d.global_indices)
+                        bottom_vector_indices =
+                            vcat(bottom_vector_indices,
+                                 get_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
+                    end
+                    d = Dimension(d.ngrid, d.nrank, d.irank, d.periodic,
+                                  d.has_lower_boundary, false, false)
+                    new_dimensions[i_dim] = d
+                end
+            end
         end
     end
+
+    slice_i = pick_dimension_to_split(dimensions, n_groups,
+                                      optimize_schur_complement_size)
+    slice_dim = new_dimensions[slice_i]
+    slice_periodic = slice_dim.periodic
+    if slice_periodic
+        # Once dimension has been sliced at least once, the periodic boundary is removed,
+        # so the dimension is effectively no longer periodic, and also does not include
+        # lower and upper boundaries.
+        slice_dim = Dimension(slice_dim.ngrid, slice_dim.nrank, false, false, false,
+                              false)
+    end
+    if slice_dim.nrank > 1
+        # When dimension is distributed, split on block boundaries.
+        blocks_per_group = (slice_dim.nrank + n_groups - 1) ÷ n_groups
+        block_boundaries = [i_group * blocks_per_group for i_group ∈ 1:n_groups-1]
+        if (slice_dim.irank ∈ block_boundaries) || (slice_periodic && slice_dim.irank == 0)
+            # Lower boundary on this block is a split.
+            bottom_vector_indices =
+                vcat(bottom_vector_indices,
+                     get_ind_slice(new_dimensions, slice_dim, 1:1))
+            first_top_vector_ind = 2
+            slice_dim = Dimension(slice_dim.ngrid, slice_dim.nrank, slice_dim.irank,
+                                  slice_dim.periodic, slice_dim.has_lower_boundary,
+                                  slice_dim.has_upper_boundary, false)
+        else
+            first_top_vector_ind = 1
+        end
+        last_ind = length(d.global_indices)
+        if slice_dim.irank + 1 ∈ block_boundaries
+            # Upper boundary on this block is a split.
+            bottom_vector_indices =
+                vcat(bottom_vector_indices,
+                     get_ind_slice(new_dimensions, slice_dim, last_ind:last_ind))
+            last_top_vector_ind = last_ind - 1
+            slice_dim = Dimension(slice_dim.ngrid, slice_dim.nrank, slice_dim.irank,
+                                  slice_dim.periodic, slice_dim.has_lower_boundary,
+                                  slice_dim.has_upper_boundary, false)
+        else
+            last_top_vector_ind = last_ind
+        end
+        top_vector_indices = get_ind_slice(new_dimensions, slice_dim,
+                                           first_top_vctor_ind:last_top_vector_ind)
+    else
+        elements_per_group = (slice_dim.nelement + n_groups - 1) ÷ n_groups
+        this_group_elements = shared_comm_rank*elements_per_group+1:(shared_comm_rank+1)*elements_per_group
+        error("finish??")
+    end
+    new_dimensions[slice_i] = slice_dim
+
+    return new_dimensions, top_vector_indices, bottom_vector_indices
 end
 
 """
