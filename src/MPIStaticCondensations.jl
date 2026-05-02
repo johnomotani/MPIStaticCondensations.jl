@@ -126,9 +126,9 @@ struct Dimension{Ti<:Integer}
     has_upper_boundary::Bool
     remove_boundaries::Bool
 
-    function Dimension(nelement::Integer, ngrid::Integer, nrank::Integer,
-                       irank::Integer, periodic::Bool, has_lower_boundary::Bool,
-                       has_upper_boundary::Bool, remove_boundaries::Bool)
+    function Dimension(nelement::Ti, ngrid::Ti, nrank::Ti, irank::Ti, periodic::Bool,
+                       has_lower_boundary::Bool, has_upper_boundary::Bool,
+                       remove_boundaries::Bool) where Ti <: Integer
 
         if periodic && (has_lower_boundary || has_upper_boundary)
             error("Cannot have boundaries when `periodic=true`. Got "
@@ -166,8 +166,8 @@ struct Dimension{Ti<:Integer}
             global_inds[end] = 1
         end
 
-        return new(n, nelement, ngrid, nrank, irank, global_inds, periodic,
-                   has_lower_boundary, has_upper_boundary)
+        return new{Ti}(n, nelement, ngrid, nrank, irank, global_inds, periodic,
+                       has_lower_boundary, has_upper_boundary)
     end
 end
 
@@ -202,7 +202,7 @@ function create_dimension(nelement::Integer, ngrid::Integer, nrank::Integer,
                      remove_boundaries)
 end
 
-function pick_dimension_to_split(dimensions::Vector{Dimension}, n_groups::Integer,
+function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Integer,
                                  optimise_schur_complement_size::Bool)
     distributed_dims = findall(d -> d.nrank > 1, dimensions)
     if optimise_schur_complement_size
@@ -239,7 +239,7 @@ function pick_dimension_to_split(dimensions::Vector{Dimension}, n_groups::Intege
     error("Case not handled - this should never happen")
 end
 
-function get_flattened_index(indices::Vector{<:Integer}, dimensions::Vector{Dimension})
+function get_flattened_index(indices::Vector{<:Integer}, dimensions::Vector{<:Dimension})
     flat_i = 0
     for (i, dim) ∈ reverse(zip(indices, dimensions))
         flat_i = flat_i * dim.n + dim.global_indices[i] - 1
@@ -249,7 +249,7 @@ function get_flattened_index(indices::Vector{<:Integer}, dimensions::Vector{Dime
     return flat_i
 end
 
-function get_ind_slice(dimensions::Vector{Dimension}, dim_to_slice::Integer,
+function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                        slice_inds::Union{UnitRange{<:Integer},Vector{<:Integer}})
     dimensions = copy(dimensions)
     result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dimensions[i].n for i ∈ length(dimensions))
@@ -271,7 +271,7 @@ MPI.Comm_split(comm::FakeComm, color, key) = nothing
 
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
 # for testing of the index generation.
-function split_dimension(dimensions::Vector{Dimension}, n_groups::Integer,
+function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                          optimize_schur_complement_size::Bool,
                          comm::Union{MPI.Comm,FakeComm},
                          distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
@@ -458,7 +458,7 @@ which may often be the case (e.g. if the number of processes is a power of 2, an
 `check_lu=true` can be passed to activate extra checks that all values are finite in
 matrices being factorized.
 """
-function mpi_static_condensation(dimensions::Vector{Dimension};
+function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -467,7 +467,6 @@ function mpi_static_condensation(dimensions::Vector{Dimension};
                                  synchronize_shared::Union{Function,Nothing}=nothing,
                                  schur_tile_size::Union{Nothing,Integer}=nothing,
                                  use_sparse::Bool=true,
-                                 optimise_schur_complement_size::Bool=true,
                                  optimise_schur_complement_size::Bool=true,
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false)
