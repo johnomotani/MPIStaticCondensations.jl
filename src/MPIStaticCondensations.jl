@@ -261,10 +261,30 @@ function get_ind_slice(dimensions::Vector{Dimension}, dim_to_slice::Integer,
     return inds
 end
 
+struct FakeComm
+    rank::Int64
+    size::Int64
+end
+MPI.Comm_rank(comm::FakeComm) = comm.rank
+MPI.Comm_size(comm::FakeComm) = comm.size
+MPI.Comm_split(comm::FakeComm, color, key) = nothing
+
+# Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
+# for testing of the index generation.
 function split_dimension(dimensions::Vector{Dimension}, n_groups::Integer,
-                         optimize_schur_complement_size::Bool)
+                         optimize_schur_complement_size::Bool,
+                         comm::Union{MPI.Comm,FakeComm},
+                         distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
+                         shared_comm::Union{MPI.Comm,FakeComm})
     ind_type = typeof(n_groups)
     new_dimensions = copy(dimensions)
+    new_comm = comm
+    new_distributed_comm = distributed_comm
+    new_shared_comm = shared_comm
+    comm_rank = MPI.Comm_rank(new_comm)
+    shared_comm_rank = MPI.Comm_rank(new_shared_comm)
+    shared_comm_size = MPI.Comm_size(new_shared_comm)
+    distributed_comm_rank = comm_rank ÷ shared_comm_size
     bottom_vector_indices = ind_type[]
 
     if any(d.remove_boundaries for d ∈ new_dimensions)
@@ -304,48 +324,107 @@ function split_dimension(dimensions::Vector{Dimension}, n_groups::Integer,
         # Once dimension has been sliced at least once, the periodic boundary is removed,
         # so the dimension is effectively no longer periodic, and also does not include
         # lower and upper boundaries.
-        slice_dim = Dimension(slice_dim.ngrid, slice_dim.nrank, false, false, false,
-                              false)
+        slice_dim = Dimension(slice_dim.nelement, slice_dim.ngrid, slice_dim.nrank, false,
+                              false, false, false)
     end
     if slice_dim.nrank > 1
         # When dimension is distributed, split on block boundaries.
         blocks_per_group = (slice_dim.nrank + n_groups - 1) ÷ n_groups
+        group_rank = distributed_comm_rank ÷ blocks_per_group
+        new_comm = MPI.Comm_split(new_comm, group_rank, 0)
+        if shared_comm_rank == 0
+            new_distributed_comm = MPI.Comm_split(new_distributed_comm, group_rank, 0)
+        end
+        if slice_dim.nelement % slice_dim.nrank != 0
+            error("Number of elements in dimension should split equally among blocks."
+                  * "Dimension $slice_i has $(slice_dim.nelement) elements and "
+                  * "$(slice_dim.nrank) blocks.")
+        end
+        elements_per_block = slice_dim.nelement ÷ slice_dim.nrank
+        if group_rank == n_groups - 1
+            this_group_nelement = slice_dim.nelement - group_rank * blocks_per_group * elements_per_block
+        else
+            this_group_nelement = blocks_per_group * elements_per_block
+        end
         block_boundaries = [i_group * blocks_per_group for i_group ∈ 1:n_groups-1]
         if (slice_dim.irank ∈ block_boundaries) || (slice_periodic && slice_dim.irank == 0)
             # Lower boundary on this block is a split.
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
                      get_ind_slice(new_dimensions, slice_dim, 1:1))
-            first_top_vector_ind = 2
-            slice_dim = Dimension(slice_dim.ngrid, slice_dim.nrank, slice_dim.irank,
-                                  slice_dim.periodic, slice_dim.has_lower_boundary,
+            first_top_vector_slice_ind = 2
+            slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
+                                  slice_dim.irank, slice_dim.periodic,
+                                  slice_dim.has_lower_boundary,
                                   slice_dim.has_upper_boundary, false)
         else
-            first_top_vector_ind = 1
+            first_top_vector_slice_ind = 1
         end
-        last_ind = length(d.global_indices)
+        last_slice_ind = length(slice_ind.global_indices)
         if slice_dim.irank + 1 ∈ block_boundaries
             # Upper boundary on this block is a split.
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
-                     get_ind_slice(new_dimensions, slice_dim, last_ind:last_ind))
-            last_top_vector_ind = last_ind - 1
-            slice_dim = Dimension(slice_dim.ngrid, slice_dim.nrank, slice_dim.irank,
-                                  slice_dim.periodic, slice_dim.has_lower_boundary,
+                     get_ind_slice(new_dimensions, slice_dim,
+                                   last_slice_ind:last_slice_ind))
+            last_top_vector_slice_ind = last_ind - 1
+            slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
+                                  slice_dim.irank, slice_dim.periodic,
+                                  slice_dim.has_lower_boundary,
                                   slice_dim.has_upper_boundary, false)
         else
-            last_top_vector_ind = last_ind
+            last_top_vector_slice_ind = last_slice_ind
         end
-        top_vector_indices = get_ind_slice(new_dimensions, slice_dim,
-                                           first_top_vctor_ind:last_top_vector_ind)
+        top_vector_indices =
+            get_ind_slice(new_dimensions, slice_dim,
+                          first_top_vctor_slice_ind:last_top_vector_slice_ind)
+        local_top_vector_indices = top_vector_indices
     else
+        ngrid = slice_dim.ngrid
         elements_per_group = (slice_dim.nelement + n_groups - 1) ÷ n_groups
-        this_group_elements = shared_comm_rank*elements_per_group+1:(shared_comm_rank+1)*elements_per_group
-        error("finish??")
+        procs_per_group = (shared_comm_size + n_groups - 1) ÷ n_groups
+        group_rank = shared_comm_rank ÷ procs_per_group
+        if group_rank == n_groups - 1
+            this_group_nelement = slice_dim.nelement - group_rank * elements_per_group
+        else
+            this_group_nelement = elements_per_group
+        end
+        slice_points = [i * elements_per_group * (ngrid - 1) for i ∈ 1:n_groups-1]
+        if slice_dim.has_lower_boundary
+            slice_points .+= 1
+        end
+        bottom_vector_indices =
+            vcat(bottom_vector_indices,
+                 get_ind_slice(new_dimensions, slice_dim, slice_points))
+        last_slice_ind = length(slice_dim.global_indices)
+        if group_rank == 0
+            first_local_top_vector_slice_ind = 1
+            has_lower_boundary = slice_dim.has_lower_boundary
+        else
+            first_local_top_vector_slice_ind = slice_points[group_rank] + 1
+            has_lower_boundary = false
+        end
+        if group_rank == n_groups - 1
+            last_local_top_vector_slice_ind = last_slice_ind
+            has_upper_boundary = slice_dim.has_upper_boundary
+        else
+            last_local_top_vector_slice_ind = slice_points[group_rank+1] - 1
+            has_upper_boundary = false
+        end
+        local_top_vector_indices =
+            get_ind_slice(new_dimensions, slice_dim,
+                          first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
+        all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
+        top_vector_indices = get_ind_slice(new_dimensions, slice_dim,
+                                           all_top_vector_slice_inds)
+        slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
+                              slice_dim.irank, slice_dim.periodic, has_lower_boundary,
+                              has_upper_boundary, false)
     end
     new_dimensions[slice_i] = slice_dim
 
-    return new_dimensions, top_vector_indices, bottom_vector_indices
+    return new_dimensions, top_vector_indices, local_top_vector_indices,
+           bottom_vector_indices, new_comm, new_distributed_comm, new_shared_comm
 end
 
 """
@@ -381,6 +460,7 @@ matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{Dimension};
                                  comm::MPI.Comm=MPI.COMM_WORLD,
+                                 distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
                                  allocate_shared_float::Union{Function,Nothing}=nothing,
                                  allocate_shared_int::Union{Function,Nothing}=nothing,
@@ -397,6 +477,12 @@ function mpi_static_condensation(dimensions::Vector{Dimension};
 
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
+    shared_comm_rank = MPI.Comm_rank(shared_comm)
+
+    if distributed_comm === missing
+        # Create default distributed_comm
+        distributed_comm = MPI.Comm_split(comm, shared_comm_rank == 0 ? 0 : nothing, 0)
+    end
 
     if comm_size % shared_comm_size != 0
         error("Size of shared_comm ($shared_comm_size) does not divide the size of comm "
