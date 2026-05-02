@@ -239,10 +239,10 @@ function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Inte
     error("Case not handled - this should never happen")
 end
 
-function get_flattened_index(indices::Vector{<:Integer}, dimensions::Vector{<:Dimension})
+function get_flattened_index(indices::CartesianIndex, dimensions::Vector{<:Dimension})
     flat_i = 0
-    for (i, dim) ∈ reverse(zip(indices, dimensions))
-        flat_i = flat_i * dim.n + dim.global_indices[i] - 1
+    for (i, dim) ∈ zip(reverse(Tuple(indices)), reverse(dimensions))
+        flat_i = flat_i * dim.n + dim.global_inds[i] - 1
     end
     # So far constructed a 0-based index, so convert to 1-based.
     flat_i += 1
@@ -253,7 +253,7 @@ function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                        slice_inds::Union{UnitRange{<:Integer},Vector{<:Integer}})
     dimensions = copy(dimensions)
     result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dimensions[i].n for i ∈ length(dimensions))
-    inds = fill(typeof(slice_ind)(-1), prod(result_sizes))
+    inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
     slice_dim = popat!(dimensions, dim_to_slice)
     for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
         inds[local_flat_i] = get_flattened_index(i, dimensions)
@@ -303,7 +303,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 end
                 if d.has_upper_boundary
                     if d.irank == d.nrank - 1
-                        last_ind = length(d.global_indices)
+                        last_ind = length(d.global_inds)
                         bottom_vector_indices =
                             vcat(bottom_vector_indices,
                                  get_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
@@ -360,14 +360,14 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         else
             first_top_vector_slice_ind = 1
         end
-        last_slice_ind = length(slice_ind.global_indices)
+        last_slice_ind = length(slice_dim.global_inds)
         if slice_dim.irank + 1 ∈ block_boundaries
             # Upper boundary on this block is a split.
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
-                     get_ind_slice(new_dimensions, slice_dim,
+                     get_ind_slice(new_dimensions, slice_i,
                                    last_slice_ind:last_slice_ind))
-            last_top_vector_slice_ind = last_ind - 1
+            last_top_vector_slice_ind = last_slice_ind - 1
             slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
                                   slice_dim.irank, slice_dim.periodic,
                                   slice_dim.has_lower_boundary,
@@ -376,8 +376,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             last_top_vector_slice_ind = last_slice_ind
         end
         top_vector_indices =
-            get_ind_slice(new_dimensions, slice_dim,
-                          first_top_vctor_slice_ind:last_top_vector_slice_ind)
+            get_ind_slice(new_dimensions, slice_i,
+                          first_top_vector_slice_ind:last_top_vector_slice_ind)
         local_top_vector_indices = top_vector_indices
     else
         ngrid = slice_dim.ngrid
@@ -395,8 +395,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         end
         bottom_vector_indices =
             vcat(bottom_vector_indices,
-                 get_ind_slice(new_dimensions, slice_dim, slice_points))
-        last_slice_ind = length(slice_dim.global_indices)
+                 get_ind_slice(new_dimensions, slice_i, slice_points))
+        last_slice_ind = length(slice_dim.global_inds)
         if group_rank == 0
             first_local_top_vector_slice_ind = 1
             has_lower_boundary = slice_dim.has_lower_boundary
@@ -412,10 +412,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             has_upper_boundary = false
         end
         local_top_vector_indices =
-            get_ind_slice(new_dimensions, slice_dim,
+            get_ind_slice(new_dimensions, slice_i,
                           first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
-        top_vector_indices = get_ind_slice(new_dimensions, slice_dim,
+        top_vector_indices = get_ind_slice(new_dimensions, slice_i,
                                            all_top_vector_slice_inds)
         slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
                               slice_dim.irank, slice_dim.periodic, has_lower_boundary,
