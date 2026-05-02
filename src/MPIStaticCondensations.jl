@@ -254,7 +254,6 @@ function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
     dimensions = copy(dimensions)
     result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dimensions[i].n for i ∈ length(dimensions))
     inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
-    slice_dim = popat!(dimensions, dim_to_slice)
     for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
         inds[local_flat_i] = get_flattened_index(i, dimensions)
     end
@@ -297,8 +296,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                             vcat(bottom_vector_indices,
                                  get_ind_slice(new_dimensions, i_dim, 1:1))
                     end
-                    d = Dimension(d.ngrid, d.nrank, d.irank, d.periodic, false,
-                                  d.has_upper_boundary, false)
+                    d = Dimension(d.nelement, d.ngrid, d.nrank, d.irank, d.periodic,
+                                  false, d.has_upper_boundary, false)
                     new_dimensions[i_dim] = d
                 end
                 if d.has_upper_boundary
@@ -308,7 +307,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                             vcat(bottom_vector_indices,
                                  get_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
                     end
-                    d = Dimension(d.ngrid, d.nrank, d.irank, d.periodic,
+                    d = Dimension(d.nelement, d.ngrid, d.nrank, d.irank, d.periodic,
                                   d.has_lower_boundary, false, false)
                     new_dimensions[i_dim] = d
                 end
@@ -343,9 +342,12 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         elements_per_block = slice_dim.nelement ÷ slice_dim.nrank
         if group_rank == n_groups - 1
             this_group_nelement = slice_dim.nelement - group_rank * blocks_per_group * elements_per_block
+            this_group_nrank = slice_dim.nrank - group_rank * blocks_per_group
         else
             this_group_nelement = blocks_per_group * elements_per_block
+            this_group_nrank = blocks_per_group
         end
+        this_group_irank = slice_dim.irank - group_rank * blocks_per_group
         block_boundaries = [i_group * blocks_per_group for i_group ∈ 1:n_groups-1]
         if (slice_dim.irank ∈ block_boundaries) || (slice_periodic && slice_dim.irank == 0)
             # Lower boundary on this block is a split.
@@ -353,9 +355,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 vcat(bottom_vector_indices,
                      get_ind_slice(new_dimensions, slice_dim, 1:1))
             first_top_vector_slice_ind = 2
-            slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
-                                  slice_dim.irank, slice_dim.periodic,
-                                  slice_dim.has_lower_boundary,
+            slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, this_group_nrank,
+                                  this_group_irank, slice_dim.periodic, false,
                                   slice_dim.has_upper_boundary, false)
         else
             first_top_vector_slice_ind = 1
@@ -368,10 +369,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                      get_ind_slice(new_dimensions, slice_i,
                                    last_slice_ind:last_slice_ind))
             last_top_vector_slice_ind = last_slice_ind - 1
-            slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, slice_dim.nrank,
-                                  slice_dim.irank, slice_dim.periodic,
-                                  slice_dim.has_lower_boundary,
-                                  slice_dim.has_upper_boundary, false)
+            slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, this_group_nrank,
+                                  this_group_irank, slice_dim.periodic,
+                                  slice_dim.has_lower_boundary, false, false)
         else
             last_top_vector_slice_ind = last_slice_ind
         end
@@ -379,6 +379,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             get_ind_slice(new_dimensions, slice_i,
                           first_top_vector_slice_ind:last_top_vector_slice_ind)
         local_top_vector_indices = top_vector_indices
+        slice_dim = Dimension(this_group_nelement, slice_dim.ngrid, this_group_nrank,
+                              this_group_irank, slice_dim.periodic,
+                              slice_dim.has_lower_boundary, slice_dim.has_upper_boundary,
+                              false)
     else
         ngrid = slice_dim.ngrid
         elements_per_group = (slice_dim.nelement + n_groups - 1) ÷ n_groups
