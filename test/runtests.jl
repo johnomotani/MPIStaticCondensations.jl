@@ -1149,6 +1149,64 @@ function test_split_indices_3d()
             @test li.top_vector_indices == [(1:18)...,(28:45)...]
         end
     end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
+            @test li.top_vector_indices == vcat(1:6, 16:21, 31:36)
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
+            @test li.top_vector_indices == vcat(10:15, 25:30, 40:45)
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_top_vector_indices == vcat(1:6, 16:21, 31:36)
+            @test li.top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_top_vector_indices == vcat(10:15, 25:30, 40:45)
+            @test li.top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+        end
+    end
 end
 
 function runtests()

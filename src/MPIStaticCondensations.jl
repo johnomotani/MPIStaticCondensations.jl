@@ -118,6 +118,7 @@ end
 
 struct Dimension{Ti<:Integer}
     n::Ti
+    n_local::Ti
     nelement::Ti
     ngrid::Ti
     nrank::Ti
@@ -142,17 +143,20 @@ struct Dimension{Ti<:Integer}
         # elements share a boundary point. `ngrid` counts the points in a single element,
         # but two of these are shared (except at the ends of the grid).
         n = nelement * (ngrid - 1) + 1
+        n_local = nelement_local * (ngrid - 1) + 1
         first_global_ind = irank * nelement_local * (ngrid - 1) + 1
         last_global_ind = (irank + 1) * nelement_local * (ngrid - 1) + 1
 
         if !has_lower_boundary
             n -= 1
+            n_local -= 1
             if irank == 0
                 first_global_ind += 1
             end
         end
         if !has_upper_boundary
             n -= 1
+            n_local -= 1
             if irank == nrank - 1
                 last_global_ind -= 1
             end
@@ -163,7 +167,7 @@ struct Dimension{Ti<:Integer}
             global_inds[end] = 1
         end
 
-        return new{Ti}(n, nelement, ngrid, nrank, irank, global_inds, periodic,
+        return new{Ti}(n, n_local, nelement, ngrid, nrank, irank, global_inds, periodic,
                        has_lower_boundary, has_upper_boundary, remove_boundaries)
     end
 end
@@ -290,7 +294,7 @@ end
 function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                              slice_inds::Union{UnitRange{<:Integer},Vector{<:Integer}})
     dimensions = copy(dimensions)
-    dim_sizes = [d.n for d ∈ dimensions]
+    dim_sizes = [d.n_local for d ∈ dimensions]
     result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dim_sizes[i] for i ∈ 1:length(dimensions))
     inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
     for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
@@ -497,8 +501,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             end
         end
         local_top_vector_indices =
-            get_ind_slice(new_dimensions, slice_i,
-                          first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
+            get_local_ind_slice(new_dimensions, slice_i,
+                                first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
         top_vector_indices = get_ind_slice(new_dimensions, slice_i,
                                            all_top_vector_slice_inds)
