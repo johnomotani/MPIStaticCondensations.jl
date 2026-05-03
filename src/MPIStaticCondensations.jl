@@ -268,8 +268,8 @@ function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                 prod(length(r) for r ∈ result_ranges_left; init=1) * length(slice_inds) *
                 prod(length(r) for r ∈ result_ranges_right; init=1))
     local_flat_i = 0
-    for i_left ∈ CartesianIndices(result_ranges_left), i_slice ∈ slice_inds,
-            i_right ∈ CartesianIndices(result_ranges_right)
+    for i_right ∈ CartesianIndices(result_ranges_right), i_slice ∈ slice_inds,
+            i_left ∈ CartesianIndices(result_ranges_left)
         local_flat_i += 1
         indices = CartesianIndex(i_left, i_slice, i_right)
         inds[local_flat_i] = get_flattened_index(indices, dimensions)
