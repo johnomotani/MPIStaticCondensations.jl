@@ -262,6 +262,28 @@ function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
     return inds
 end
 
+function get_local_flattened_index(indices::CartesianIndex, dim_sizes::Vector{<:Integer})
+    flat_i = 0
+    for (i, n) ∈ zip(reverse(Tuple(indices)), reverse(dim_sizes))
+        flat_i = flat_i * n + i - 1
+    end
+    # So far constructed a 0-based index, so convert to 1-based.
+    flat_i += 1
+    return flat_i
+end
+
+function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
+                             slice_inds::Union{UnitRange{<:Integer},Vector{<:Integer}})
+    dimensions = copy(dimensions)
+    dim_sizes = [d.n for d ∈ dimensions]
+    result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dim_sizes[i] for i ∈ length(dimensions))
+    inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
+    for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
+        inds[local_flat_i] = get_local_flattened_index(i, dim_sizes)
+    end
+    return inds
+end
+
 struct FakeComm
     rank::Int64
     size::Int64
@@ -402,7 +424,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         top_vector_indices =
             get_ind_slice(new_dimensions, slice_i,
                           first_top_vector_slice_ind:last_top_vector_slice_ind)
-        local_top_vector_indices = top_vector_indices
+        local_top_vector_indices =
+            get_local_ind_slice(new_dimensions, slice_i,
+                                first_top_vector_slice_ind:last_top_vector_slice_ind)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=this_group_nrank, irank=this_group_irank,
                               periodic=slice_dim.periodic,
