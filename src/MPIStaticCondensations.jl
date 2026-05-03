@@ -132,11 +132,6 @@ struct Dimension{Ti<:Integer}
                        has_lower_boundary::Bool, has_upper_boundary::Bool,
                        remove_boundaries::Bool) where Ti <: Integer
 
-        if periodic && (has_lower_boundary || has_upper_boundary)
-            error("Cannot have boundaries when `periodic=true`. Got "
-                  * "`has_lower_boundary=$has_lower_boundary` and "
-                  * "`has_upper_boundary=$has_upper_boundary`.")
-        end
         if nelement % nrank != 0
             error("`nrank=$nrank` does not divide nelement=$nelement")
         end
@@ -379,6 +374,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     slice_dim = new_dimensions[slice_i]
     slice_periodic = slice_dim.periodic
     slice_irank = slice_dim.irank
+    slice_nrank = slice_dim.nrank
     last_slice_ind = length(slice_dim.global_inds)
     if slice_periodic
         # Once dimension has been sliced at least once, the periodic boundary is removed,
@@ -426,7 +422,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         else
             first_top_vector_slice_ind = 1
         end
-        if slice_irank + 1 ∈ block_boundaries
+        if (slice_irank + 1 ∈ block_boundaries) || (slice_periodic && slice_irank == slice_nrank - 1)
             # Upper boundary on this block is a split.
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
@@ -464,26 +460,37 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             this_group_nelement = elements_per_group
         end
         slice_step = elements_per_group * (ngrid - 1)
-        slice_points = slice_step:slice_step:slice_step*(n_groups-1)
-        if slice_dim.has_lower_boundary
-            slice_points = slice_points .+ 1
+        if slice_periodic
+            slice_points = 1:slice_step:last_slice_ind
+        else
+            slice_points = slice_step:slice_step:slice_step*(n_groups-1)
+            if slice_dim.has_lower_boundary
+                slice_points = slice_points .+ 1
+            end
         end
         bottom_vector_indices =
             vcat(bottom_vector_indices,
                  get_ind_slice(new_dimensions, slice_i, slice_points))
-        if group_rank == 0
-            first_local_top_vector_slice_ind = 1
-            has_lower_boundary = slice_dim.has_lower_boundary
-        else
-            first_local_top_vector_slice_ind = slice_points[group_rank] + 1
+        if slice_periodic
+            first_local_top_vector_slice_ind = slice_points[group_rank+1] + 1
             has_lower_boundary = false
-        end
-        if group_rank == n_groups - 1
-            last_local_top_vector_slice_ind = last_slice_ind
-            has_upper_boundary = slice_dim.has_upper_boundary
-        else
-            last_local_top_vector_slice_ind = slice_points[group_rank+1] - 1
+            last_local_top_vector_slice_ind = slice_points[min(group_rank+2,end)] - 1
             has_upper_boundary = false
+        else
+            if group_rank == 0
+                first_local_top_vector_slice_ind = 1
+                has_lower_boundary = slice_dim.has_lower_boundary
+            else
+                first_local_top_vector_slice_ind = slice_points[group_rank] + 1
+                has_lower_boundary = false
+            end
+            if group_rank == n_groups - 1
+                last_local_top_vector_slice_ind = last_slice_ind
+                has_upper_boundary = slice_dim.has_upper_boundary
+            else
+                last_local_top_vector_slice_ind = slice_points[group_rank+1] - 1
+                has_upper_boundary = false
+            end
         end
         local_top_vector_indices =
             get_ind_slice(new_dimensions, slice_i,
@@ -492,8 +499,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         top_vector_indices = get_ind_slice(new_dimensions, slice_i,
                                            all_top_vector_slice_inds)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
-                              nrank=slice_dim.nrank, irank=slice_irank,
-                              periodic=slice_dim.periodic,
+                              nrank=slice_dim.nrank, irank=slice_irank, periodic=false,
                               has_lower_boundary=has_lower_boundary,
                               has_upper_boundary=has_upper_boundary,
                               remove_boundaries=false)

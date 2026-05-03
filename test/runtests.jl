@@ -242,6 +242,279 @@ function test_split_indices()
             @test li.top_vector_indices == [1,2,4,6,8,9]
         end
     end
+
+    n_groups = 3
+    nrank = 3
+    n_shared = 3
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5,9]
+            @test li.local_top_vector_indices == 1:4
+            @test li.top_vector_indices == [(1:4)...,(6:8)...]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5,9]
+            @test li.local_top_vector_indices == 6:8
+            @test li.top_vector_indices == [(1:4)...,(6:8)...]
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5,9]
+            @test li.local_top_vector_indices == 1:0
+            @test li.top_vector_indices == [(1:4)...,(6:8)...]
+        end
+    end
+
+    nelement_list = [4]
+    periodic_list = [true]
+    remove_boundaries_list = [false]
+
+    n_groups = 2
+    nrank = 4
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1]
+            @test li.local_top_vector_indices == 2:3
+            @test li.top_vector_indices == 2:3
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5]
+            @test li.local_top_vector_indices == 1:2
+            @test li.top_vector_indices == 3:4
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5]
+            @test li.local_top_vector_indices == 2:3
+            @test li.top_vector_indices == 6:7
+        end
+
+        irank = 3
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1]
+            @test li.local_top_vector_indices == 1:2
+            @test li.top_vector_indices == 7:8
+        end
+    end
+
+    n_groups = 2
+    nrank = 4
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == 2:4
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == 2:4
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5,1]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == 6:8
+        end
+
+        irank = 3
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5,1]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == 6:8
+        end
+    end
+
+    n_groups = 2
+    nrank = 4
+    n_shared = 4
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 6:8
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+
+        irank = 3
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 6:8
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+    end
+
+    n_groups = 4
+    nrank = 4
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,3]
+            @test li.local_top_vector_indices == 2:2
+            @test li.top_vector_indices == 2:2
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [3,5]
+            @test li.local_top_vector_indices == 2:2
+            @test li.top_vector_indices == 4:4
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [5,7]
+            @test li.local_top_vector_indices == 2:2
+            @test li.top_vector_indices == 6:6
+        end
+
+        irank = 3
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [7,1]
+            @test li.local_top_vector_indices == 2:2
+            @test li.top_vector_indices == 8:8
+        end
+    end
+
+    n_groups = 4
+    nrank = 4
+    n_shared = 4
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_top_vector_indices == 2:2
+            @test li.top_vector_indices == [2,4,6,8]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_top_vector_indices == 4:4
+            @test li.top_vector_indices == [2,4,6,8]
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_top_vector_indices == 6:6
+            @test li.top_vector_indices == [2,4,6,8]
+        end
+
+        irank = 3
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_top_vector_indices == 8:8
+            @test li.top_vector_indices == [2,4,6,8]
+        end
+    end
+
+    n_groups = 3
+    nrank = 3
+    n_shared = 3
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 2:4
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 6:8
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank, n_shared, n_groups, irank)
+            @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_top_vector_indices == 1:0
+            @test li.top_vector_indices == [(2:4)...,(6:8)...]
+        end
+    end
 end
 
 function runtests()
