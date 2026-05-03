@@ -292,13 +292,30 @@ function get_local_flattened_index(indices::CartesianIndex, dim_sizes::Vector{<:
 end
 
 function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
-                             slice_inds::Union{UnitRange{<:Integer},Vector{<:Integer}})
+                             slice_inds::OrdinalRange{<:Integer})
     dimensions = copy(dimensions)
     dim_sizes = [d.n_local for d ∈ dimensions]
     result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dim_sizes[i] for i ∈ 1:length(dimensions))
     inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
     for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
         inds[local_flat_i] = get_local_flattened_index(i, dim_sizes)
+    end
+    return inds
+end
+
+function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
+                             slice_inds::Vector{<:Integer})
+    dimensions = copy(dimensions)
+    dim_sizes = [d.n_local for d ∈ dimensions]
+    result_ranges_left = Tuple(1:dim_sizes[i] for i ∈ 1:dim_to_slice-1)
+    result_ranges_right = Tuple(1:dim_sizes[i] for i ∈ dim_to_slice+1:length(dimensions))
+    inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
+    local_flat_i = 0
+    for i_right ∈ CartesianIndices(result_ranges_right), i_slice ∈ slice_inds,
+            i_left ∈ CartesianIndices(result_ranges_left)
+        local_flat_i += 1
+        indices = CartesianIndex(i_left, i_slice, i_right)
+        inds[local_flat_i] = get_local_flattened_index(indices, dim_sizes)
     end
     return inds
 end
@@ -316,6 +333,7 @@ MPI.Comm_split(comm::FakeComm, color, key) = comm
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     bottom_vector_indices::Vector{Ti}
+    local_bottom_vector_indices::Vector{Ti}
     new_comm::Tcomm
     new_distributed_comm::Tdcomm
     new_shared_comm::Tcomm
@@ -338,6 +356,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     shared_comm_size = MPI.Comm_size(new_shared_comm)
     distributed_comm_rank = comm_rank ÷ shared_comm_size
     bottom_vector_indices = ind_type[]
+    local_bottom_vector_indices = ind_type[]
 
     slice_i = pick_dimension_to_split(dimensions, n_groups,
                                       optimize_schur_complement_size)
@@ -354,6 +373,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                         bottom_vector_indices =
                             vcat(bottom_vector_indices,
                                  get_ind_slice(new_dimensions, i_dim, 1:1))
+                        local_bottom_vector_indices =
+                            vcat(local_bottom_vector_indices,
+                                 get_local_ind_slice(new_dimensions, i_dim, 1:1))
                     end
                     d = Dimension(; nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
                                   irank=d.irank, periodic=d.periodic,
@@ -368,6 +390,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                         bottom_vector_indices =
                             vcat(bottom_vector_indices,
                                  get_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
+                        local_bottom_vector_indices =
+                            vcat(local_bottom_vector_indices,
+                                 get_local_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
                     end
                     d = Dimension(; nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
                                   irank=d.irank, periodic=d.periodic,
@@ -421,6 +446,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
                      get_ind_slice(new_dimensions, slice_i, 1:1))
+            local_bottom_vector_indices =
+                vcat(local_bottom_vector_indices,
+                     get_local_ind_slice(new_dimensions, slice_i, 1:1))
             first_top_vector_slice_ind = 2
             slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                                   nrank=this_group_nrank, irank=this_group_irank,
@@ -436,6 +464,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 vcat(bottom_vector_indices,
                      get_ind_slice(new_dimensions, slice_i,
                                    last_slice_ind:last_slice_ind))
+            local_bottom_vector_indices =
+                vcat(local_bottom_vector_indices,
+                     get_local_ind_slice(new_dimensions, slice_i,
+                                         last_slice_ind:last_slice_ind))
             last_top_vector_slice_ind = last_slice_ind - 1
             slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                                   nrank=this_group_nrank, irank=this_group_irank,
@@ -479,6 +511,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         bottom_vector_indices =
             vcat(bottom_vector_indices,
                  get_ind_slice(new_dimensions, slice_i, slice_points))
+        local_bottom_vector_indices =
+            vcat(local_bottom_vector_indices,
+                 get_local_ind_slice(new_dimensions, slice_i, slice_points))
         if slice_remove_boundaries
             first_local_top_vector_slice_ind = slice_points[group_rank+1] + 1
             has_lower_boundary = false
@@ -515,8 +550,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     new_dimensions[slice_i] = slice_dim
 
     return LevelInfo(; new_dimensions, top_vector_indices, local_top_vector_indices,
-                     bottom_vector_indices, new_comm, new_distributed_comm,
-                     new_shared_comm)
+                     bottom_vector_indices, local_bottom_vector_indices, new_comm,
+                     new_distributed_comm, new_shared_comm)
 end
 
 """

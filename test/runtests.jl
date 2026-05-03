@@ -46,6 +46,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == []
+            @test li.local_bottom_vector_indices == []
             @test li.local_top_vector_indices == 1:3
             @test li.top_vector_indices == 1:3
         end
@@ -56,6 +57,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 3:4
         end
@@ -66,6 +68,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 6:7
         end
@@ -76,6 +79,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == []
+            @test li.local_bottom_vector_indices == []
             @test li.local_top_vector_indices == 1:3
             @test li.top_vector_indices == 7:9
         end
@@ -91,6 +95,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [5]
             @test li.local_top_vector_indices == 1:4
             @test li.top_vector_indices == 1:4
         end
@@ -101,6 +106,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [5]
             @test li.local_top_vector_indices == 1:4
             @test li.top_vector_indices == 1:4
         end
@@ -111,6 +117,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:5
             @test li.top_vector_indices == 6:9
         end
@@ -121,6 +128,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:5
             @test li.top_vector_indices == 6:9
         end
@@ -136,6 +144,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [5]
             @test li.local_top_vector_indices == 1:4
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
         end
@@ -146,6 +155,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [5]
             @test li.local_top_vector_indices == 1:4
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
         end
@@ -156,6 +166,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [5]
             @test li.local_top_vector_indices == 6:9
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
         end
@@ -166,6 +177,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [5]
             @test li.local_top_vector_indices == 6:9
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
         end
@@ -181,6 +193,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 1:2
         end
@@ -191,6 +204,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 4:4
         end
@@ -201,6 +215,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,7]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 6:6
         end
@@ -211,6 +226,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [7]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 8:9
         end
@@ -226,6 +242,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5,7]
+            @test li.local_bottom_vector_indices == [3,5,7]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == [1,2,4,6,8,9]
         end
@@ -236,6 +253,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5,7]
+            @test li.local_bottom_vector_indices == [3,5,7]
             @test li.local_top_vector_indices == 4:4
             @test li.top_vector_indices == [1,2,4,6,8,9]
         end
@@ -246,6 +264,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5,7]
+            @test li.local_bottom_vector_indices == [3,5,7]
             @test li.local_top_vector_indices == 6:6
             @test li.top_vector_indices == [1,2,4,6,8,9]
         end
@@ -256,6 +275,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5,7]
+            @test li.local_bottom_vector_indices == [3,5,7]
             @test li.local_top_vector_indices == 8:9
             @test li.top_vector_indices == [1,2,4,6,8,9]
         end
@@ -271,6 +291,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,9]
+            @test li.local_bottom_vector_indices == [5,9]
             @test li.local_top_vector_indices == 1:4
             @test li.top_vector_indices == [(1:4)...,(6:8)...]
         end
@@ -281,6 +302,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,9]
+            @test li.local_bottom_vector_indices == [5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(1:4)...,(6:8)...]
         end
@@ -291,6 +313,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,9]
+            @test li.local_bottom_vector_indices == [5,9]
             @test li.local_top_vector_indices == 1:0
             @test li.top_vector_indices == [(1:4)...,(6:8)...]
         end
@@ -310,6 +333,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 2:3
         end
@@ -320,6 +344,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 3:4
         end
@@ -330,6 +355,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 6:7
         end
@@ -340,6 +366,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 7:8
         end
@@ -355,6 +382,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 2:4
         end
@@ -365,6 +393,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 2:4
         end
@@ -375,6 +404,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,1]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 6:8
         end
@@ -385,6 +415,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,1]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 6:8
         end
@@ -400,6 +431,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -410,6 +442,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -420,6 +453,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -430,6 +464,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -445,6 +480,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 2:2
         end
@@ -455,6 +491,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 4:4
         end
@@ -465,6 +502,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,7]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 6:6
         end
@@ -475,6 +513,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [7,1]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 8:8
         end
@@ -490,6 +529,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -500,6 +540,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 4:4
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -510,6 +551,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 6:6
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -520,6 +562,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 8:8
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -535,6 +578,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -545,6 +589,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -555,6 +600,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 1:0
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -574,6 +620,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 2:3
         end
@@ -584,6 +631,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 3:4
         end
@@ -594,6 +642,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 6:7
         end
@@ -604,6 +653,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [9]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 7:8
         end
@@ -619,6 +669,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 2:4
         end
@@ -629,6 +680,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 2:4
         end
@@ -639,6 +691,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,9]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 6:8
         end
@@ -649,6 +702,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,9]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 6:8
         end
@@ -664,6 +718,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -674,6 +729,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -684,6 +740,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -694,6 +751,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -709,6 +767,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 2:2
         end
@@ -719,6 +778,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 4:4
         end
@@ -729,6 +789,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,7]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 6:6
         end
@@ -739,6 +800,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [7,9]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 8:8
         end
@@ -754,6 +816,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,9]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -764,6 +827,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,9]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 4:4
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -774,6 +838,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,9]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 6:6
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -784,6 +849,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,9]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 8:8
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -799,6 +865,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -809,6 +876,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -819,6 +887,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,9]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 1:0
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -838,6 +907,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 2:3
         end
@@ -848,6 +918,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 3:4
         end
@@ -858,6 +929,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5]
+            @test li.local_bottom_vector_indices == [1]
             @test li.local_top_vector_indices == 2:3
             @test li.top_vector_indices == 6:7
         end
@@ -868,6 +940,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1]
+            @test li.local_bottom_vector_indices == [3]
             @test li.local_top_vector_indices == 1:2
             @test li.top_vector_indices == 7:8
         end
@@ -883,6 +956,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 2:4
         end
@@ -893,6 +967,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 2:4
         end
@@ -903,6 +978,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,1]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 6:8
         end
@@ -913,6 +989,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,1]
+            @test li.local_bottom_vector_indices == [1,5]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == 6:8
         end
@@ -928,6 +1005,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -938,6 +1016,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -948,6 +1027,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -958,6 +1038,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -973,6 +1054,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 2:2
         end
@@ -983,6 +1065,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [3,5]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 4:4
         end
@@ -993,6 +1076,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [5,7]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 6:6
         end
@@ -1003,6 +1087,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [7,1]
+            @test li.local_bottom_vector_indices == [1,3]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == 8:8
         end
@@ -1018,6 +1103,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 2:2
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -1028,6 +1114,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 4:4
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -1038,6 +1125,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 6:6
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -1048,6 +1136,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,3,5,7,1]
+            @test li.local_bottom_vector_indices == [1,3,5,7,9]
             @test li.local_top_vector_indices == 8:8
             @test li.top_vector_indices == [2,4,6,8]
         end
@@ -1063,6 +1152,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 2:4
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -1073,6 +1163,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 6:8
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -1083,6 +1174,7 @@ function test_split_indices_1d()
                                 remove_boundaries_list, [nrank÷n_shared],
                                 [irank÷n_shared], n_shared, n_groups, irank)
             @test li.bottom_vector_indices == [1,5,1]
+            @test li.local_bottom_vector_indices == [1,5,9]
             @test li.local_top_vector_indices == 1:0
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
         end
@@ -1107,6 +1199,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == 19:27
+            @test li.local_bottom_vector_indices == 19:27
             @test li.local_top_vector_indices == 1:18
             @test li.top_vector_indices == 1:18
         end
@@ -1118,6 +1211,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == 19:27
+            @test li.local_bottom_vector_indices == 1:9
             @test li.local_top_vector_indices == 10:27
             @test li.top_vector_indices == 28:45
         end
@@ -1134,6 +1228,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == 19:27
+            @test li.local_bottom_vector_indices == 19:27
             @test li.local_top_vector_indices == 1:18
             @test li.top_vector_indices == [(1:18)...,(28:45)...]
         end
@@ -1145,6 +1240,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == 19:27
+            @test li.local_bottom_vector_indices == 19:27
             @test li.local_top_vector_indices == 28:45
             @test li.top_vector_indices == [(1:18)...,(28:45)...]
         end
@@ -1165,6 +1261,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_bottom_vector_indices == vcat(7:9, 16:18, 25:27)
             @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
             @test li.top_vector_indices == vcat(1:6, 16:21, 31:36)
         end
@@ -1176,6 +1273,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_bottom_vector_indices == vcat(1:3, 10:12, 19:21)
             @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
             @test li.top_vector_indices == vcat(10:15, 25:30, 40:45)
         end
@@ -1192,6 +1290,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
             @test li.local_top_vector_indices == vcat(1:6, 16:21, 31:36)
             @test li.top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
         end
@@ -1203,6 +1302,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
             @test li.local_top_vector_indices == vcat(10:15, 25:30, 40:45)
             @test li.top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
         end
