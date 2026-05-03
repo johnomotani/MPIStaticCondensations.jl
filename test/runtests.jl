@@ -1451,11 +1451,160 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:5, 9:10, 14:15, 19:20, 24:25, 29:30, 34:35, 39:40, 44:45)
         end
     end
+
+    # With the 3rd dimension divided in two, the global index division is (where columns
+    # are the right-most index, rows are the centre index, and indices within each cell
+    # are the left-most index):
+    # ----------------------------------=========-----------------------------------------
+    # | 1:5   | 26:30 | 51:55 | 76:80  ∥ 101:105 ∥ 126:130 | 151:155 | 176:180 | 201:205 |
+    # ----------------------------------=========-----------------------------------------
+    # | 6:10  | 31:35 | 56:60 | 81:85  ∥ 106:110 ∥ 131:135 | 156:160 | 181:185 | 206:210 |
+    # ----------------------------------=========-----------------------------------------
+    # | 11:15 | 36:40 | 61:65 | 86:90  ∥ 111:115 ∥ 136:140 | 161:165 | 186:190 | 211:215 |
+    # ----------------------------------=========-----------------------------------------
+    # | 16:20 | 41:45 | 66:70 | 91:95  ∥ 116:120 ∥ 141:145 | 166:170 | 191:195 | 216:220 |
+    # ----------------------------------=========-----------------------------------------
+    # | 21:25 | 46:50 | 71:75 | 96:100 ∥ 121:125 ∥ 146:150 | 171:175 | 196:200 | 221:225 |
+    # ----------------------------------=========-----------------------------------------
+    nelement_list = [2, 2, 4]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [2, 2, 2]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == 101:125
+            @test li.local_bottom_vector_indices == 101:125
+            @test li.top_vector_indices == 1:100
+            @test li.local_top_vector_indices == 1:100
+        end
+
+        irank = 1
+        irank_list = [0, 0, 1]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == 101:125
+            @test li.local_bottom_vector_indices == 1:25
+            @test li.top_vector_indices == 126:225
+            @test li.local_top_vector_indices == 26:125
+        end
+    end
+
+    # With the 2nd dimension divided in two, the global index division is (where columns
+    # are the right-most index, rows are the centre index, and indices within each cell
+    # are the left-most index):
+    # -----------------------------------------------
+    # | 1:5   | 46:50 | 91:95   | 136:140 | 181:185 |
+    # -----------------------------------------------
+    # | 6:10  | 51:55 | 96:100  | 141:145 | 186:190 |
+    # -----------------------------------------------
+    # | 11:15 | 56:60 | 101:105 | 146:150 | 191:195 |
+    # -----------------------------------------------
+    # | 16:20 | 61:65 | 106:110 | 151:155 | 196:200 |
+    # ===============================================
+    # ∥ 21:25 ∥ 66:70 ∥ 111:115 ∥ 156:160 ∥ 201:205 ∥
+    # ===============================================
+    # | 26:30 | 71:75 | 116:120 | 161:165 | 206:210 |
+    # -----------------------------------------------
+    # | 31:35 | 76:80 | 121:125 | 166:170 | 211:215 |
+    # -----------------------------------------------
+    # | 36:40 | 81:85 | 126:130 | 171:175 | 216:220 |
+    # -----------------------------------------------
+    # | 41:45 | 86:90 | 131:135 | 176:180 | 221:225 |
+    # -----------------------------------------------
+    nelement_list = [2, 4, 2]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [2, 2, 2]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(21:25, 66:70, 111:115, 156:160, 201:205)
+            @test li.local_bottom_vector_indices == vcat(21:25, 46:50, 71:75, 96:100, 121:125)
+            @test li.top_vector_indices == vcat(1:20, 46:65, 91:110, 136:155, 181:200)
+            @test li.local_top_vector_indices == vcat(1:20, 26:45, 51:70, 76:95, 101:120)
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(21:25, 66:70, 111:115, 156:160, 201:205)
+            @test li.local_bottom_vector_indices == vcat(1:5, 26:30, 51:55, 76:80, 101:105)
+            @test li.top_vector_indices == vcat(26:45, 71:90, 116:135, 161:180, 206:225)
+            @test li.local_top_vector_indices == vcat(6:25, 31:50, 56:75, 80:100, 106:125)
+        end
+    end
+
+    # With the 1st dimension divided in two, the global index division is (where columns
+    # are the right-most index, rows are the centre index, and indices within each cell
+    # are the left-most index):
+    # --------==---------------==-----------------===-------------------===-------------------===----------
+    # | 1:4  ; 5;6:9   | 46:49;50;51:54 | 91:94  ;95 ;96:99   | 136:139;140;141:144 | 181:184;185;186:189 |
+    # --------==---------------==-----------------===-------------------===-------------------===----------
+    # | 10:13;14;15:18 | 55:58;59;60:63 | 100:103;104;105:108 | 145:148;149;150:153 | 190:193;194;195:198 |
+    # --------==---------------==-----------------===-------------------===-------------------===----------
+    # | 19:22;23;24:27 | 64:67;68;69:72 | 109:112;113;114:117 | 154:157;158;159:162 | 199:202;203;204:207 |
+    # --------==---------------==-----------------===-------------------===-------------------===----------
+    # | 28:31;32;33:36 | 73:76;77;78:81 | 118:121;122;123:126 | 163:166;167;168:171 | 208:211;212;213:216 |
+    # --------==---------------==-----------------===-------------------===-------------------===----------
+    # | 37:40;41;42:45 | 82:85;86;87:90 | 127:130;131;132:135 | 172:175;176;177:180 | 217:220;221;222:225 |
+    # --------==---------------==-----------------===-------------------===-------------------===----------
+    nelement_list = [4, 2, 2]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [2, 2, 2]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [5, 14, 23, 32, 41, 50, 59, 68, 77, 86, 95, 104, 113, 122, 131, 140, 149, 158, 167, 176, 185, 194, 203, 212, 221]
+            @test li.local_bottom_vector_indices == [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 100, 105, 110, 115, 120]
+            @test li.top_vector_indices == vcat(1:4, 10:13, 19:22, 28:31, 37:40, 46:49, 55:58, 64:67, 73:76, 82:85, 91:94, 100:103, 109:112, 118:121, 127:130, 136:139, 145:148, 154:157, 163:166, 172:175, 181:184, 190:193, 199:202, 208:211, 217:220)
+            @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44, 46:49, 51:54, 56:59, 61:64, 66:69, 71:74, 76:79, 81:84, 86:89, 91:94, 96:99, 101:104, 106:109, 111:114, 116:119, 121:125)
+        end
+
+        irank = 1
+        irank_list = [1, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [5, 14, 23, 32, 41, 50, 59, 68, 77, 86, 95, 104, 113, 122, 131, 140, 149, 158, 167, 176, 185, 194, 203, 212, 221]
+            @test li.local_bottom_vector_indices == [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56, 61, 66, 71, 76, 81, 86, 91, 96, 101, 106, 111, 116, 121]
+            @test li.top_vector_indices == vcat(6:9, 15:18, 24:27, 33:36, 42:45, 51:54, 60:63, 69:72, 78:81, 87:90, 96:99, 105:108, 114:117, 123:126, 132:135, 141:144, 150:153, 159:162, 168:171, 177:180, 186:189, 195:198, 204:207, 213:216, 222:225)
+            @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45, 47:50, 52:55, 57:60, 62:65, 67:70, 72:75, 77:80, 82:85, 87:90, 92:95, 97:100, 102:105, 107:110, 112:115, 117:120, 122:125)
+        end
+    end
 end
 
 function runtests()
     @testset "MPIStaticCondensations.jl" begin
-        #@testset "test_split_indices_1d" test_split_indices_1d()
+        @testset "test_split_indices_1d" test_split_indices_1d()
         @testset "test_split_indices_3d" test_split_indices_3d()
     end
 end
