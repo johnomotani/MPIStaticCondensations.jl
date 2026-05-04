@@ -253,7 +253,7 @@ end
 function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                        slice_inds::OrdinalRange{<:Integer})
     dimensions = copy(dimensions)
-    result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dimensions[i].n for i ∈ 1:length(dimensions))
+    result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dimensions[i].n_local for i ∈ 1:length(dimensions))
     inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
     for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
         inds[local_flat_i] = get_flattened_index(i, dimensions)
@@ -266,8 +266,8 @@ function get_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
     # When `slice_inds` is a Vector, not an OrdinalRange, cannot use CartesianIndices on
     # it, so have to do more complicated loops.
     dimensions = copy(dimensions)
-    result_ranges_left = Tuple(1:dimensions[i].n for i ∈ 1:dim_to_slice-1)
-    result_ranges_right = Tuple(1:dimensions[i].n for i ∈ dim_to_slice+1:length(dimensions))
+    result_ranges_left = Tuple(1:dimensions[i].n_local for i ∈ 1:dim_to_slice-1)
+    result_ranges_right = Tuple(1:dimensions[i].n_local for i ∈ dim_to_slice+1:length(dimensions))
     inds = fill(eltype(slice_inds)(-1),
                 prod(length(r) for r ∈ result_ranges_left; init=1) * length(slice_inds) *
                 prod(length(r) for r ∈ result_ranges_right; init=1))
