@@ -203,15 +203,23 @@ function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
                      has_upper_boundary=true, remove_boundaries)
 end
 
+# Find the index of the last instance of the maximum in `x`.
+# This function is only used in `pick_dimension_to_split` and called with small
+# collections of integers, so efficiency is not important.
+function last_argmax(x)
+    i = argmax(reverse(collect(x)))
+    return length(x) - i + 1
+end
+
 function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Integer,
                                  optimise_schur_complement_size::Bool)
     distributed_dims = findall(d -> d.nrank > 1, dimensions)
     if optimise_schur_complement_size
         if !isempty(distributed_dims)
-            idim = argmax(d.n for d ∈ dimensions[distributed_dims])
+            idim = last_argmax(d.n for d ∈ dimensions[distributed_dims])
             return distributed_dims[idim]
         else
-            return argmax(d.n for d ∈ dimensions)
+            return last_argmax(d.n for d ∈ dimensions)
         end
     else
         if !isempty(distributed_dims)
@@ -221,19 +229,19 @@ function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Inte
                                                  for d ∈ dimensions[distributed_dims])
             dims_to_divide = distributed_dims[distributed_dims_to_divide]
             if !isempty(dims_to_divide)
-                idim = argmax(d.n for d ∈ dimensions[dims_to_divide])
+                idim = last_argmax(d.n for d ∈ dimensions[dims_to_divide])
                 return dims_to_divide[idim]
             else
-                idim = argmax(d.n for d ∈ dimensions[distributed_dims])
+                idim = last_argmax(d.n for d ∈ dimensions[distributed_dims])
                 return distributed_dims[idim]
             end
         else
             dims_to_divide = findall(d.nelement % n_groups == 0 for d ∈ dimensions)
             if !isempty(dims_to_divide)
-                idim = argmax(d.n for d ∈ dimensions[dims_to_divide])
+                idim = last_argmax(d.n for d ∈ dimensions[dims_to_divide])
                 return dims_to_divide[idim]
             else
-                return argmax(d.n for d ∈ dimensions)
+                return last_argmax(d.n for d ∈ dimensions)
             end
         end
     end

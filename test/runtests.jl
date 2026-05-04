@@ -1,5 +1,5 @@
 using MPIStaticCondensations
-using MPIStaticCondensations: FakeComm, split_dimension
+using MPIStaticCondensations: FakeComm, split_dimension, pick_dimension_to_split
 using Test
 
 function get_level_info(ngrid, nelement_list, periodic_list, remove_boundaries_list,
@@ -1227,6 +1227,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:0
         end
     end
+
+    return nothing
 end
 
 function test_split_indices_3d()
@@ -1816,12 +1818,531 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
         end
     end
+
+    return nothing
+end
+
+function test_pick_dimension_to_split()
+    @testset "periodic=$periodic, remove_boundaries=$remove_boundaries" for periodic ∈ (false, true), remove_boundaries ∈ (false, true)
+        optimise_schur_complement_size = true
+        @testset "optimise_schur_complement_size=$optimise_schur_complement_size" begin
+            # No dimensions are distributed, pick largest dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            # ...even when n_group does not divide nelement for the largest dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            # Some or all dimensions are distributed. Pick only from the distributed
+            # dimensions.
+            # Pick largest distributed dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=4, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=4, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=4, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            # ...even when n_group does not divide nelement for the largest dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=4, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=4, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+        end
+
+        optimise_schur_complement_size = false
+        @testset "optimise_schur_complement_size=$optimise_schur_complement_size" begin
+            # No dimensions are distributed, pick largest dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            # ...but only when n_group divides nelement for the largest dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            # ...and if no dimensions are exactly divisible, fall back on the largest
+            # dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=4, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=9, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            # Some or all dimensions are distributed. Pick only from the distributed
+            # dimensions.
+            # Pick largest distributed dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=4, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=4, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=4, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            # ...but only when n_group divides nelement for the largest dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=4, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=4, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=4, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=2, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=5, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            # ...and if no dimensions are exactly divisible, fall back on the largest
+            # dimension.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=4, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=4, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=3, ngrid=3, nrank=3, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=10, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+        end
+    end
+
+    return nothing
 end
 
 function runtests()
     @testset "MPIStaticCondensations.jl" begin
         @testset "test_split_indices_1d" test_split_indices_1d()
         @testset "test_split_indices_3d" test_split_indices_3d()
+        @testset "test_pick_dimension_to_split" test_pick_dimension_to_split()
     end
 end
 
