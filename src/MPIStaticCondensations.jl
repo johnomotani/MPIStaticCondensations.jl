@@ -104,8 +104,8 @@ end
 
 struct MPIStaticCondensationParallel{Tsolver<:MPISchurComplement,Tranget,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
     local_block_solver::Tsolver
-    top_vector_indices::Tranget
-    bottom_vector_indices::Trangeb
+    local_top_vector_indices::Tranget
+    local_bottom_vector_indices::Trangeb
     timer::Ttimer
 end
 
@@ -337,14 +337,14 @@ MPI.Comm_size(comm::FakeComm) = comm.size
 MPI.Comm_split(comm::FakeComm, color, key) = comm
 
 @kwdef struct LevelInfo{Ti,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
-    new_dimensions::Vector{Dimension{Ti}}
+    level_dimensions::Vector{Dimension{Ti}}
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
-    new_comm::Tcomm
-    new_distributed_comm::Tdcomm
-    new_shared_comm::Tcomm
+    level_comm::Tcomm
+    level_distributed_comm::Tdcomm
+    level_shared_comm::Tcomm
 end
 
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
@@ -355,13 +355,13 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                          distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
                          shared_comm::Union{MPI.Comm,FakeComm})
     ind_type = typeof(n_groups)
-    new_dimensions = copy(dimensions)
-    new_comm = comm
-    new_distributed_comm = distributed_comm
-    new_shared_comm = shared_comm
-    comm_rank = MPI.Comm_rank(new_comm)
-    shared_comm_rank = MPI.Comm_rank(new_shared_comm)
-    shared_comm_size = MPI.Comm_size(new_shared_comm)
+    level_dimensions = copy(dimensions)
+    level_comm = comm
+    level_distributed_comm = distributed_comm
+    level_shared_comm = shared_comm
+    comm_rank = MPI.Comm_rank(level_comm)
+    shared_comm_rank = MPI.Comm_rank(level_shared_comm)
+    shared_comm_size = MPI.Comm_size(level_shared_comm)
     distributed_comm_rank = comm_rank ÷ shared_comm_size
     bottom_vector_indices = ind_type[]
     local_bottom_vector_indices = ind_type[]
@@ -369,50 +369,50 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     slice_i = pick_dimension_to_split(dimensions, n_groups,
                                       optimize_schur_complement_size)
 
-    if any(collect(d.remove_boundaries for d ∈ new_dimensions))
-        for i_dim ∈ 1:length(new_dimensions)
+    if any(collect(d.remove_boundaries for d ∈ level_dimensions))
+        for i_dim ∈ 1:length(level_dimensions)
             if i_dim == slice_i
                 continue
             end
-            d = new_dimensions[i_dim]
+            d = level_dimensions[i_dim]
             if d.remove_boundaries
                 if d.has_lower_boundary
                     if d.irank == 0
                         bottom_vector_indices =
                             vcat(bottom_vector_indices,
-                                 get_ind_slice(new_dimensions, i_dim, 1:1))
+                                 get_ind_slice(level_dimensions, i_dim, 1:1))
                         local_bottom_vector_indices =
                             vcat(local_bottom_vector_indices,
-                                 get_local_ind_slice(new_dimensions, i_dim, 1:1))
+                                 get_local_ind_slice(level_dimensions, i_dim, 1:1))
                     end
                     d = Dimension(; nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
                                   irank=d.irank, periodic=d.periodic,
                                   has_lower_boundary=false,
                                   has_upper_boundary=d.has_upper_boundary,
                                   remove_boundaries=false)
-                    new_dimensions[i_dim] = d
+                    level_dimensions[i_dim] = d
                 end
                 if d.has_upper_boundary
                     if d.irank == d.nrank - 1
                         last_ind = length(d.global_inds)
                         bottom_vector_indices =
                             vcat(bottom_vector_indices,
-                                 get_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
+                                 get_ind_slice(level_dimensions, i_dim, last_ind:last_ind))
                         local_bottom_vector_indices =
                             vcat(local_bottom_vector_indices,
-                                 get_local_ind_slice(new_dimensions, i_dim, last_ind:last_ind))
+                                 get_local_ind_slice(level_dimensions, i_dim, last_ind:last_ind))
                     end
                     d = Dimension(; nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
                                   irank=d.irank, periodic=d.periodic,
                                   has_lower_boundary=d.has_lower_boundary,
                                   has_upper_boundary=false, remove_boundaries=false)
-                    new_dimensions[i_dim] = d
+                    level_dimensions[i_dim] = d
                 end
             end
         end
     end
 
-    slice_dim = new_dimensions[slice_i]
+    slice_dim = level_dimensions[slice_i]
     slice_remove_boundaries = slice_dim.periodic || slice_dim.remove_boundaries
     slice_irank = slice_dim.irank
     slice_nrank = slice_dim.nrank
@@ -430,9 +430,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         # When dimension is distributed, split on block boundaries.
         blocks_per_group = (slice_dim.nrank + n_groups - 1) ÷ n_groups
         group_rank = distributed_comm_rank ÷ blocks_per_group
-        new_comm = MPI.Comm_split(new_comm, group_rank, 0)
+        level_comm = MPI.Comm_split(level_comm, group_rank, 0)
         if shared_comm_rank == 0
-            new_distributed_comm = MPI.Comm_split(new_distributed_comm, group_rank, 0)
+            level_distributed_comm = MPI.Comm_split(level_distributed_comm, group_rank, 0)
         end
         if slice_dim.nelement % slice_dim.nrank != 0
             error("Number of elements in dimension should split equally among blocks."
@@ -453,10 +453,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             # Lower boundary on this block is a split.
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
-                     get_ind_slice(new_dimensions, slice_i, 1:1))
+                     get_ind_slice(level_dimensions, slice_i, 1:1))
             local_bottom_vector_indices =
                 vcat(local_bottom_vector_indices,
-                     get_local_ind_slice(new_dimensions, slice_i, 1:1))
+                     get_local_ind_slice(level_dimensions, slice_i, 1:1))
             first_top_vector_slice_ind = 2
             slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                                   nrank=this_group_nrank, irank=this_group_irank,
@@ -470,11 +470,11 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             # Upper boundary on this block is a split.
             bottom_vector_indices =
                 vcat(bottom_vector_indices,
-                     get_ind_slice(new_dimensions, slice_i,
+                     get_ind_slice(level_dimensions, slice_i,
                                    last_slice_ind:last_slice_ind))
             local_bottom_vector_indices =
                 vcat(local_bottom_vector_indices,
-                     get_local_ind_slice(new_dimensions, slice_i,
+                     get_local_ind_slice(level_dimensions, slice_i,
                                          last_slice_ind:last_slice_ind))
             last_top_vector_slice_ind = last_slice_ind - 1
             slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
@@ -486,10 +486,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             last_top_vector_slice_ind = last_slice_ind
         end
         top_vector_indices =
-            get_ind_slice(new_dimensions, slice_i,
+            get_ind_slice(level_dimensions, slice_i,
                           first_top_vector_slice_ind:last_top_vector_slice_ind)
         local_top_vector_indices =
-            get_local_ind_slice(new_dimensions, slice_i,
+            get_local_ind_slice(level_dimensions, slice_i,
                                 first_top_vector_slice_ind:last_top_vector_slice_ind)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=this_group_nrank, irank=this_group_irank,
@@ -518,10 +518,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         end
         bottom_vector_indices =
             vcat(bottom_vector_indices,
-                 get_ind_slice(new_dimensions, slice_i, slice_points))
+                 get_ind_slice(level_dimensions, slice_i, slice_points))
         local_bottom_vector_indices =
             vcat(local_bottom_vector_indices,
-                 get_local_ind_slice(new_dimensions, slice_i, slice_points))
+                 get_local_ind_slice(level_dimensions, slice_i, slice_points))
         if slice_remove_boundaries
             first_local_top_vector_slice_ind = slice_points[group_rank+1] + 1
             has_lower_boundary = false
@@ -544,10 +544,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             end
         end
         local_top_vector_indices =
-            get_local_ind_slice(new_dimensions, slice_i,
+            get_local_ind_slice(level_dimensions, slice_i,
                                 first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
-        top_vector_indices = get_ind_slice(new_dimensions, slice_i,
+        top_vector_indices = get_ind_slice(level_dimensions, slice_i,
                                            all_top_vector_slice_inds)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=slice_dim.nrank, irank=slice_irank, periodic=false,
@@ -555,11 +555,11 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                               has_upper_boundary=has_upper_boundary,
                               remove_boundaries=false)
     end
-    new_dimensions[slice_i] = slice_dim
+    level_dimensions[slice_i] = slice_dim
 
-    return LevelInfo(; new_dimensions, top_vector_indices, local_top_vector_indices,
-                     bottom_vector_indices, local_bottom_vector_indices, new_comm,
-                     new_distributed_comm, new_shared_comm)
+    return LevelInfo(; level_dimensions, top_vector_indices, local_top_vector_indices,
+                     bottom_vector_indices, local_bottom_vector_indices, level_comm,
+                     level_distributed_comm, level_shared_comm)
 end
 
 """
@@ -574,6 +574,8 @@ by `mpi_schur_complement()`. `schur_tile_size` is passed to the `tile_size` argu
 
 `use_sparse` indicates whether to use a sparse-matrix solver as the lowest-level LU
 solver, and within the MPISchurComplement solvers.
+
+`separate_Ainv_B` is passed through to the MPISchurComplement constructors.
 
 `optimize_schur_complement_size` sets the strategy used to pick which dimension to split
 at each level. The default strategy (`true`) splits the largest (according to value of
@@ -601,8 +603,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  allocate_shared_int::Union{Function,Nothing}=nothing,
                                  synchronize_shared::Union{Function,Nothing}=nothing,
                                  schur_tile_size::Union{Nothing,Integer}=nothing,
-                                 use_sparse::Bool=true,
-                                 optimise_schur_complement_size::Bool=true,
+                                 use_sparse::Bool=true, separate_Ainv_B::Bool=false,
+                                 optimize_schur_complement_size::Bool=true,
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false)
 
@@ -632,7 +634,32 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     if n_levels == 1
         lowest_level_n = prod(d.n for d ∈ dimensions)
     else
-        first_level_points = ind_type[]
+        this_level_info =
+            LevelInfo(; level_dimensions=dimensions, top_vector_indices=ind_type[],
+                      local_top_vector_indices=ind_type[],
+                      bottom_vector_indices=ind_type[],
+                      local_bottom_vector_indices=ind_type[], level_comm=comm,
+                      level_distributed_comm=distributed_comm,
+                      level_shared_comm=shared_comm)
+
+        # Vector{LevelInfo} is not type stable because of the unspecified type parameters
+        # of LevelInfo, but that does not matter here because this is just a constructor
+        # function, and the nested nature of the solve means that the final
+        # `MPIStaticCondensationParallel` could not have its type fully specified by the
+        # types of the input arguments anyway.
+        level_info_list = Vector{LevelInfo}(undef, n_levels - 1)
+        level = 0
+        for (level, n_groups) ∈ enumerate(vcat(n_blocks_factors,
+                                               shared_comm_size_factors))
+            this_level_info =
+                split_dimension(this_level_info.dimensions, n_groups,
+                                optimize_schur_complement_size, this_level_info.comm,
+                                this_level_info.distributed_comm,
+                                this_level_info.shared_comm)
+            level_info_list[level] = this_level_info
+        end
+
+        lowest_level_n = length(level_info_list[end].local_top_vector_indices)
     end
 
     # Create lowest level solver
@@ -650,29 +677,50 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     end
 
     this_level_solver = lowest_level_solver
-    for level ∈ 2:n_levels
-        A_block_solver = BlockDiagonalSolver(this_level_solver, local_top_vector_entries)
+    for level ∈ n_levels-1:-1:1
+        level_info = level_info_list[level]
+
+        A_block_solver = BlockDiagonalSolver(this_level_solver,
+                                             level_info.local_top_vector_entries)
 
         # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
         # as the Schur complement matrix is not too small.
         level_parallel_schur = length(level_bottom_vector_entries) ≥ 1024
 
+        level_shared_comm = level_info.level_shared_comm
+
+        if allocate_shared_float === nothing
+            level_allocate_shared_float = nothing
+        else
+            level_allocate_shared_float =
+                (args...) -> allocate_shared_float(args...; comm=level_shared_comm)
+        end
+
+        if allocate_shared_int === nothing
+            level_allocate_shared_int = nothing
+        else
+            level_allocate_shared_int =
+                (args...) -> allocate_shared_int(args...; comm=level_shared_comm)
+        end
+
         this_level_sc =
             mpi_schur_complement(A_block_solver, data_type, data_type, data_type,
-                                 level_top_vector_entries, level_bottom_vector_entries;
-                                 comm=level_comm, shared_comm=level_shared_comm,
-                                 distributed_comm=level_distributed_comm,
+                                 level_info.top_vector_indices,
+                                 level_info.bottom_vector_indices;
+                                 comm=level_info.level_comm,
+                                 shared_comm=level_shared_comm,
+                                 distributed_comm=level_info.level_distributed_comm,
                                  allocate_shared_float=level_allocate_shared_float,
                                  allocate_shared_int=level_allocate_shared_int,
                                  synchronize_shared=synchronize_shared,
-                                 use_sparse=use_sparse, separate_Ainv_B=false,
+                                 use_sparse=use_sparse, separate_Ainv_B=separate_Ainv_B,
                                  parallel_schur=level_parallel_schur,
-                                 skip_factorization=false,
-                                 schur_tile_size=schur_tile_size, check_lu=check_lu,
-                                 timer=timer)
+                                 skip_factorization=true, schur_tile_size=schur_tile_size,
+                                 check_lu=check_lu, timer=timer)
         this_level_solver =
-            MPIStaticCondensationParallel(this_level_sc, level_top_vector_entries,
-                                          level_bottom_vector_entries, timer)
+            MPIStaticCondensationParallel(this_level_sc,
+                                          level_info.local_top_vector_entries,
+                                          level_info.local_bottom_vector_entries, timer)
     end
 
     return this_level_solver
@@ -748,6 +796,12 @@ end
 
 function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
     @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+        local_top_vector_indices = solver.local_top_vector_indices
+        local_bottom_vector_indices = solver.local_bottom_vector_indices
+        a = @view A[local_top_vector_indices,local_top_vector_indices]
+        b = @view A[local_top_vector_indices,local_bottom_vector_indices]
+        c = @view A[local_bottom_vector_indices,local_top_vector_indices]
+        d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
         update_schur_complement(solver.local_block_solver, a, b, c, d)
     end
     return nothing
@@ -755,12 +809,12 @@ end
 
 function ldiv!(X::AbstractVector, solver::MPIStaticCondensationParallel, U::AbstractVector)
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        top_vector_indices = solver.top_vector_indices
-        bottom_vector_indices = solver.bottom_vector_indices
-        x = @view X[top_vector_indices]
-        u = @view U[top_vector_indices]
-        y = @view X[bottom_vector_indices]
-        v = @view U[bottom_vector_indices]
+        local_top_vector_indices = solver.local_top_vector_indices
+        local_bottom_vector_indices = solver.local_bottom_vector_indices
+        x = @view X[local_top_vector_indices]
+        u = @view U[local_top_vector_indices]
+        y = @view X[local_bottom_vector_indices]
+        v = @view U[local_bottom_vector_indices]
         ldiv!(x, y, solver.local_block_solver, u, v)
     end
     return nothing
@@ -768,10 +822,10 @@ end
 function ldiv!(solver::MPIStaticCondensationParallel, U::AbstractVector)
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
-        top_vector_indices = solver.top_vector_indices
-        bottom_vector_indices = solver.bottom_vector_indices
-        u = @view U[top_vector_indices]
-        v = @view U[bottom_vector_indices]
+        local_top_vector_indices = solver.local_top_vector_indices
+        local_bottom_vector_indices = solver.local_bottom_vector_indices
+        u = @view U[local_top_vector_indices]
+        v = @view U[local_bottom_vector_indices]
         ldiv!(u, v, solver, u, v)
     end
     return nothing
