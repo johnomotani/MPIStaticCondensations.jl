@@ -1900,6 +1900,39 @@ function test_pick_dimension_to_split()
             ]
             @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
 
+            # Check that dimensions with one element are never divided.
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=3, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=1, ngrid=100, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 1
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=1, ngrid=100, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 3
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=1, ngrid=100, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=2, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=1, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size) == 2
+
+            n_groups = 2
+            dimensions = [
+                create_dimension(; nelement=1, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=1, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+                create_dimension(; nelement=1, ngrid=3, nrank=1, irank=0, periodic=false, remove_boundaries=false),
+            ]
+            @test_throws "All dimensions contain one element" pick_dimension_to_split(dimensions, n_groups, optimise_schur_complement_size)
+
             # Some or all dimensions are distributed. Pick only from the distributed
             # dimensions.
             # Pick largest distributed dimension.

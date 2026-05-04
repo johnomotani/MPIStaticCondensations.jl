@@ -213,13 +213,23 @@ end
 
 function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Integer,
                                  optimise_schur_complement_size::Bool)
+    if all(d.nelement == 1 for d ∈ dimensions)
+        error("All dimensions contain one element, and so cannot be split. This probably "
+              * "means too many MPI processes are being used for the size of the grid.")
+    end
+    if n_groups ≤ 1
+        error("Cannot split a dimension when n_groups≤1. Got n_groups=$n_groups.")
+    end
+
     distributed_dims = findall(d -> d.nrank > 1, dimensions)
     if optimise_schur_complement_size
         if !isempty(distributed_dims)
             idim = last_argmax(d.n for d ∈ dimensions[distributed_dims])
             return distributed_dims[idim]
         else
-            return last_argmax(d.n for d ∈ dimensions)
+            dims_to_divide = findall(d.nelement > 1 for d ∈ dimensions)
+            idim = last_argmax(d.n for d ∈ dimensions[dims_to_divide])
+            return dims_to_divide[idim]
         end
     else
         if !isempty(distributed_dims)
@@ -241,7 +251,9 @@ function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Inte
                 idim = last_argmax(d.n for d ∈ dimensions[dims_to_divide])
                 return dims_to_divide[idim]
             else
-                return last_argmax(d.n for d ∈ dimensions)
+                dims_to_divide = findall(d.nelement > 1 for d ∈ dimensions)
+                idim = last_argmax(d.n for d ∈ dimensions[dims_to_divide])
+                return dims_to_divide[idim]
             end
         end
     end
