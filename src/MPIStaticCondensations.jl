@@ -93,7 +93,8 @@ abstract type MPIStaticCondensation{Tf<:AbstractFloat} end
 
 struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
-    buffer::Vector{Tf}
+    U_buffer::Vector{Tf}
+    X_buffer::Vector{Tf}
     timer::Ttimer
     check_lu::Bool
 end
@@ -102,6 +103,7 @@ Base.size(Alu::MPIStaticCondensationSerialSparse, d::Integer) = size(Alu)[d]
 
 struct MPIStaticCondensationSerialDense{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::LU{Tf,Matrix{Tf},Vector{Ti}}
+    X_buffer::Vector{Tf}
     timer::Ttimer
     check_lu::Bool
 end
@@ -694,11 +696,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         lowest_level_solver =
             MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu),
                                               Vector{data_type}(undef, lowest_level_n),
+                                              Vector{data_type}(undef, lowest_level_n),
                                               timer, check_lu)
     else
         lowest_level_solver =
-            MPIStaticCondensationSerialDense(lu(identity; check=check_lu), timer,
-                                             check_lu)
+            MPIStaticCondensationSerialDense(lu(identity; check=check_lu),
+                                             Vector{data_type}(undef, lowest_level_n),
+                                             timer, check_lu)
     end
 
     this_level_solver = lowest_level_solver
@@ -798,22 +802,57 @@ end
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T},
                U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        ldiv!(X, solver.local_block_solver, U)
+        # Note if X or U are views that were indexed with Vector{<:Integer}, then we need
+        # to replace them with contiguous-in-memory buffers.
+        if !isa(X, StridedVector)
+            this_X = solver.X_buffer
+        else
+            this_X = X
+        end
+        if !isa(U, StridedVector)
+            this_U = solver.U_buffer
+        else
+            this_U = U
+        end
+        ldiv!(this_X, solver.local_block_solver, this_U)
+        if !isa(X, StridedVector)
+            X .= this_X
+        end
     end
     return nothing
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T},
                U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        ldiv!(X, solver.local_block_solver, U)
+        # Note if X or U are views that were indexed with Vector{<:Integer}, then we need
+        # to fall back to the AbstractVector function which can replace them with
+        # contiguous-in-memory buffers.
+        local_block_solver = solver.local_block_solver
+        if !isa(X, StridedMatrix) || !isa(U, StridedMatrix)
+            for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
+                ldiv!(this_X, local_block_solver, this_U)
+            end
+        else
+            ldiv!(X, local_block_solver, U)
+        end
     end
     return nothing
 end
 function ldiv!(solver::MPIStaticCondensationSerialSparse{T}, U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        buffer = solver.buffer
-        buffer .= U
-        ldiv!(U, solver.local_block_solver, buffer)
+        U_buffer = solver.U_buffer
+        U_buffer .= U
+        if !isa(U, StridedVector)
+            # Note if U is a view that was indexed with Vector{<:Integer}, then we need to
+            # replace it with a contiguous-in-memory buffer.
+            this_X = solver.X_buffer
+        else
+            this_X = U
+        end
+        ldiv!(this_X, solver.local_block_solver, U_buffer)
+        if !isa(U, StridedVector)
+            U .= this_X
+        end
     end
     return nothing
 end
@@ -838,21 +877,58 @@ end
 
 function ldiv!(solver::MPIStaticCondensationSerialDense{T}, U::AbstractVectorOrMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        ldiv!(solver.local_block_solver, U)
+        local_block_solver = solver.local_block_solver
+        if isa(U, StridedVecOrMat)
+            ldiv!(local_block_solver, U)
+        elseif isa(U, AbstractMatrix)
+            # Note if U is a view that was indexed with Vector{<:Integer}, then we need to
+            # fall back to the AbstractVector function which can replace it with a
+            # contiguous-in-memory buffer.
+            for this_U ∈ eachcol(U)
+                ldiv!(local_block_solver, this_U)
+            end
+        else # U is an AbstractVector
+            # Note if U is a view that was indexed with Vector{<:Integer}, then we need to
+            # replace it with a contiguous-in-memory buffer.
+            X_buffer = solver.X_buffer
+            X_buffer .= U
+            ldiv!(local_block_solver, X_buffer)
+            U .= X_buffer
+        end
     end
     return nothing
 end
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialDense{T},
                U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        ldiv!(X, solver.local_block_solver, U)
+        if !isa(X, StridedVector)
+            # Note if X is a view that was indexed with Vector{<:Integer}, then we need to
+            # replace it with a contiguous-in-memory buffer.
+            this_X = solver.X_buffer
+        else
+            this_X = X
+        end
+        ldiv!(this_X, solver.local_block_solver, U)
+        if !isa(X, StridedVector)
+            X .= this_X
+        end
     end
     return nothing
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialDense{T},
                U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
-        ldiv!(X, solver.local_block_solver, U)
+        local_block_solver = solver.local_block_solver
+        if isa(X, StridedMatrix)
+            ldiv!(X, local_block_solver, U)
+        else
+            # Note if X is a view that was indexed with Vector{<:Integer}, then we need to
+            # fall back to the AbstractVector function which can replace it with a
+            # contiguous-in-memory buffer.
+            for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
+                ldiv!(this_X, local_block_solver, this_U)
+            end
+        end
     end
     return nothing
 end
@@ -890,7 +966,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         local_bottom_vector_indices = solver.local_bottom_vector_indices
         u = @view U[local_top_vector_indices]
         v = @view U[local_bottom_vector_indices]
-        ldiv!(u, v, solver, u, v)
+        ldiv!(u, v, solver.local_block_solver, u, v)
     end
     return nothing
 end
@@ -914,7 +990,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractMatrix{T}) w
         local_bottom_vector_indices = solver.local_bottom_vector_indices
         u = @view U[local_top_vector_indices,:]
         v = @view U[local_bottom_vector_indices,:]
-        ldiv!(u, v, solver, u, v)
+        ldiv!(u, v, solver.local_block_solver, u, v)
     end
     return nothing
 end
