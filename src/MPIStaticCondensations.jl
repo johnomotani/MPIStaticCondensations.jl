@@ -122,10 +122,10 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIStaticCondensation{Tf}}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIStaticCondensation{Tf},Tinds}
     n::Ti
     local_block_solver::Tsolver
-    local_block_indices::Vector{Ti}
+    local_block_indices::Tinds
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
 Base.size(Alu::BlockDiagonalSolver, d::Integer) = size(Alu)[d]
@@ -362,10 +362,11 @@ MPI.Comm_rank(comm::FakeComm) = comm.rank
 MPI.Comm_size(comm::FakeComm) = comm.size
 MPI.Comm_split(comm::FakeComm, color, key) = comm
 
-@kwdef struct LevelInfo{Ti,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
+@kwdef struct LevelInfo{Ti,Ttvbi,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
     level_dimensions::Vector{Dimension{Ti}}
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
+    top_vector_block_indices::Ttvbi
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     level_comm::Tcomm
@@ -517,6 +518,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         local_top_vector_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_top_vector_slice_ind:last_top_vector_slice_ind)
+        top_vector_block_indices = (:)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=this_group_nrank, irank=this_group_irank,
                               periodic=slice_dim.periodic,
@@ -553,13 +555,24 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             has_lower_boundary = false
             last_local_top_vector_slice_ind = slice_points[min(group_rank+2,end)] - 1
             has_upper_boundary = false
+            first_top_vector_block_slice_ind = group_rank * slice_step + 1
+            # Maximum last 'block slice-dimension ind' is the total slice dimension size
+            # minus the number of slice points (=n_groups-1), minus the two boundary
+            # points that are removed.
+            last_top_vector_block_slice_ind = min((group_rank + 1) * slice_step,
+                                                  slice_dim.n - (n_groups - 1) - 2)
         else
             if group_rank == 0
                 first_local_top_vector_slice_ind = 1
                 has_lower_boundary = slice_dim.has_lower_boundary
+                first_top_vector_block_slice_ind = 1
             else
                 first_local_top_vector_slice_ind = slice_points[group_rank] + 1
                 has_lower_boundary = false
+                first_top_vector_block_slice_ind = group_rank * slice_step + 1
+                if slice_dim.has_lower_boundary
+                    first_top_vector_block_slice_ind += 1
+                end
             end
             if group_rank == n_groups - 1
                 last_local_top_vector_slice_ind = last_slice_ind
@@ -568,10 +581,22 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 last_local_top_vector_slice_ind = slice_points[group_rank+1] - 1
                 has_upper_boundary = false
             end
+            # Maximum last 'block slice-dimension ind' is the total slice dimension
+            # size minus the number of slice points (=n_groups-1).
+            if slice_dim.has_lower_boundary
+                offset = 1
+            else
+                offset = 0
+            end
+            last_top_vector_block_slice_ind = min((group_rank + 1) * slice_step + offset,
+                                                  slice_dim.n - (n_groups - 1))
         end
         local_top_vector_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
+        top_vector_block_indices =
+            get_local_ind_slice(level_dimensions, slice_i,
+                                first_top_vector_block_slice_ind:last_top_vector_block_slice_ind)
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
         top_vector_indices = get_ind_slice(level_dimensions, slice_i,
                                            all_top_vector_slice_inds)
@@ -584,8 +609,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     level_dimensions[slice_i] = slice_dim
 
     return LevelInfo(; level_dimensions, top_vector_indices, local_top_vector_indices,
-                     bottom_vector_indices, local_bottom_vector_indices, level_comm,
-                     level_distributed_comm, level_shared_comm)
+                     top_vector_block_indices, bottom_vector_indices,
+                     local_bottom_vector_indices, level_comm, level_distributed_comm,
+                     level_shared_comm)
 end
 
 """
@@ -663,6 +689,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_info =
             LevelInfo(; level_dimensions=dimensions, top_vector_indices=ind_type[],
                       local_top_vector_indices=ind_type[],
+                      top_vector_block_indices=ind_type[],
                       bottom_vector_indices=ind_type[],
                       local_bottom_vector_indices=ind_type[], level_comm=comm,
                       level_distributed_comm=distributed_comm,
@@ -709,9 +736,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     for level ∈ n_levels-1:-1:1
         level_info = level_info_list[level]
 
+        # A_block_solver has its `lu!()` function called from within the
+        # MPISchurComplement solver. At that point a view that gives the top-left 'A'
+        # block of the matrix has already been constructed (using
+        # `level_info.top_vector_indices`), and is passed to A_block_solver, which needs
+        # to select its block out of that.
         A_block_solver = BlockDiagonalSolver(length(level_info.top_vector_indices),
                                              this_level_solver,
-                                             level_info.local_top_vector_indices)
+                                             level_info.top_vector_block_indices)
 
         # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
         # as the Schur complement matrix is not too small.
