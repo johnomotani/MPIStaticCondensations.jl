@@ -122,10 +122,9 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIStaticCondensation{Tf},Tinds}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIStaticCondensation{Tf}}
     n::Ti
     local_block_solver::Tsolver
-    local_block_indices::Tinds
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
 Base.size(Alu::BlockDiagonalSolver, d::Integer) = size(Alu)[d]
@@ -362,11 +361,10 @@ MPI.Comm_rank(comm::FakeComm) = comm.rank
 MPI.Comm_size(comm::FakeComm) = comm.size
 MPI.Comm_split(comm::FakeComm, color, key) = comm
 
-@kwdef struct LevelInfo{Ti,Ttvbi,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
+@kwdef struct LevelInfo{Ti,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
     level_dimensions::Vector{Dimension{Ti}}
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
-    top_vector_block_indices::Ttvbi
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     level_comm::Tcomm
@@ -518,7 +516,6 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         local_top_vector_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_top_vector_slice_ind:last_top_vector_slice_ind)
-        top_vector_block_indices = (:)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=this_group_nrank, irank=this_group_irank,
                               periodic=slice_dim.periodic,
@@ -594,9 +591,6 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         local_top_vector_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
-        top_vector_block_indices =
-            get_local_ind_slice(level_dimensions, slice_i,
-                                first_top_vector_block_slice_ind:last_top_vector_block_slice_ind)
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
         top_vector_indices = get_ind_slice(level_dimensions, slice_i,
                                            all_top_vector_slice_inds)
@@ -609,9 +603,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     level_dimensions[slice_i] = slice_dim
 
     return LevelInfo(; level_dimensions, top_vector_indices, local_top_vector_indices,
-                     top_vector_block_indices, bottom_vector_indices,
-                     local_bottom_vector_indices, level_comm, level_distributed_comm,
-                     level_shared_comm)
+                     bottom_vector_indices, local_bottom_vector_indices, level_comm,
+                     level_distributed_comm, level_shared_comm)
 end
 
 """
@@ -689,7 +682,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_info =
             LevelInfo(; level_dimensions=dimensions, top_vector_indices=ind_type[],
                       local_top_vector_indices=ind_type[],
-                      top_vector_block_indices=ind_type[],
                       bottom_vector_indices=ind_type[],
                       local_bottom_vector_indices=ind_type[], level_comm=comm,
                       level_distributed_comm=distributed_comm,
@@ -742,8 +734,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         # `level_info.top_vector_indices`), and is passed to A_block_solver, which needs
         # to select its block out of that.
         A_block_solver = BlockDiagonalSolver(length(level_info.top_vector_indices),
-                                             this_level_solver,
-                                             level_info.top_vector_block_indices)
+                                             this_level_solver)
 
         # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
         # as the Schur complement matrix is not too small.
@@ -791,35 +782,30 @@ end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
-    inds = block_diagonal_solver.local_block_indices
-    lu!(solver, @view(A[inds,inds]))
+    lu!(solver, A)
     return nothing
 end
 
 function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    inds = block_diagonal_solver.local_block_indices
-    @views ldiv!(x[inds], solver, u[inds])
+    @views ldiv!(x, solver, u)
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    inds = block_diagonal_solver.local_block_indices
-    @views ldiv!(solver, u[inds])
+    @views ldiv!(solver, u)
     return nothing
 end
-function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractMatrix{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    inds = block_diagonal_solver.local_block_indices
-    @views ldiv!(x[inds], solver, u[inds,:])
+    @views ldiv!(x, solver, u)
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    inds = block_diagonal_solver.local_block_indices
-    @views ldiv!(solver, u[inds,:])
+    @views ldiv!(solver, u)
     return nothing
 end
 
