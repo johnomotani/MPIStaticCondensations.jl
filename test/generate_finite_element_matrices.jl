@@ -80,14 +80,14 @@ function imin(dim)
     elements_per_block = dim.nelement ÷ dim.nrank
     irank = dim.irank
     ngrid_minus_one = dim.ngrid - 1
-    return irank * ngrid_minus_one + 1
+    return irank * elements_per_block * ngrid_minus_one + 1
 end
 
 function imax(dim)
     elements_per_block = dim.nelement ÷ dim.nrank
     irank = dim.irank
     ngrid_minus_one = dim.ngrid - 1
-    return (irank + 1) * ngrid_minus_one + 1
+    return (irank + 1) * elements_per_block * ngrid_minus_one + 1
 end
 
 function is_global_index_in_block(inds, dimensions, global_cartinds)
@@ -266,7 +266,9 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         local_i = local_i_list[1]
         local_j = local_j_list[1]
         local_matrix .= 0
-        local_matrix[local_i,local_j] .= @view data_to_distribute[local_sparse_inds]
+        for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
+            local_matrix[i,j] = data_to_distribute[isparse]
+        end
 
         apply_periodicity_to_indices!(global_i, dimensions)
         apply_periodicity_to_indices!(global_j, dimensions)
@@ -358,7 +360,7 @@ function gather_vector!(x_global::Union{AbstractVector,Nothing}, x_local::Abstra
 
     if distributed_comm_rank == 0 && shared_comm_rank == 0
         local_block_irank_lists = [get_irank_list(irank, dimensions)
-                                   for irank ∈ 1:distributed_comm_size-1]
+                                   for irank ∈ 0:distributed_comm_size-1]
         local_block_indices_list =
             get_rhs_indices_for_all_local_blocks(dimensions, local_block_irank_lists)
 

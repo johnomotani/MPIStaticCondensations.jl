@@ -1,5 +1,6 @@
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension
+using LinearAlgebra
 using MPI
 using Primes
 using StableRNGs
@@ -40,7 +41,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         x_global = gather_vector!(x_global, rhs_local, dimensions, distributed_comm,
                                   shared_comm)
         if distributed_rank == 0 && shared_rank == 0
-            check_soluion = global_matrix \ rhs_global
+            check_solution = global_matrix \ rhs_global
             @test isapprox(x_global, check_solution;
                            norm=(x)->NaN, rtol=1.0e-13, atol=1.0e-13)
             @test isapprox(global_matrix * x_global, rhs_global;

@@ -639,7 +639,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     n_blocks = comm_size ÷ shared_comm_size
 
     n_blocks_factors = factor(Vector, n_blocks)
-    shared_comm_size_factors = factor(Vector, shared_comm_size_factors)
+    shared_comm_size_factors = factor(Vector, shared_comm_size)
 
     n_levels = length(n_blocks_factors) + length(shared_comm_size_factors) + 1
 
@@ -676,7 +676,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     # Create lowest level solver
     identity = Matrix{data_type}(undef, lowest_level_n, lowest_level_n)
-    identity .= I
+    copyto!(identity, I)
     if use_sparse
         lowest_level_solver =
             MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu),
