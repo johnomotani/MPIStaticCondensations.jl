@@ -105,7 +105,7 @@ function global_to_local(inds, dimensions)
         if !(i1 ≤ i ≤ i2)
             error("i=$i not found in dimension's global indices $i1:$i2.")
         end
-        return iloc
+        return i - i1 + 1
     end
     i = 0
     for d ∈ length(dimensions):-1:1
@@ -164,7 +164,8 @@ function get_rhs_indices_for_local_block(dimensions, irank_list)
     function get_dim_range(dim)
         irank = dim.irank
         ngrid_minus_one = dim.ngrid - 1
-        return irank*ngrid_minus_one+1:(irank+1)*ngrid_minus_one+1
+        nelement_local = dim.nelement ÷ dim.nrank
+        return irank*nelement_local*ngrid_minus_one+1:(irank+1)*nelement_local*ngrid_minus_one+1
     end
     dim_ranges = Tuple(get_dim_range(d) for d in dimensions)
     local_inds = zeros(Int64, prod(length(r) for r ∈ dim_ranges))
@@ -236,7 +237,7 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                                                           false)
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
-                                   for irank ∈ 1:distributed_comm_size-1]
+                                   for irank ∈ 0:distributed_comm_size-1]
         local_block_sparse_indices, local_i_list, local_j_list =
             get_sparse_indices_for_all_local_blocks(global_i, global_j, dimensions,
                                                     local_block_irank_lists)
@@ -277,7 +278,7 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         # once periodicity is accounted for there will be duplicate indices, whose
         # corresponding entries must be summed.
         for (entry, i, j) ∈ zip(data, global_i, global_j)
-            global_matrix[i,j] += data
+            global_matrix[i,j] += entry
         end
     elseif shared_comm_rank == 0
         MPI.Recv!(local_matrix, distributed_comm; source=0)
@@ -329,7 +330,7 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
         end
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
-                                   for irank ∈ 1:distributed_comm_size-1]
+                                   for irank ∈ 0:distributed_comm_size-1]
         local_block_indices_list =
             get_rhs_indices_for_all_local_blocks(dimensions, local_block_irank_lists)
 
