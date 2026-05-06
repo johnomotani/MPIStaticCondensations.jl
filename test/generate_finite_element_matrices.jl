@@ -258,7 +258,9 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
             local_j = local_j_list[irank+1]
 
             local_matrix .= 0
-            local_matrix[local_i,local_j] .= @view data_to_distribute[local_sparse_inds]
+            for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
+                local_matrix[i,j] = data_to_distribute[isparse]
+            end
             MPI.Send(local_matrix, distributed_comm; dest=irank)
         end
 
