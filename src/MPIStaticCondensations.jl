@@ -89,7 +89,7 @@ end
 
 const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 
-abstract type MPIStaticCondensation{Tf<:AbstractFloat} end
+abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
 struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
