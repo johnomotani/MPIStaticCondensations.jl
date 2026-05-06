@@ -87,34 +87,46 @@ macro sc_timeit(timer, name, expr)
     end
 end
 
-abstract type MPIStaticCondensation end
+const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 
-struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
+abstract type MPIStaticCondensation{Tf<:AbstractFloat} end
+
+struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
     buffer::Vector{Tf}
     timer::Ttimer
     check_lu::Bool
 end
+Base.size(Alu::MPIStaticCondensationSerialSparse) = size(Alu.local_block_solver)
+Base.size(Alu::MPIStaticCondensationSerialSparse, d::Integer) = size(Alu)[d]
 
-struct MPIStaticCondensationSerialDense{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
+struct MPIStaticCondensationSerialDense{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::LU{Tf,Matrix{Tf},Vector{Ti}}
     timer::Ttimer
     check_lu::Bool
 end
+Base.size(Alu::MPIStaticCondensationSerialDense) = size(Alu.local_block_solver)
+Base.size(Alu::MPIStaticCondensationSerialDense, d::Integer) = size(Alu)[d]
 
-struct MPIStaticCondensationParallel{Tsolver<:MPISchurComplement,Tranget,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+    n::Ti
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
     local_bottom_vector_indices::Trangeb
     timer::Ttimer
 end
+Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
+Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tsolver<:MPIStaticCondensation,Ti<:Integer}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIStaticCondensation{Tf}}
+    n::Ti
     local_block_solver::Tsolver
     local_block_indices::Vector{Ti}
 end
+Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
+Base.size(Alu::BlockDiagonalSolver, d::Integer) = size(Alu)[d]
 
 struct Dimension{Ti<:Integer}
     n::Ti
@@ -664,10 +676,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         for (level, n_groups) ∈ enumerate(vcat(n_blocks_factors,
                                                shared_comm_size_factors))
             this_level_info =
-                split_dimension(this_level_info.dimensions, n_groups,
-                                optimize_schur_complement_size, this_level_info.comm,
-                                this_level_info.distributed_comm,
-                                this_level_info.shared_comm)
+                split_dimension(this_level_info.level_dimensions, n_groups,
+                                optimize_schur_complement_size,
+                                this_level_info.level_comm,
+                                this_level_info.level_distributed_comm,
+                                this_level_info.level_shared_comm)
             level_info_list[level] = this_level_info
         end
 
@@ -692,12 +705,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     for level ∈ n_levels-1:-1:1
         level_info = level_info_list[level]
 
-        A_block_solver = BlockDiagonalSolver(this_level_solver,
-                                             level_info.local_top_vector_entries)
+        A_block_solver = BlockDiagonalSolver(length(level_info.top_vector_indices),
+                                             this_level_solver,
+                                             level_info.local_top_vector_indices)
 
         # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
         # as the Schur complement matrix is not too small.
-        level_parallel_schur = length(level_bottom_vector_entries) ≥ 1024
+        level_parallel_schur = length(level_info.bottom_vector_indices) ≥ 1024
 
         level_shared_comm = level_info.level_shared_comm
 
@@ -730,9 +744,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
         this_level_solver =
-            MPIStaticCondensationParallel(this_level_sc,
-                                          level_info.local_top_vector_entries,
-                                          level_info.local_bottom_vector_entries, timer)
+            MPIStaticCondensationParallel(length(level_info.top_vector_indices),
+                                          this_level_sc,
+                                          level_info.local_top_vector_indices,
+                                          level_info.local_bottom_vector_indices, timer)
     end
 
     return this_level_solver
@@ -745,16 +760,30 @@ function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     return nothing
 end
 
-function ldiv!(x::AbstractVector, block_diagonal_solver::BlockDiagonalSolver, u::AbstractVector)
+function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+               u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
     inds = block_diagonal_solver.local_block_indices
     @views ldiv!(x[inds], solver, u[inds])
     return nothing
 end
-function ldiv!(block_diagonal_solver::BlockDiagonalSolver, u::AbstractVector)
+function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
     inds = block_diagonal_solver.local_block_indices
     @views ldiv!(solver, u[inds])
+    return nothing
+end
+function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+               u::AbstractMatrix{T}) where T
+    solver = block_diagonal_solver.local_block_solver
+    inds = block_diagonal_solver.local_block_indices
+    @views ldiv!(x[inds], solver, u[inds,:])
+    return nothing
+end
+function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
+    solver = block_diagonal_solver.local_block_solver
+    inds = block_diagonal_solver.local_block_indices
+    @views ldiv!(solver, u[inds,:])
     return nothing
 end
 
@@ -766,17 +795,31 @@ function lu!(solver::MPIStaticCondensationSerialSparse, A::AbstractMatrix)
     return nothing
 end
 
-function ldiv!(X::AbstractVector, solver::MPIStaticCondensationSerialSparse, U::AbstractVector)
+function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T},
+               U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         ldiv!(X, solver.local_block_solver, U)
     end
     return nothing
 end
-function ldiv!(solver::MPIStaticCondensationSerialSparse, U::AbstractVector)
+function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T},
+               U::AbstractMatrix{T}) where T
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        ldiv!(X, solver.local_block_solver, U)
+    end
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationSerialSparse{T}, U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         buffer = solver.buffer
         buffer .= U
         ldiv!(U, solver.local_block_solver, buffer)
+    end
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationSerialSparse{T}, U::AbstractMatrix{T}) where T
+    for col ∈ eachcol(U)
+        ldiv!(solver, col)
     end
     return nothing
 end
@@ -793,13 +836,21 @@ function lu!(solver::MPIStaticCondensationSerialDense, A::AbstractMatrix)
     return nothing
 end
 
-function ldiv!(solver::MPIStaticCondensationSerialDense, U::AbstractVector)
+function ldiv!(solver::MPIStaticCondensationSerialDense{T}, U::AbstractVectorOrMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         ldiv!(solver.local_block_solver, U)
     end
     return nothing
 end
-function ldiv!(X::AbstractVector, solver::MPIStaticCondensationSerialDense, U::AbstractVector)
+function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialDense{T},
+               U::AbstractVector{T}) where T
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        ldiv!(X, solver.local_block_solver, U)
+    end
+    return nothing
+end
+function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialDense{T},
+               U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         ldiv!(X, solver.local_block_solver, U)
     end
@@ -814,12 +865,13 @@ function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
         b = @view A[local_top_vector_indices,local_bottom_vector_indices]
         c = @view A[local_bottom_vector_indices,local_top_vector_indices]
         d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
-        update_schur_complement(solver.local_block_solver, a, b, c, d)
+        update_schur_complement!(solver.local_block_solver, a, b, c, d)
     end
     return nothing
 end
 
-function ldiv!(X::AbstractVector, solver::MPIStaticCondensationParallel, U::AbstractVector)
+function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
+               U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         local_top_vector_indices = solver.local_top_vector_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
@@ -831,13 +883,37 @@ function ldiv!(X::AbstractVector, solver::MPIStaticCondensationParallel, U::Abst
     end
     return nothing
 end
-function ldiv!(solver::MPIStaticCondensationParallel, U::AbstractVector)
+function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         local_top_vector_indices = solver.local_top_vector_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
         u = @view U[local_top_vector_indices]
         v = @view U[local_bottom_vector_indices]
+        ldiv!(u, v, solver, u, v)
+    end
+    return nothing
+end
+function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
+               U::AbstractMatrix{T}) where T
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        local_top_vector_indices = solver.local_top_vector_indices
+        local_bottom_vector_indices = solver.local_bottom_vector_indices
+        x = @view X[local_top_vector_indices,:]
+        u = @view U[local_top_vector_indices,:]
+        y = @view X[local_bottom_vector_indices,:]
+        v = @view U[local_bottom_vector_indices,:]
+        ldiv!(x, y, solver.local_block_solver, u, v)
+    end
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractMatrix{T}) where T
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        # MPISchurComplement allows the RHS and solution vectors to be the same array.
+        local_top_vector_indices = solver.local_top_vector_indices
+        local_bottom_vector_indices = solver.local_bottom_vector_indices
+        u = @view U[local_top_vector_indices,:]
+        v = @view U[local_bottom_vector_indices,:]
         ldiv!(u, v, solver, u, v)
     end
     return nothing
