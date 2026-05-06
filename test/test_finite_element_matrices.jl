@@ -8,11 +8,11 @@ using Test
 include("generate_finite_element_matrices.jl")
 include("utils.jl")
 
-function test_matrix(dimensions::Vector{Dimension}, n_shared::Integer,
+function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, use_sparse::Bool,
                      optimize_schur_complement_size::Bool)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
-        shared_nproc, shared_rank, allocate_array_float, allocate_array_int,
+        shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
 
     rng = StableRNG(random_seed)
@@ -23,6 +23,11 @@ function test_matrix(dimensions::Vector{Dimension}, n_shared::Integer,
     rhs_global, rhs_local =
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
+    if distributed_rank == 0 && shared_rank == 0
+        x_global = similar(rhs_global)
+    else
+        x_global = nothing
+    end
 
     Alu = mpi_static_condensation(dimensions; comm, distributed_comm, shared_comm,
                                   allocate_shared_float, allocate_shared_int, use_sparse,
@@ -32,7 +37,8 @@ function test_matrix(dimensions::Vector{Dimension}, n_shared::Integer,
 
     @testset "solve" begin
         ldiv!(Alu, rhs_local)
-        x_global = gather_vector(rhs_local)
+        x_global = gather_vector!(x_global, rhs_local, dimensions, distributed_comm,
+                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
             check_soluion = global_matrix \ rhs_global
             @test isapprox(x_global, check_solution;
@@ -62,4 +68,11 @@ function test_matrix(dimensions::Vector{Dimension}, n_shared::Integer,
 end
 
 function test_finite_element_matrices()
+    if !MPI.Initialized()
+        MPI.Init()
+    end
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
+    comm_size = MPI.Comm_size(MPI.COMM_WORLD)
+    dimensions = [create_dimension(; nelement=4, ngrid=3, nrank=comm_size, irank=rank, periodic=false, remove_boundaries=false)]
+    test_matrix(dimensions, 1, 987, true, true)
 end

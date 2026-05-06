@@ -2,10 +2,10 @@ using MPIStaticCondensations
 using MPIStaticCondensations: Dimension
 using MPI
 
-function get_flattened_index(n_list, ngrid_list, ielement, igrid)
-    combined_inds = Tuple((iel - 1) * (ng - 1) + igr for (ng, iel, igr) ∈ zip(ngrid_list, Tuple(ielement), Tuple(igrid)))
+function get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
+    combined_inds = Tuple((iel - 1) * (ng - 1) + igr for (ng, iel, igr) ∈ zip(ngrid_tuple, Tuple(ielement), Tuple(igrid)))
     i_flat = 0
-    for (i, n) ∈ zip(reverse(combined_inds), reverse(n_list))
+    for (i, n) ∈ zip(reverse(combined_inds), reverse(n_tuple))
         i_flat = n * i_flat + i - 1
     end
     return i_flat + 1
@@ -27,8 +27,8 @@ function construct_sparse_finite_element_matrix(dimensions::Vector{<:Dimension},
             istart = counter
             for igrid ∈ element_indices, d ∈ nd, this_jgrid ∈ 1:ngrid_tuple[d]
                 jgrid = CartesianIndex(Tuple(this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd))
-                global_i = get_flattened_index(n_list, nelement_list, ngrid_list, ielement, igrid)
-                global_j = get_flattened_index(n_list, nelement_list, ngrid_list, ielement, jgrid)
+                global_i = get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
+                global_j = get_flattened_index(n_tuple, ngrid_tuple, ielement, jgrid)
                 i = (global_i, global_j)
                 if i ∉ global_inds
                     # Search global_inds to avoid appending repeats.
@@ -48,8 +48,8 @@ function construct_sparse_finite_element_matrix(dimensions::Vector{<:Dimension},
     else
         for ielement ∈ CartesianIndices(Tuple(d.nelement for d ∈ dimensions))
             for igrid ∈ element_indices, jgrid ∈ element_indices
-                global_i = get_flattened_index(n_list, nelement_list, ngrid_list, ielement, igrid)
-                global_j = get_flattened_index(n_list, nelement_list, ngrid_list, ielement, jgrid)
+                global_i = get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
+                global_j = get_flattened_index(n_tuple, ngrid_tuple, ielement, jgrid)
                 i = (global_i, global_j)
                 if i ∉ global_inds
                     # Search global_inds to avoid appending repeats.
@@ -305,13 +305,13 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
             n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
             rhs_global = fill(NaN, n)
             counter = 0
-            n_list = Tuple(d.n for d ∈ dimensions)
-            global_cartinds = CartesianIndices(n_list)
+            n_tuple = Tuple(d.n for d ∈ dimensions)
+            global_cartinds = CartesianIndices(n_tuple)
             for i_global ∈ 1:n_total
                 inds = global_cartinds[i_global]
-                if any(Tuple(inds) .== n_list)
+                if any(Tuple(inds) .== n_tuple)
                     i_dup = 0
-                    for (i, n) ∈ zip(reverse(Tuple(inds)), reverse(n_list))
+                    for (i, n) ∈ zip(reverse(Tuple(inds)), reverse(n_tuple))
                         if i == n
                             i = 1
                         end
@@ -328,6 +328,8 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
             rhs_global = rhs_global_with_dups
         end
 
+        local_block_irank_lists = [get_irank_list(irank, dimensions)
+                                   for irank ∈ 1:distributed_comm_size-1]
         local_block_indices_list =
             get_rhs_indices_for_all_local_blocks(dimensions, local_block_irank_lists)
 
@@ -344,4 +346,34 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
     end
 
     return rhs_global, rhs_local
+end
+
+function gather_vector!(x_global::Union{AbstractVector,Nothing}, x_local::AbstractVector,
+                        dimensions::Vector{<:Dimension},
+                        distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
+    distributed_comm_rank = MPI.Comm_rank(distributed_comm)
+    distributed_comm_size = MPI.Comm_size(distributed_comm)
+    shared_comm_rank = MPI.Comm_rank(shared_comm)
+
+    if distributed_comm_rank == 0 && shared_comm_rank == 0
+        local_block_irank_lists = [get_irank_list(irank, dimensions)
+                                   for irank ∈ 1:distributed_comm_size-1]
+        local_block_indices_list =
+            get_rhs_indices_for_all_local_blocks(dimensions, local_block_irank_lists)
+
+        # First add root's contributions to x_global.
+        x_global[local_block_indices_list[1]] .= x_local
+
+        # Collect contributions from all other ranks. Overlapping points are overwritten,
+        # but this should be OK because the overlapping points should be identical on all
+        # processes anyway.
+        for rank ∈ 1:distributed_comm_size-1
+            MPI.IRecv!(x_local, distributed_comm; source=rank)
+            x_global[local_block_indices_list[rank+1]] .= x_local
+        end
+    elseif shared_comm_rank == 0
+        MPI.Send(x_local, distributed_comm; dest=0)
+    end
+
+    return x_global
 end
