@@ -91,10 +91,12 @@ const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 
 abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
-struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Tndi,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
     U_buffer::Vector{Tf}
     X_buffer::Vector{Tf}
+    non_duplicate_indices::Tndi
+    periodic_index_pairs::Matrix{Ti}
     timer::Ttimer
     check_lu::Bool
 end
@@ -760,6 +762,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu),
                                               Vector{data_type}(undef, lowest_level_n),
                                               Vector{data_type}(undef, lowest_level_n),
+                                              lowest_level_non_duplicate_indices,
+                                              lowest_level_periodic_index_pairs,
                                               timer, check_lu)
     else
         lowest_level_solver =
@@ -857,8 +861,18 @@ end
 
 function lu!(solver::MPIStaticCondensationSerialSparse, A::AbstractMatrix)
     @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+        non_duplicate_indices = solver.non_duplicate_indices
+        periodic_index_pairs = solver.periodic_index_pairs
+        for (j1, j2) ∈ eachcol(periodic_index_pairs)
+            @views A[:,j1] .+= A[:,j2]
+        end
+        for (i1, i2) ∈ eachcol(periodic_index_pairs)
+            @views A[i1,non_duplicate_indices] .+= A[i2,non_duplicate_indices]
+        end
         # For simplicity assume non-zero pattern might change, so pass reuse_symbolic=false.
-        lu!(solver.local_block_solver, sparse(A); reuse_symbolic=false, check=solver.check_lu)
+        lu!(solver.local_block_solver,
+            sparse(@view(A[non_duplicate_indices,non_duplicate_indices]));
+            reuse_symbolic=false, check=solver.check_lu)
     end
     return nothing
 end
@@ -866,22 +880,23 @@ end
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T},
                U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        non_duplicate_indices = solver.non_duplicate_indices
         # Note if X or U are views that were indexed with Vector{<:Integer}, then we need
         # to replace them with contiguous-in-memory buffers.
-        if !isa(X, StridedVector)
-            this_X = solver.X_buffer
-        else
+        if isa(X, StridedVector) && isa(non_duplicate_indices, Colon)
             this_X = X
-        end
-        if !isa(U, StridedVector)
-            this_U = solver.U_buffer
-            this_U .= U
         else
+            this_X = solver.X_buffer
+        end
+        if isa(U, StridedVector) && isa(non_duplicate_indices, Colon)
             this_U = U
+        else
+            this_U = solver.U_buffer
+            this_U .= @view U[non_duplicate_indices]
         end
         ldiv!(this_X, solver.local_block_solver, this_U)
-        if !isa(X, StridedVector)
-            X .= this_X
+        if !(isa(X, StridedVector) && isa(non_duplicate_indices, Colon))
+            @views X[non_duplicate_indices] .= this_X
         end
     end
     return nothing
@@ -893,7 +908,7 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T
         # to fall back to the AbstractVector function which can replace them with
         # contiguous-in-memory buffers.
         local_block_solver = solver.local_block_solver
-        if !isa(X, StridedMatrix) || !isa(U, StridedMatrix)
+        if !isa(X, StridedMatrix) || !isa(U, StridedMatrix) || !isa(solver.non_duplicate_indices, Colon)
             for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
                 ldiv!(this_X, local_block_solver, this_U)
             end
@@ -905,18 +920,19 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T
 end
 function ldiv!(solver::MPIStaticCondensationSerialSparse{T}, U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+        non_duplicate_indices = solver.non_duplicate_indices
         U_buffer = solver.U_buffer
-        U_buffer .= U
-        if !isa(U, StridedVector)
+        U_buffer .= @view U[non_duplicate_indices]
+        if isa(U, StridedVector) && isa(non_duplicate_indices, Colon)
+            this_X = U
+        else
             # Note if U is a view that was indexed with Vector{<:Integer}, then we need to
             # replace it with a contiguous-in-memory buffer.
             this_X = solver.X_buffer
-        else
-            this_X = U
         end
         ldiv!(this_X, solver.local_block_solver, U_buffer)
-        if !isa(U, StridedVector)
-            U .= this_X
+        if !(isa(U, StridedVector) && isa(non_duplicate_indices, Colon))
+            @views U[non_duplicate_indices] .= this_X
         end
     end
     return nothing
