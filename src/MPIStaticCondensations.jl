@@ -729,7 +729,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             if any(d.periodic && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
                 has_duplicate = true
                 pair_i = 0
-                for (d, i) ∈ zip(dimensions, Tuple(inds))
+                for (d, i) ∈ zip(reverse(dimensions), reverse(Tuple(inds)))
                     n = d.periodic ? d.n - 1 : d.n
                     if d.periodic && i == d.n
                         # pair_i corresponds to the first index in this dimension.
@@ -863,10 +863,10 @@ function lu!(solver::MPIStaticCondensationSerialSparse, A::AbstractMatrix)
         non_duplicate_indices = solver.non_duplicate_indices
         periodic_index_pairs = solver.periodic_index_pairs
         for (j1, j2) ∈ eachcol(periodic_index_pairs)
-            @views A[:,j1] .+= A[:,j2]
+            @views A[:,non_duplicate_indices[j1]] .+= A[:,j2]
         end
         for (i1, i2) ∈ eachcol(periodic_index_pairs)
-            @views A[i1,non_duplicate_indices] .+= A[i2,non_duplicate_indices]
+            @views A[non_duplicate_indices[i1],non_duplicate_indices] .+= A[i2,non_duplicate_indices]
         end
         # For simplicity assume non-zero pattern might change, so pass reuse_symbolic=false.
         lu!(solver.local_block_solver,
@@ -896,6 +896,9 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T
         ldiv!(this_X, solver.local_block_solver, this_U)
         if !(isa(X, StridedVector) && isa(non_duplicate_indices, Colon))
             @views X[non_duplicate_indices] .= this_X
+            for (i1, i2) ∈ eachcol(solver.periodic_index_pairs)
+                X[i2] = this_X[i1]
+            end
         end
     end
     return nothing
@@ -932,6 +935,9 @@ function ldiv!(solver::MPIStaticCondensationSerialSparse{T}, U::AbstractVector{T
         ldiv!(this_X, solver.local_block_solver, U_buffer)
         if !(isa(U, StridedVector) && isa(non_duplicate_indices, Colon))
             @views U[non_duplicate_indices] .= this_X
+            for (i1, i2) ∈ eachcol(solver.periodic_index_pairs)
+                U[i2] = this_X[i1]
+            end
         end
     end
     return nothing

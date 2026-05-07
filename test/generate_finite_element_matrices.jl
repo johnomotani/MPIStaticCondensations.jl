@@ -302,10 +302,12 @@ function remove_duplicates_from_global_vector(x_global_with_dups, dimensions::Ve
         global_cartinds = CartesianIndices(n_tuple)
         for i_global ∈ 1:length(x_global_with_dups)
             inds = global_cartinds[i_global]
-            if any(Tuple(inds) .== n_tuple)
+            if any(d.periodic && i == d.n for (d, i)
+                   ∈ zip(reverse(dimensions), reverse(Tuple(inds))))
                 i_dup = 0
-                for (i, n) ∈ zip(reverse(Tuple(inds)), reverse(n_tuple))
-                    if i == n
+                for (d, i) ∈ zip(reverse(dimensions), reverse(Tuple(inds)))
+                    n = d.periodic ? d.n - 1 : d.n
+                    if d.periodic && i == d.n
                         i = 1
                     end
                     i_dup = n * i_dup + i - 1
