@@ -726,22 +726,20 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_cartinds = CartesianIndices(Tuple(d.n for d ∈ lowest_level_dimensions))
         for (flat_i, inds) ∈ enumerate(level_cartinds)
             has_duplicate = false
-            for (idim, (d, i)) ∈ enumerate(zip(lowest_level_dimensions, Tuple(inds)))
-                if d.periodic && i == d.n
-                    has_duplicate = true
-                    pair_i = 0
-                    for (this_idim, this_i) ∈ enumerate(Tuple(inds))
-                        n = dimensions[this_idim].periodic ? dimensions[this_idim].n - 1 : dimensions[this_idim].n
-                        if this_idim == idim
-                            # pair_i corresponds to the first index in this dimension.
-                            pair_i = pair_i * n
-                        else
-                            pair_i = pair_i * n + this_i - 1
-                        end
+            if any(d.periodic && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
+                has_duplicate = true
+                pair_i = 0
+                for (d, i) ∈ zip(dimensions, Tuple(inds))
+                    n = d.periodic ? d.n - 1 : d.n
+                    if d.periodic && i == d.n
+                        # pair_i corresponds to the first index in this dimension.
+                        pair_i = pair_i * n
+                    else
+                        pair_i = pair_i * n + i - 1
                     end
-                    pair_i += 1
-                    push!(periodic_pairs, (pair_i, flat_i))
                 end
+                pair_i += 1
+                push!(periodic_pairs, (pair_i, flat_i))
             end
             if !has_duplicate
                 push!(lowest_level_non_duplicate_indices, flat_i)
