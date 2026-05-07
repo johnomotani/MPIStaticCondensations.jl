@@ -72,8 +72,10 @@ function test_finite_element_matrices()
     if !MPI.Initialized()
         MPI.Init()
     end
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-    comm_size = MPI.Comm_size(MPI.COMM_WORLD)
-    dimensions = [create_dimension(; nelement=4, ngrid=3, nrank=comm_size, irank=rank, periodic=false, remove_boundaries=false)]
-    test_matrix(dimensions, 1, 987, true, true)
+    @testset "finite element matrices" begin
+        rank = MPI.Comm_rank(MPI.COMM_WORLD)
+        comm_size = MPI.Comm_size(MPI.COMM_WORLD)
+        dimensions = [create_dimension(; nelement=4, ngrid=3, nrank=comm_size, irank=rank, periodic=false, remove_boundaries=false)]
+        test_matrix(dimensions, 1, 987, true, true)
+    end
 end
