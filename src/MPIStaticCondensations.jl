@@ -363,6 +363,7 @@ MPI.Comm_split(comm::FakeComm, color, key) = comm
 
 @kwdef struct LevelInfo{Ti,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
     level_dimensions::Vector{Dimension{Ti}}
+    global_top_vector_size::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     bottom_vector_indices::Vector{Ti}
@@ -451,6 +452,12 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                               periodic=false, has_lower_boundary=false,
                               has_upper_boundary=false, remove_boundaries=false)
     end
+
+    top_vector_slice_dim_n = slice_dim.n - (n_groups - 1)
+    global_top_vector_size =
+        top_vector_slice_dim_n * prod(dimensions[i].n
+                                      for i ∈ 1:length(dimensions) if i ≠ slice_i; init=1)
+
     if slice_dim.nrank > 1
         # When dimension is distributed, split on block boundaries.
         blocks_per_group = (slice_dim.nrank + n_groups - 1) ÷ n_groups
@@ -602,9 +609,10 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     end
     level_dimensions[slice_i] = slice_dim
 
-    return LevelInfo(; level_dimensions, top_vector_indices, local_top_vector_indices,
-                     bottom_vector_indices, local_bottom_vector_indices, level_comm,
-                     level_distributed_comm, level_shared_comm),
+    return LevelInfo(; level_dimensions, global_top_vector_size, top_vector_indices,
+                     local_top_vector_indices, bottom_vector_indices,
+                     local_bottom_vector_indices, level_comm, level_distributed_comm,
+                     level_shared_comm),
            level_dimensions, next_comm, next_distributed_comm, next_shared_comm
 end
 
@@ -730,7 +738,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         # block of the matrix has already been constructed (using
         # `level_info.top_vector_indices`), and is passed to A_block_solver, which needs
         # to select its block out of that.
-        A_block_solver = BlockDiagonalSolver(length(level_info.top_vector_indices),
+        A_block_solver = BlockDiagonalSolver(level_info.global_top_vector_size,
                                              this_level_solver)
 
         # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
