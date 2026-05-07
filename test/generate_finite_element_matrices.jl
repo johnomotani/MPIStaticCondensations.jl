@@ -373,7 +373,7 @@ function gather_vector!(x_global::Union{AbstractVector,Nothing}, x_local::Abstra
         # but this should be OK because the overlapping points should be identical on all
         # processes anyway.
         for rank ∈ 1:distributed_comm_size-1
-            MPI.Irecv!(x_local, distributed_comm; source=rank)
+            MPI.Recv!(x_local, distributed_comm; source=rank)
             x_global[local_block_indices_list[rank+1]] .= x_local
         end
     elseif shared_comm_rank == 0
