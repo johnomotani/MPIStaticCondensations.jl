@@ -892,7 +892,7 @@ function lu!(solver::MPIStaticCondensationSerialDense, A::AbstractMatrix)
         # Re-use the arrays to avoid allocating.
         mat_storage = solver.local_block_solver.factors
         ipiv = solver.local_block_solver.ipiv
-        check = solver.check
+        check = solver.check_lu
         mat_storage .= A
         LAPACK.getrf!(mat_storage, ipiv; check=check)
     end
