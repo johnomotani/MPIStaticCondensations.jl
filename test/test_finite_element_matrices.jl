@@ -12,7 +12,7 @@ include("utils.jl")
 
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, use_sparse::Bool,
-                     optimize_schur_complement_size::Bool)
+                     optimize_schur_complement_size::Bool, sparse_stencils::Bool)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -21,7 +21,8 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
 
     global_matrix, local_matrix =
         assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
-                                           shared_comm, allocate_shared_float, rng)
+                                           shared_comm, allocate_shared_float, rng,
+                                           sparse_stencils)
     rhs_global, rhs_local =
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
@@ -129,9 +130,10 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
     distributed_comm_rank = rank ÷ n_shared
 
     bool_perms = generate_bool_permutations(length(nelement_list))
-    @testset "nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, optimize_schur_complement_size=$optimize_schur_complement_size" for
+    @testset "nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, optimize_schur_complement_size=$optimize_schur_complement_size, sparse_stencils=$sparse_stencils" for
             use_sparse ∈ (true, false),
-            optimize_schur_complement_size ∈ (true, false)
+            optimize_schur_complement_size ∈ (true, false),
+            sparse_stencils ∈ (true, false)
 
         @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
@@ -145,7 +147,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                           for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
                           ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, remove_boundaries_list)]
 
-            test_matrix(dimensions, n_shared, this_seed, use_sparse, optimize_schur_complement_size)
+            test_matrix(dimensions, n_shared, this_seed, use_sparse, optimize_schur_complement_size, sparse_stencils)
             this_seed += 1
         end
     end

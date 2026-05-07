@@ -224,7 +224,7 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                             comm::MPI.Comm,
                                             distributed_comm::Union{MPI.Comm,Nothing},
                                             shared_comm::MPI.Comm, allocate_shared_float,
-                                            rng)
+                                            rng, sparse_stencils::Bool)
     rank = MPI.Comm_rank(comm)
     distributed_comm_size = MPI.Comm_size(distributed_comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -234,6 +234,7 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     global_matrix = nothing
     if rank == 0
         data, global_i, global_j = construct_sparse_finite_element_matrix(dimensions, rng,
+                                                                          sparse_stencils,
                                                                           false)
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
