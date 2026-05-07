@@ -13,7 +13,7 @@ include("utils.jl")
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, use_sparse::Bool,
                      optimize_schur_complement_size::Bool, sparse_stencils::Bool,
-                     tol=1.0e-10)
+                     tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -116,7 +116,7 @@ function get_iranks(nrank_list, rank)
 end
 
 function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
-                                     comm_size, n_shared, this_seed)
+                                     comm_size, n_shared, tol, this_seed)
     if length(nelement_list) != length(ngrid_list)
         error("nelement_list and ngrid_list must have the same length")
     end
@@ -148,7 +148,8 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                           for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
                           ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, remove_boundaries_list)]
 
-            test_matrix(dimensions, n_shared, this_seed, use_sparse, optimize_schur_complement_size, sparse_stencils)
+            test_matrix(dimensions, n_shared, this_seed, use_sparse,
+                        optimize_schur_complement_size, sparse_stencils, tol)
             this_seed += 1
         end
     end
@@ -158,42 +159,45 @@ function test_finite_element_matrices()
     if !MPI.Initialized()
         MPI.Init()
     end
+    BLAS.set_num_threads(1)
     @testset "finite element matrices" begin
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
         comm_size = MPI.Comm_size(MPI.COMM_WORLD)
         n_shared_list = vcat(1, factor(Vector, comm_size))
         @testset "n_shared=$n_shared" for n_shared ∈ [prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
             @testset "1D" begin
-                test_dimension_combinations([1], [3], 1, rank, comm_size, n_shared, 1000)
-                test_dimension_combinations([2], [3], 2, rank, comm_size, n_shared, 1001)
-                test_dimension_combinations([2], [4], 2, rank, comm_size, n_shared, 1002)
-                test_dimension_combinations([2], [5], 2, rank, comm_size, n_shared, 1003)
-                test_dimension_combinations([3], [3], 3, rank, comm_size, n_shared, 1004)
-                test_dimension_combinations([4], [3], 4, rank, comm_size, n_shared, 1005)
-                test_dimension_combinations([5], [3], 5, rank, comm_size, n_shared, 1006)
-                test_dimension_combinations([6], [3], 6, rank, comm_size, n_shared, 1007)
-                test_dimension_combinations([7], [3], 5, rank, comm_size, n_shared, 1008)
-                test_dimension_combinations([8], [3], 8, rank, comm_size, n_shared, 1009)
-                test_dimension_combinations([16], [3], 16, rank, comm_size, n_shared, 1010)
-                test_dimension_combinations([32], [3], 32, rank, comm_size, n_shared, 1011)
+                tol = 1.0e-13
+                test_dimension_combinations([1], [3], 1, rank, comm_size, n_shared, tol, 1000)
+                test_dimension_combinations([2], [3], 2, rank, comm_size, n_shared, tol, 1001)
+                test_dimension_combinations([2], [4], 2, rank, comm_size, n_shared, tol, 1002)
+                test_dimension_combinations([2], [5], 2, rank, comm_size, n_shared, tol, 1003)
+                test_dimension_combinations([3], [3], 3, rank, comm_size, n_shared, tol, 1004)
+                test_dimension_combinations([4], [3], 4, rank, comm_size, n_shared, tol, 1005)
+                test_dimension_combinations([5], [3], 5, rank, comm_size, n_shared, tol, 1006)
+                test_dimension_combinations([6], [3], 6, rank, comm_size, n_shared, tol, 1007)
+                test_dimension_combinations([7], [3], 5, rank, comm_size, n_shared, tol, 1008)
+                test_dimension_combinations([8], [3], 8, rank, comm_size, n_shared, tol, 1009)
+                test_dimension_combinations([16], [3], 16, rank, comm_size, n_shared, tol, 1010)
+                test_dimension_combinations([32], [3], 32, rank, comm_size, n_shared, tol, 1011)
             end
             @testset "2D" begin
-                test_dimension_combinations([1, 1], [3, 3], 1, rank, comm_size, n_shared, 2000)
-                test_dimension_combinations([1, 2], [3, 3], 2, rank, comm_size, n_shared, 2001)
-                test_dimension_combinations([1, 2], [3, 5], 2, rank, comm_size, n_shared, 2002)
-                test_dimension_combinations([1, 3], [3, 5], 3, rank, comm_size, n_shared, 2003)
-                test_dimension_combinations([2, 2], [3, 5], 4, rank, comm_size, n_shared, 2004)
-                test_dimension_combinations([2, 3], [3, 5], 4, rank, comm_size, n_shared, 2005)
-                test_dimension_combinations([2, 4], [3, 5], 8, rank, comm_size, n_shared, 2006)
-                test_dimension_combinations([1, 8], [3, 5], 8, rank, comm_size, n_shared, 2007)
-                test_dimension_combinations([1, 16], [3, 5], 16, rank, comm_size, n_shared, 2008)
-                test_dimension_combinations([2, 8], [3, 5], 16, rank, comm_size, n_shared, 2009)
-                test_dimension_combinations([4, 4], [3, 5], 16, rank, comm_size, n_shared, 2010)
-                test_dimension_combinations([4, 4], [5, 5], 16, rank, comm_size, n_shared, 2011)
-                test_dimension_combinations([1, 32], [3, 5], 32, rank, comm_size, n_shared, 2012)
-                test_dimension_combinations([2, 16], [3, 5], 32, rank, comm_size, n_shared, 2013)
-                test_dimension_combinations([4, 8], [3, 5], 32, rank, comm_size, n_shared, 2014)
-                test_dimension_combinations([4, 8], [5, 5], 32, rank, comm_size, n_shared, 2015)
+                tol = 1.0e-9
+                test_dimension_combinations([1, 1], [3, 3], 1, rank, comm_size, n_shared, tol, 2000)
+                test_dimension_combinations([1, 2], [3, 3], 2, rank, comm_size, n_shared, tol, 2001)
+                test_dimension_combinations([1, 2], [3, 5], 2, rank, comm_size, n_shared, tol, 2002)
+                test_dimension_combinations([1, 3], [3, 5], 3, rank, comm_size, n_shared, tol, 2003)
+                test_dimension_combinations([2, 2], [3, 5], 4, rank, comm_size, n_shared, tol, 2004)
+                test_dimension_combinations([2, 3], [3, 5], 4, rank, comm_size, n_shared, tol, 2005)
+                test_dimension_combinations([2, 4], [3, 5], 8, rank, comm_size, n_shared, tol, 2006)
+                test_dimension_combinations([1, 8], [3, 5], 8, rank, comm_size, n_shared, tol, 2007)
+                test_dimension_combinations([1, 16], [3, 5], 16, rank, comm_size, n_shared, tol, 2008)
+                test_dimension_combinations([2, 8], [3, 5], 16, rank, comm_size, n_shared, tol, 2009)
+                test_dimension_combinations([4, 4], [3, 5], 16, rank, comm_size, n_shared, tol, 2010)
+                test_dimension_combinations([4, 4], [5, 5], 16, rank, comm_size, n_shared, tol, 2011)
+                test_dimension_combinations([1, 32], [3, 5], 32, rank, comm_size, n_shared, tol, 2012)
+                test_dimension_combinations([2, 16], [3, 5], 32, rank, comm_size, n_shared, tol, 2013)
+                test_dimension_combinations([4, 8], [3, 5], 32, rank, comm_size, n_shared, tol, 2014)
+                test_dimension_combinations([4, 8], [5, 5], 32, rank, comm_size, n_shared, tol, 2015)
             end
         end
     end
