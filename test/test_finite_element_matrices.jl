@@ -133,7 +133,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
             use_sparse ∈ (true, false),
             optimize_schur_complement_size ∈ (true, false)
 
-        @testset "$this_nelement_list, $this_ngrid_list, $this_nrank_list, $periodic_list, $remove_boundaries_list" for
+        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
