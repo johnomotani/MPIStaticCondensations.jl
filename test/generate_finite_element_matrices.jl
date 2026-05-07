@@ -211,7 +211,8 @@ function apply_periodicity_to_indices!(global_inds, dimensions)
             if d.periodic && i == d.n
                 i = 1
             end
-            new_flat_i = new_flat_i * d.n + i - 1
+            n = d.periodic ? d.n - 1 : d.n
+            new_flat_i = new_flat_i * n + i - 1
         end
         new_flat_i += 1
         global_inds[sparse_i] = new_flat_i
