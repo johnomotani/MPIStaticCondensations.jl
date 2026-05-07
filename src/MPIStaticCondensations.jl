@@ -834,6 +834,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T
         end
         if !isa(U, StridedVector)
             this_U = solver.U_buffer
+            this_U .= U
         else
             this_U = U
         end
