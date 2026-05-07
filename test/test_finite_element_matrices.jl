@@ -176,6 +176,24 @@ function test_finite_element_matrices()
                 test_dimension_combinations([16], [3], 16, rank, comm_size, n_shared, 1010)
                 test_dimension_combinations([32], [3], 32, rank, comm_size, n_shared, 1011)
             end
+            @testset "2D" begin
+                test_dimension_combinations([1, 1], [3, 3], 1, rank, comm_size, n_shared, 2000)
+                test_dimension_combinations([1, 2], [3, 3], 2, rank, comm_size, n_shared, 2001)
+                test_dimension_combinations([1, 2], [3, 5], 2, rank, comm_size, n_shared, 2002)
+                test_dimension_combinations([1, 3], [3, 5], 3, rank, comm_size, n_shared, 2003)
+                test_dimension_combinations([2, 2], [3, 5], 4, rank, comm_size, n_shared, 2004)
+                test_dimension_combinations([2, 3], [3, 5], 4, rank, comm_size, n_shared, 2005)
+                test_dimension_combinations([2, 4], [3, 5], 8, rank, comm_size, n_shared, 2006)
+                test_dimension_combinations([1, 8], [3, 5], 8, rank, comm_size, n_shared, 2007)
+                test_dimension_combinations([1, 16], [3, 5], 16, rank, comm_size, n_shared, 2008)
+                test_dimension_combinations([2, 8], [3, 5], 16, rank, comm_size, n_shared, 2009)
+                test_dimension_combinations([4, 4], [3, 5], 16, rank, comm_size, n_shared, 2010)
+                test_dimension_combinations([4, 4], [5, 5], 16, rank, comm_size, n_shared, 2011)
+                test_dimension_combinations([1, 32], [3, 5], 32, rank, comm_size, n_shared, 2012)
+                test_dimension_combinations([2, 16], [3, 5], 32, rank, comm_size, n_shared, 2013)
+                test_dimension_combinations([4, 8], [3, 5], 32, rank, comm_size, n_shared, 2014)
+                test_dimension_combinations([4, 8], [5, 5], 32, rank, comm_size, n_shared, 2015)
+            end
         end
     end
 end
