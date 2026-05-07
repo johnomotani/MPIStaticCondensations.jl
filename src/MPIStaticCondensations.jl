@@ -376,14 +376,14 @@ end
 # for testing of the index generation.
 function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                          optimize_schur_complement_size::Bool,
-                         comm::Union{MPI.Comm,FakeComm},
-                         distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
-                         shared_comm::Union{MPI.Comm,FakeComm})
+                         level_comm::Union{MPI.Comm,FakeComm},
+                         level_distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
+                         level_shared_comm::Union{MPI.Comm,FakeComm})
     ind_type = typeof(n_groups)
     level_dimensions = copy(dimensions)
-    level_comm = comm
-    level_distributed_comm = distributed_comm
-    level_shared_comm = shared_comm
+    next_comm = level_comm
+    next_distributed_comm = level_distributed_comm
+    next_shared_comm = level_shared_comm
     comm_rank = MPI.Comm_rank(level_comm)
     shared_comm_rank = MPI.Comm_rank(level_shared_comm)
     shared_comm_size = MPI.Comm_size(level_shared_comm)
@@ -455,9 +455,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         # When dimension is distributed, split on block boundaries.
         blocks_per_group = (slice_dim.nrank + n_groups - 1) ÷ n_groups
         group_rank = distributed_comm_rank ÷ blocks_per_group
-        level_comm = MPI.Comm_split(level_comm, group_rank, 0)
+        next_comm = MPI.Comm_split(next_comm, group_rank, 0)
         if shared_comm_rank == 0
-            level_distributed_comm = MPI.Comm_split(level_distributed_comm, group_rank, 0)
+            next_distributed_comm = MPI.Comm_split(next_distributed_comm, group_rank, 0)
         end
         if slice_dim.nelement % slice_dim.nrank != 0
             error("Number of elements in dimension should split equally among blocks."
@@ -604,7 +604,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
 
     return LevelInfo(; level_dimensions, top_vector_indices, local_top_vector_indices,
                      bottom_vector_indices, local_bottom_vector_indices, level_comm,
-                     level_distributed_comm, level_shared_comm)
+                     level_distributed_comm, level_shared_comm),
+           level_dimensions, next_comm, next_distributed_comm, next_shared_comm
 end
 
 """
@@ -679,13 +680,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     if n_levels == 1
         lowest_level_n = prod(d.n for d ∈ dimensions)
     else
-        this_level_info =
-            LevelInfo(; level_dimensions=dimensions, top_vector_indices=ind_type[],
-                      local_top_vector_indices=ind_type[],
-                      bottom_vector_indices=ind_type[],
-                      local_bottom_vector_indices=ind_type[], level_comm=comm,
-                      level_distributed_comm=distributed_comm,
-                      level_shared_comm=shared_comm)
+        this_level_dimensions = dimensions
+        this_level_comm = comm
+        this_level_distributed_comm = distributed_comm
+        this_level_shared_comm = shared_comm
 
         # Vector{LevelInfo} is not type stable because of the unspecified type parameters
         # of LevelInfo, but that does not matter here because this is just a constructor
@@ -696,12 +694,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level = 0
         for (level, n_groups) ∈ enumerate(vcat(n_blocks_factors,
                                                shared_comm_size_factors))
-            this_level_info =
-                split_dimension(this_level_info.level_dimensions, n_groups,
-                                optimize_schur_complement_size,
-                                this_level_info.level_comm,
-                                this_level_info.level_distributed_comm,
-                                this_level_info.level_shared_comm)
+            this_level_info, this_level_dimensions, this_level_comm,
+            this_level_distributed_comm, this_level_shared_comm =
+                split_dimension(this_level_dimensions, n_groups,
+                                optimize_schur_complement_size, this_level_comm,
+                                this_level_distributed_comm, this_level_shared_comm)
             level_info_list[level] = this_level_info
         end
 
