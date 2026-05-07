@@ -291,6 +291,36 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     return global_matrix, local_matrix
 end
 
+function remove_duplicates_from_global_vector(x_global_with_dups, dimensions::Vector{<:Dimension})
+    if any(d.periodic for d ∈ dimensions)
+        n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
+        x_global = fill(NaN, n)
+        counter = 0
+        n_tuple = Tuple(d.n for d ∈ dimensions)
+        global_cartinds = CartesianIndices(n_tuple)
+        for i_global ∈ 1:length(x_global_with_dups)
+            inds = global_cartinds[i_global]
+            if any(Tuple(inds) .== n_tuple)
+                i_dup = 0
+                for (i, n) ∈ zip(reverse(Tuple(inds)), reverse(n_tuple))
+                    if i == n
+                        i = 1
+                    end
+                    i_dup = n * i_dup + i - 1
+                end
+                i_dup += 1
+                x_global_with_dups[i_global] = x_global[i_dup]
+            else
+                counter += 1
+                x_global[counter] = x_global_with_dups[i_global]
+            end
+        end
+        return x_global
+    else
+        return x_global_with_dups
+    end
+end
+
 function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::MPI.Comm,
                                          distributed_comm::Union{MPI.Comm,Nothing},
                                          shared_comm::MPI.Comm, allocate_shared_float,
@@ -306,32 +336,7 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
 
     if rank == 0
         rhs_global_with_dups = rand(rng, n_total)
-        if any(d.periodic for d ∈ dimensions)
-            n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
-            rhs_global = fill(NaN, n)
-            counter = 0
-            n_tuple = Tuple(d.n for d ∈ dimensions)
-            global_cartinds = CartesianIndices(n_tuple)
-            for i_global ∈ 1:n_total
-                inds = global_cartinds[i_global]
-                if any(Tuple(inds) .== n_tuple)
-                    i_dup = 0
-                    for (i, n) ∈ zip(reverse(Tuple(inds)), reverse(n_tuple))
-                        if i == n
-                            i = 1
-                        end
-                        i_dup = n * i_dup + i - 1
-                    end
-                    i_dup += 1
-                    rhs_global_with_dups[i_global] = rhs_global[i_dup]
-                else
-                    counter += 1
-                    rhs_global[counter] = rhs_global_with_dups[i_global]
-                end
-            end
-        else
-            rhs_global = rhs_global_with_dups
-        end
+        rhs_global = remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
                                    for irank ∈ 0:distributed_comm_size-1]
@@ -353,31 +358,36 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
     return rhs_global, rhs_local
 end
 
-function gather_vector!(x_global::Union{AbstractVector,Nothing}, x_local::AbstractVector,
-                        dimensions::Vector{<:Dimension},
-                        distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
+function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
+                       distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
     distributed_comm_rank = MPI.Comm_rank(distributed_comm)
     distributed_comm_size = MPI.Comm_size(distributed_comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
 
     if distributed_comm_rank == 0 && shared_comm_rank == 0
+        n_total = prod(d.n for d ∈ dimensions)
+        x_global_with_dups = fill(NaN, n_total)
+
         local_block_irank_lists = [get_irank_list(irank, dimensions)
                                    for irank ∈ 0:distributed_comm_size-1]
         local_block_indices_list =
             get_rhs_indices_for_all_local_blocks(dimensions, local_block_irank_lists)
 
         # First add root's contributions to x_global.
-        x_global[local_block_indices_list[1]] .= x_local
+        @views x_global_with_dups[local_block_indices_list[1]] .= x_local
 
         # Collect contributions from all other ranks. Overlapping points are overwritten,
         # but this should be OK because the overlapping points should be identical on all
         # processes anyway.
         for rank ∈ 1:distributed_comm_size-1
             MPI.Recv!(x_local, distributed_comm; source=rank)
-            x_global[local_block_indices_list[rank+1]] .= x_local
+            @views x_global_with_dups[local_block_indices_list[rank+1]] .= x_local
         end
+
+        x_global = remove_duplicates_from_global_vector(x_global_with_dups, dimensions)
     elseif shared_comm_rank == 0
         MPI.Send(x_local, distributed_comm; dest=0)
+        x_global = nothing
     end
 
     return x_global

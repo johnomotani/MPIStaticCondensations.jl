@@ -25,11 +25,6 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     rhs_global, rhs_local =
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
-    if distributed_rank == 0 && shared_rank == 0
-        x_global = similar(rhs_global)
-    else
-        x_global = nothing
-    end
 
     Alu = mpi_static_condensation(dimensions; comm, distributed_comm, shared_comm,
                                   allocate_shared_float, allocate_shared_int, use_sparse,
@@ -39,8 +34,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
 
     @testset "solve" begin
         ldiv!(Alu, rhs_local)
-        x_global = gather_vector!(x_global, rhs_local, dimensions, distributed_comm,
-                                  shared_comm)
+        x_global = gather_vector(rhs_local, dimensions, distributed_comm, shared_comm)
         if distributed_rank == 0 && shared_rank == 0
             check_solution = global_matrix \ rhs_global
             @test isapprox(x_global, check_solution;
