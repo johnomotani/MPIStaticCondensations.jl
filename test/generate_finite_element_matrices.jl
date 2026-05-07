@@ -123,18 +123,18 @@ function get_sparse_indices_for_local_block(global_i, global_j, dimensions, iran
                          periodic=d.periodic, remove_boundaries=d.remove_boundaries)
         for (d, irank) ∈ zip(dimensions, irank_list)
     ]
-    global_cartinds = CartesianIndices(Tuple(d.n for d ∈ dimensions))
+    global_cartinds = CartesianIndices(Tuple(d.n for d ∈ local_dimensions))
     local_sparse_inds = Int64[]
     local_i = Int64[]
     local_j = Int64[]
     for (sparse_i, (i, j)) ∈ enumerate(zip(global_i, global_j))
         i_inds = global_cartinds[i]
         j_inds = global_cartinds[j]
-        if (is_global_index_in_block(i_inds, dimensions, global_cartinds)
-                && is_global_index_in_block(j_inds, dimensions, global_cartinds))
+        if (is_global_index_in_block(i_inds, local_dimensions, global_cartinds)
+                && is_global_index_in_block(j_inds, local_dimensions, global_cartinds))
             push!(local_sparse_inds, sparse_i)
-            push!(local_i, global_to_local(i_inds, dimensions))
-            push!(local_j, global_to_local(j_inds, dimensions))
+            push!(local_i, global_to_local(i_inds, local_dimensions))
+            push!(local_j, global_to_local(j_inds, local_dimensions))
         end
     end
     return local_sparse_inds, local_i, local_j
@@ -167,7 +167,7 @@ function get_rhs_indices_for_local_block(dimensions, irank_list)
         nelement_local = dim.nelement ÷ dim.nrank
         return irank*nelement_local*ngrid_minus_one+1:(irank+1)*nelement_local*ngrid_minus_one+1
     end
-    dim_ranges = Tuple(get_dim_range(d) for d in dimensions)
+    dim_ranges = Tuple(get_dim_range(d) for d in local_dimensions)
     local_inds = zeros(Int64, prod(length(r) for r ∈ dim_ranges))
     for (local_i, inds) ∈ enumerate(CartesianIndices(dim_ranges))
         flat_i = 0
