@@ -731,11 +731,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                     has_duplicate = true
                     pair_i = 0
                     for (this_idim, this_i) ∈ enumerate(Tuple(inds))
+                        n = dimensions[this_idim].periodic ? dimensions[this_idim].n - 1 : dimensions[this_idim].n
                         if this_idim == idim
                             # pair_i corresponds to the first index in this dimension.
-                            pair_i = pair_i * dimensions[this_idim].n
+                            pair_i = pair_i * n
                         else
-                            pair_i = pair_i * dimensions[this_idim].n + this_i - 1
+                            pair_i = pair_i * n + this_i - 1
                         end
                     end
                     pair_i += 1
