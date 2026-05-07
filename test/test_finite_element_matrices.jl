@@ -160,7 +160,22 @@ function test_finite_element_matrices()
     @testset "finite element matrices" begin
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
         comm_size = MPI.Comm_size(MPI.COMM_WORLD)
-        n_shared = 1
-        test_dimension_combinations([4], [3], 4, rank, comm_size, n_shared, 987)
+        n_shared_list = vcat(1, factor(Vector, comm_size))
+        @testset "n_shared=$n_shared" for n_shared ∈ [prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
+            @testset "1D" begin
+                test_dimension_combinations([1], [3], 1, rank, comm_size, n_shared, 1000)
+                test_dimension_combinations([2], [3], 2, rank, comm_size, n_shared, 1001)
+                test_dimension_combinations([2], [4], 2, rank, comm_size, n_shared, 1002)
+                test_dimension_combinations([2], [5], 2, rank, comm_size, n_shared, 1003)
+                test_dimension_combinations([3], [3], 3, rank, comm_size, n_shared, 1004)
+                test_dimension_combinations([4], [3], 4, rank, comm_size, n_shared, 1005)
+                test_dimension_combinations([5], [3], 5, rank, comm_size, n_shared, 1006)
+                test_dimension_combinations([6], [3], 6, rank, comm_size, n_shared, 1007)
+                test_dimension_combinations([7], [3], 5, rank, comm_size, n_shared, 1008)
+                test_dimension_combinations([8], [3], 8, rank, comm_size, n_shared, 1009)
+                test_dimension_combinations([16], [3], 16, rank, comm_size, n_shared, 1010)
+                test_dimension_combinations([32], [3], 32, rank, comm_size, n_shared, 1011)
+            end
+        end
     end
 end
