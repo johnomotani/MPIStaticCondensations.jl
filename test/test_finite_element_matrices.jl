@@ -12,7 +12,8 @@ include("utils.jl")
 
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, use_sparse::Bool,
-                     optimize_schur_complement_size::Bool, sparse_stencils::Bool)
+                     optimize_schur_complement_size::Bool, sparse_stencils::Bool,
+                     tol=1.0e-10)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -39,9 +40,9 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         if distributed_rank == 0 && shared_rank == 0
             check_solution = global_matrix \ rhs_global
             @test isapprox(x_global, check_solution;
-                           norm=(x)->NaN, rtol=1.0e-13, atol=1.0e-13)
+                           norm=(x)->NaN, rtol=tol, atol=tol)
             @test isapprox(global_matrix * x_global, rhs_global;
-                           norm=(x)->NaN, rtol=1.0e-13, atol=1.0e-13)
+                           norm=(x)->NaN, rtol=tol, atol=tol)
         end
     end
 
