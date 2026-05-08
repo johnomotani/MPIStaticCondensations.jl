@@ -445,7 +445,16 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                               has_upper_boundary=false, remove_boundaries=false)
     end
 
+    elements_per_group = (slice_dim.nelement + n_groups - 1) ÷ n_groups
+
     top_vector_slice_dim_n = slice_dim.n - (n_groups - 1)
+    if elements_per_group * (n_groups - 1) ≥ slice_dim.nelement && slice_remove_boundaries
+        # The last element does not actually contain any points, so the last 'boundary'
+        # point is actually the final grid point in slice_dim, which was already removed
+        # by slice_remove_boundaries, so we have removed one point to many in
+        # `top_vector_slice_dim_n`.
+        top_vector_slice_dim_n += 1
+    end
     global_top_vector_size =
         top_vector_slice_dim_n * prod(dimensions[i].n
                                       for i ∈ 1:length(dimensions) if i ≠ slice_i; init=1)
@@ -525,7 +534,6 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                               remove_boundaries=false)
     else
         ngrid = slice_dim.ngrid
-        elements_per_group = (slice_dim.nelement + n_groups - 1) ÷ n_groups
         procs_per_group = (shared_comm_size + n_groups - 1) ÷ n_groups
         group_rank = shared_comm_rank ÷ procs_per_group
         if group_rank == n_groups - 1
