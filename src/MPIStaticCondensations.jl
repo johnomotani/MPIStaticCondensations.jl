@@ -342,6 +342,27 @@ function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Inte
     return inds
 end
 
+function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
+                             slice_inds::Vector{<:Integer})
+    # When `slice_inds` is a Vector, not an OrdinalRange, cannot use CartesianIndices on
+    # it, so have to do more complicated loops.
+    dimensions = copy(dimensions)
+    result_ranges_left = Tuple(1:dimensions[i].n_local for i ∈ 1:dim_to_slice-1)
+    result_ranges_right = Tuple(1:dimensions[i].n_local for i ∈ dim_to_slice+1:length(dimensions))
+    inds = fill(eltype(slice_inds)(-1),
+                prod(length(r) for r ∈ result_ranges_left; init=1) * length(slice_inds) *
+                prod(length(r) for r ∈ result_ranges_right; init=1))
+    dim_sizes = [d.n_local for d ∈ dimensions]
+    local_flat_i = 0
+    for i_right ∈ CartesianIndices(result_ranges_right), i_slice ∈ slice_inds,
+            i_left ∈ CartesianIndices(result_ranges_left)
+        local_flat_i += 1
+        indices = CartesianIndex(i_left, i_slice, i_right)
+        inds[local_flat_i] = get_local_flattened_index(indices, dim_sizes)
+    end
+    return inds
+end
+
 function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{<:Integer})
     global_inds = similar(local_inds)
     cartinds = CartesianIndices(Tuple(d.n_local for d ∈ dimensions))
@@ -551,8 +572,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                                                   slice_dim.n - (n_groups - 1))
         end
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
-        local_top_vector_indices = get_ind_slice(level_dimensions, slice_i,
-                                                 all_top_vector_slice_inds)
+        local_top_vector_indices = get_local_ind_slice(level_dimensions, slice_i,
+                                                       all_top_vector_slice_inds)
         local_top_vector_a_block_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
@@ -612,6 +633,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         sort!(local_bottom_vector_indices)
         unique!(local_bottom_vector_indices)
         level_dimensions = new_dimensions
+    else
+        sort!(local_bottom_vector_indices)
     end
 
     if is_distributed_slice
