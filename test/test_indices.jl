@@ -1651,6 +1651,1141 @@ function test_split_indices_3d()
         end
     end
 
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, false, true]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:9, 22:24, 31:39)
+            @test li.local_bottom_vector_indices == vcat(1:9, 16:27)
+            @test li.top_vector_indices == 16:21
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == 10:15
+            @test li.local_top_vector_a_block_indices == 10:15
+            @test li.a_block_sub_selection_indices == 1:6
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:15, 22:24, 37:45)
+            @test li.local_bottom_vector_indices == vcat(1:9, 10:12, 19:27)
+            @test li.top_vector_indices == 25:30
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == 13:18
+            @test li.local_top_vector_a_block_indices == 13:18
+            @test li.a_block_sub_selection_indices == 1:6
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:15, 22:24, 31:45)
+            @test li.local_bottom_vector_indices == vcat(1:15, 22:24, 31:45)
+            @test li.top_vector_indices == vcat(16:21, 25:30)
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == vcat(16:21, 25:30)
+            @test li.local_top_vector_a_block_indices == 16:21
+            @test li.a_block_sub_selection_indices == 1:6
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:15, 22:24, 31:45)
+            @test li.local_bottom_vector_indices == vcat(1:15, 22:24, 31:45)
+            @test li.top_vector_indices == vcat(16:21, 25:30)
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == vcat(16:21, 25:30)
+            @test li.local_top_vector_a_block_indices == 25:30
+            @test li.a_block_sub_selection_indices == 1:6
+        end
+    end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, true, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 16:18, 22:24, 31:33, 37:39)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == vcat(4:6, 19:21, 34:36)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(3:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 13:15, 22:24, 28:30, 37:39, 43:45)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == vcat(10:15, 25:30, 40:45)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
+            @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
+            @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+        end
+    end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [false, true, true]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:9, 16:18, 22:39)
+            @test li.local_bottom_vector_indices == vcat(1:12, 16:27)
+            @test li.top_vector_indices == 19:21
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == 13:15
+            @test li.local_top_vector_a_block_indices == 13:15
+            @test li.a_block_sub_selection_indices == 1:3
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:15, 22:24, 28:30, 37:45)
+            @test li.local_bottom_vector_indices == vcat(1:12, 16:27)
+            @test li.top_vector_indices == 25:27
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == 13:15
+            @test li.local_top_vector_a_block_indices == 13:15
+            @test li.a_block_sub_selection_indices == 1:3
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:18, 22:24, 28:45)
+            @test li.local_bottom_vector_indices == vcat(1:18, 22:24, 28:45)
+            @test li.top_vector_indices == vcat(19:21, 25:27)
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == vcat(19:21, 25:27)
+            @test li.local_top_vector_a_block_indices == 19:21
+            @test li.a_block_sub_selection_indices == 1:3
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:18, 22:24, 28:45)
+            @test li.local_bottom_vector_indices == vcat(1:18, 22:24, 28:45)
+            @test li.top_vector_indices == vcat(19:21, 25:27)
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == vcat(19:21, 25:27)
+            @test li.local_top_vector_a_block_indices == 25:27
+            @test li.a_block_sub_selection_indices == 4:6
+        end
+    end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [true, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1, 3:4, 6:9, 16, 18:19, 21:24, 31, 33:34, 36:39)
+            @test li.local_bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:19, 21:22, 24:27)
+            @test li.top_vector_indices == [2, 5, 17, 20, 32, 35]
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == [2, 5, 11, 14, 20, 23]
+            @test li.local_top_vector_a_block_indices == [2, 5, 11, 14, 20, 23]
+            @test li.a_block_sub_selection_indices == 1:6
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:10, 12:13, 15, 22:25, 27:28, 30, 37:40, 42:43, 45)
+            @test li.local_bottom_vector_indices == vcat(1:4, 6:7, 9:13, 15:16, 18:22, 24:25, 27)
+            @test li.top_vector_indices == [11, 14, 26, 29, 41, 44]
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == [5, 8, 14, 17, 23, 26]
+            @test li.local_top_vector_a_block_indices == [5, 8, 14, 17, 23, 26]
+            @test li.a_block_sub_selection_indices == 1:6
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
+            @test li.local_bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
+            @test li.top_vector_indices == [2, 5, 11, 14, 17, 20, 23, 26, 29, 32, 35, 41, 44]
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
+            @test li.local_top_vector_a_block_indices == [2, 5, 17, 20, 32, 35]
+            @test li.a_block_sub_selection_indices == vcat(1:2, 5:6, 9:10)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
+            @test li.local_bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
+            @test li.top_vector_indices == [2, 5, 11, 14, 17, 20, 23, 26, 29, 32, 35, 41, 44]
+            @test li.global_top_vector_size == 12
+            @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
+            @test li.local_top_vector_a_block_indices == [11, 14, 26, 29, 41, 44]
+            @test li.a_block_sub_selection_indices == vcat(3:4, 8:9, 11:12)
+        end
+    end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [true, false, true]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:9, 16, 18:19, 21:24, 31:39)
+            @test li.local_bottom_vector_indices == vcat(1:10, 12:13, 15::27)
+            @test li.top_vector_indices == [17, 20]
+            @test li.global_top_vector_size == 4
+            @test li.local_top_vector_indices == [11, 14]
+            @test li.local_top_vector_a_block_indices == [11, 14]
+            @test li.a_block_sub_selection_indices == 1:2
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:15, 22:25, 27:28, 30, 37:45)
+            @test li.local_bottom_vector_indices == vcat(1:13, 15:16, 18:27)
+            @test li.top_vector_indices == [11, 14, 26, 29, 41, 44]
+            @test li.global_top_vector_size == 4
+            @test li.local_top_vector_indices == [14, 17]
+            @test li.local_top_vector_a_block_indices == [14, 17]
+            @test li.a_block_sub_selection_indices == 1:2
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:16, 18:19, 21:25, 27:28, 30:45)
+            @test li.local_bottom_vector_indices == vcat(1:16, 18:19, 21:25, 27:28, 30:45)
+            @test li.top_vector_indices == [17, 29, 26, 29]
+            @test li.global_top_vector_size == 4
+            @test li.local_top_vector_indices == [17, 20, 26, 29]
+            @test li.local_top_vector_a_block_indices == [17, 20]
+            @test li.a_block_sub_selection_indices == 1:2
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:16, 18:19, 21:25, 27:28, 30:45)
+            @test li.local_bottom_vector_indices == vcat(1:16, 18:19, 21:25, 27:28, 30:45)
+            @test li.top_vector_indices == [17, 29, 26, 29]
+            @test li.global_top_vector_size == 4
+            @test li.local_top_vector_indices == [17, 20, 26, 29]
+            @test li.local_top_vector_a_block_indices == [26, 29]
+            @test li.a_block_sub_selection_indices == 3:4
+        end
+    end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [true, true, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:4, 6:9, 16:19, 21:24, 31:34, 36:39)
+            @test li.local_bottom_vector_indices == vcat(1:4, 6:13, 15:22, 24:27)
+            @test li.top_vector_indices == [5, 20, 35]
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == [5, 14, 23]
+            @test li.local_top_vector_a_block_indices == [5, 14, 23]
+            @test li.a_block_sub_selection_indices == 1:3
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:10, 12:15, 22:25, 27:30, 37:40, 42:45)
+            @test li.local_bottom_vector_indices == vcat(1:4, 6:13, 15:22, 24:27)
+            @test li.top_vector_indices == [11, 26, 41]
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == [5, 14, 23]
+            @test li.local_top_vector_a_block_indices == [5, 14, 23]
+            @test li.a_block_sub_selection_indices == 1:3
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:4, 6:10, 12:19, 21:25, 27:34, 36:40, 42:45)
+            @test li.local_bottom_vector_indices == vcat(1:4, 6:10, 12:19, 21:25, 27:34, 36:40, 42:45)
+            @test li.top_vector_indices == [5, 11, 20, 26, 35, 41]
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == [5, 11, 20, 26, 35, 41]
+            @test li.local_top_vector_a_block_indices == [5, 20, 35]
+            @test li.a_block_sub_selection_indices == [1, 3, 5]
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:4, 6:10, 12:19, 21:25, 27:34, 36:40, 42:45)
+            @test li.local_bottom_vector_indices == vcat(1:4, 6:10, 12:19, 21:25, 27:34, 36:40, 42:45)
+            @test li.top_vector_indices == [5, 11, 20, 26, 35, 41]
+            @test li.global_top_vector_size == 6
+            @test li.local_top_vector_indices == [5, 11, 20, 26, 35, 41]
+            @test li.local_top_vector_a_block_indices == [11, 26, 41]
+            @test li.a_block_sub_selection_indices == [2, 4, 6]
+        end
+    end
+
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, false]
+    remove_boundaries_list = [true, true, true]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:9, 16:19, 21:24, 31:34, 36:39)
+            @test li.local_bottom_vector_indices == vcat(1:13, 15:27)
+            @test li.top_vector_indices == [20]
+            @test li.global_top_vector_size == 2
+            @test li.local_top_vector_indices == [14]
+            @test li.local_top_vector_a_block_indices == [14]
+            @test li.a_block_sub_selection_indices == 1:1
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:15, 22:25, 27:30, 37:45)
+            @test li.local_bottom_vector_indices == vcat(1:13, 15:27)
+            @test li.top_vector_indices == [26]
+            @test li.global_top_vector_size == 2
+            @test li.local_top_vector_indices == [14]
+            @test li.local_top_vector_a_block_indices == [14]
+            @test li.a_block_sub_selection_indices == 1:1
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:19, 21:25, 27:45)
+            @test li.local_bottom_vector_indices == vcat(1:19, 21:25, 27:45)
+            @test li.top_vector_indices == [20, 26]
+            @test li.global_top_vector_size == 2
+            @test li.local_top_vector_indices == [20, 26]
+            @test li.local_top_vector_a_block_indices == [20]
+            @test li.a_block_sub_selection_indices == 1:1
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:19, 21:25, 27:45)
+            @test li.local_bottom_vector_indices == vcat(1:19, 21:25, 27:45)
+            @test li.top_vector_indices == [20, 26]
+            @test li.global_top_vector_size == 2
+            @test li.local_top_vector_indices == [20, 26]
+            @test li.local_top_vector_a_block_indices == [26]
+            @test li.a_block_sub_selection_indices == 2:2
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 3rd dimension periodic, the global
+    # index division is (where columns are the right-most index, rows are the centre
+    # index, and indices within each cell are the left-most index):
+    # -------------------------
+    # | 1:3   | 16:18 | 1:3   |
+    # -------------------------
+    # | 4:6   | 19:21 | 4:6   |
+    # =========================
+    # ∥ 7:9   ∥ 22:24 ∥ 7:9   ∥
+    # =========================
+    # | 10:12 | 25:27 | 10:12 |
+    # -------------------------
+    # | 13:15 | 28:30 | 13:15 |
+    # -------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, false, true]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 7:9)
+            @test li.local_bottom_vector_indices == vcat(7:9, 16:18, 25:27)
+            @test li.top_vector_indices == vcat(1:6, 16:21, 1:6)
+            @test li.global_top_vector_size == 24
+            @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
+            @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
+            @test li.a_block_sub_selection_indices == 1:18
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 7:9)
+            @test li.local_bottom_vector_indices == vcat(1:3, 10:12, 19:21)
+            @test li.top_vector_indices == vcat(10:15, 25:30, 10:15)
+            @test li.global_top_vector_size == 24
+            @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
+            @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
+            @test li.a_block_sub_selection_indices == 1:18
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 7:9)
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.top_vector_indices == vcat(1:6, 10:21, 25:30, 1:6, 10:15)
+            @test li.global_top_vector_size == 24
+            @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+            @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
+            @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 22:24, 7:9)
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.top_vector_indices == vcat(1:6, 10:21, 25:30, 1:6, 10:15)
+            @test li.global_top_vector_size == 24
+            @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+            @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
+            @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 2nd dimension periodic, the global
+    # index division is (where columns are the right-most index, rows are the centre
+    # index, and indices within each cell are the left-most index):
+    # -------------------------
+    # | 1:3   | 16:18 | 31:33 |
+    # -------------------------
+    # | 4:6   | 19:21 | 34:36 |
+    # =========================
+    # ∥ 7:9   ∥ 22:24 ∥ 37:39 ∥
+    # =========================
+    # | 10:12 | 25:27 | 40:42 |
+    # -------------------------
+    # | 1:3   | 16:18 | 31:33 |
+    # -------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, true, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 16:18, 22:24, 31:33, 37:39)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == vcat(4:6, 19:21, 34:36)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(3:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:9, 1:3, 22:24, 16:18, 37:39, 31:33)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == vcat(10:15, 25:30, 40:45)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 1:3, 16:18, 22:24, 16:18, 31:33, 37:39, 31:33)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
+            @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 1:3, 16:18, 22:24, 16:18, 31:33, 37:39, 31:33)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
+            @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 2nd and 3rd dimensions periodic, the
+    # global index division is (where columns are the right-most index, rows are the
+    # centre index, and indices within each cell are the left-most index):
+    # -------------------------
+    # | 1:3   | 16:18 | 1:3   |
+    # -------------------------
+    # | 4:6   | 19:21 | 4:6   |
+    # =========================
+    # ∥ 7:9   ∥ 22:24 ∥ 7:9   ∥
+    # =========================
+    # | 10:12 | 25:27 | 10:12 |
+    # -------------------------
+    # | 1:3   | 16:18 | 1:3   |
+    # -------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [false, true, true]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:9, 16:18, 22:24, 1:9)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == vcat(4:6, 19:21, 4:6)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:25)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:25)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(7:12, 1:3, 22:24, 16:18, 7:12, 1:3)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == vcat(10:12, 25:27, 10:12)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:25)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:25)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 1:3, 16:18, 22:24, 16:18, 1:3, 7:9, 1:3)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 4:6, 10:12)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(1:3, 7:9, 1:3, 16:18, 22:24, 16:18, 1:3, 7:9, 1:3)
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 4:6, 10:12)
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 16:18, 25:27)
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
+            @test li.a_block_sub_selection_indices == 10:18
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 1st dimension periodic, the global
+    # index division is (where columns are the right-most index, rows are the centre
+    # index, and indices within each cell are the left-most index):
+    # ----------------------------------
+    # | 1,2,1    | 16,17,16 | 31,32,31 |
+    # ----------------------------------
+    # | 4,5,4    | 19,20,19 | 34,35,34 |
+    # ==================================
+    # ∥ 7,8,7    ∥ 22,23,22 ∥ 37,38,37 ∥
+    # ==================================
+    # | 10,11,10 | 25,26,25 | 40,41,40 |
+    # ----------------------------------
+    # | 13,14,13 | 28,29,28 | 43,44,43 |
+    # ----------------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [true, false, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 37, 38, 37]
+            @test li.local_bottom_vector_indices == vcat(7:9, 16:18, 25:27)
+            @test li.top_vector_indices == [1, 2, 1, 4, 5, 4, 16, 17, 16, 19, 20, 19, 31, 32, 31, 34, 35, 34]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
+            @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
+            @test li.a_block_sub_selection_indices == 1:18
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 37, 38, 37]
+            @test li.local_bottom_vector_indices == vcat(1:3, 10:12, 19:21)
+            @test li.top_vector_indices == [10, 11, 10, 13, 14, 13, 25, 26, 25, 28, 29, 28, 40, 41, 40, 43, 44, 43]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
+            @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
+            @test li.a_block_sub_selection_indices == 1:18
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 37, 38, 37]
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.top_vector_indices == [1, 2, 1, 4, 5, 4, 10, 11, 10, 13, 14, 13, 16, 17, 16, 19, 20, 19, 25, 26, 25, 28, 29, 28, 31, 32, 31, 34, 35, 34, 40, 41, 40, 43, 44, 43]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+            @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
+            @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 37, 38, 37]
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.top_vector_indices == [1, 2, 1, 4, 5, 4, 10, 11, 10, 13, 14, 13, 16, 17, 16, 19, 20, 19, 25, 26, 25, 28, 29, 28, 31, 32, 31, 34, 35, 34, 40, 41, 40, 43, 44, 43]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+            @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
+            @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 1st and 3rd dimensions periodic, the
+    # global index division is (where columns are the right-most index, rows are the
+    # centre index, and indices within each cell are the left-most index):
+    # ----------------------------------
+    # | 1,2,1    | 16,17,16 | 1,2,1    |
+    # ----------------------------------
+    # | 4,5,4    | 19,20,19 | 4,5,4    |
+    # ==================================
+    # ∥ 7,8,7    ∥ 22,23,22 ∥ 7,8,7    ∥
+    # ==================================
+    # | 10,11,10 | 25,26,25 | 10,11,10 |
+    # ----------------------------------
+    # | 13,14,13 | 28,29,28 | 13,14,13 |
+    # ----------------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [true, false, true]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 7, 8, 7]
+            @test li.local_bottom_vector_indices == vcat(7:9, 16:18, 25:27)
+            @test li.top_vector_indices == [1, 2, 1, 4, 5, 4, 16, 17, 16, 19, 20, 19, 1, 2, 1, 4, 5, 4]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
+            @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
+            @test li.a_block_sub_selection_indices == 1:18
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 7, 8, 7]
+            @test li.local_bottom_vector_indices == vcat(1:3, 10:12, 19:21)
+            @test li.top_vector_indices == [10, 11, 10, 13, 14, 13, 25, 26, 25, 28, 29, 28, 10, 11, 10, 13, 14, 13]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
+            @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
+            @test li.a_block_sub_selection_indices == 1:18
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 7, 8, 7]
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.top_vector_indices == [1, 2, 1, 4, 5, 4, 10, 11, 10, 13, 14, 13, 16, 17, 16, 19, 20, 19, 25, 26, 25, 28, 29, 28, 1, 2, 1, 4, 5, 4, 10, 11, 10, 13, 14, 13]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+            @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
+            @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 22, 23, 22, 7, 8, 7]
+            @test li.local_bottom_vector_indices == vcat(7:9, 22:24, 37:39)
+            @test li.top_vector_indices == [1, 2, 1, 4, 5, 4, 10, 11, 10, 13, 14, 13, 16, 17, 16, 19, 20, 19, 25, 26, 25, 28, 29, 28, 1, 2, 1, 4, 5, 4, 10, 11, 10, 13, 14, 13]
+            @test li.global_top_vector_size == 36
+            @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
+            @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
+            @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 1st and 2nd dimensions periodic, the
+    # global index division is (where columns are the right-most index, rows are the
+    # centre index, and indices within each cell are the left-most index):
+    # ----------------------------------
+    # | 1,2,1    | 16,17,16 | 31,32,31 |
+    # ----------------------------------
+    # | 4,5,4    | 19,20,19 | 34,35,34 |
+    # ==================================
+    # ∥ 7,8,7    ∥ 22,23,22 ∥ 37,38,37 ∥
+    # ==================================
+    # | 10,11,10 | 25,26,25 | 40,41,40 |
+    # ----------------------------------
+    # | 1,2,1    | 16,17,16 | 31,32,31 |
+    # ----------------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [true, true, false]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [1, 2, 1, 7, 8, 7, 16, 17, 16, 22, 23, 22, 31, 32, 31, 37, 38, 37]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == [4, 5, 4, 19, 20, 19, 34, 35, 34]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(3:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 1, 2, 1, 22, 23, 22, 16, 17, 16, 37, 38, 27, 31, 32, 31]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == [10, 11, 10, 25, 26, 25, 40, 41, 40]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [1, 2, 1, 7, 8, 7, 1, 2, 1, 16, 17, 16, 22, 23, 22, 16, 17, 16, 31, 32, 31, 37, 38, 37, 31, 32, 31]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == [4, 5, 4, 10, 11, 10, 19, 20, 19, 25, 26, 25, 34, 35, 34, 40, 41, 40]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
+            @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [1, 2, 1, 7, 8, 7, 1, 2, 1, 16, 17, 16, 22, 23, 22, 16, 17, 16, 31, 32, 31, 37, 38, 37, 31, 32, 31]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == [4, 5, 4, 10, 11, 10, 19, 20, 19, 25, 26, 25, 34, 35, 34, 40, 41, 40]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
+            @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+        end
+    end
+
+    # With the 2nd dimension divided in two and the 1st, 2nd, and 3rd dimensions periodic,
+    # the global index division is (where columns are the right-most index, rows are the
+    # centre index, and indices within each cell are the left-most index):
+    # ----------------------------------
+    # | 1,2,1    | 16,17,16 | 1,2,1    |
+    # ----------------------------------
+    # | 4,5,4    | 19,20,19 | 4,5,4    |
+    # ==================================
+    # ∥ 7,8,7    ∥ 22,23,22 ∥ 7,8,7    ∥
+    # ==================================
+    # | 10,11,10 | 25,26,25 | 10,11,10 |
+    # ----------------------------------
+    # | 1,2,1    | 16,17,16 | 1,2,1    |
+    # ----------------------------------
+    nelement_list = [1, 2, 1]
+    periodic_list = [true, true, true]
+    remove_boundaries_list = [false, false, false]
+
+    n_groups = 2
+    nrank_list = [1, 2, 1]
+    n_shared = 1
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [1, 2, 1, 7, 8, 7, 16, 17, 16, 22, 23, 22, 1, 2, 1, 7, 8, 7]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == [4, 5, 4, 19, 20, 19, 4, 5, 4]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(3:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+
+        irank = 1
+        irank_list = [0, 1, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [7, 8, 7, 1, 2, 1, 22, 23, 22, 16, 17, 16, 7, 8, 7, 1, 2, 1]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
+            @test li.top_vector_indices == [10, 11, 10, 25, 26, 25, 10, 11, 10]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
+            @test li.a_block_sub_selection_indices == 1:9
+        end
+    end
+
+    n_groups = 2
+    nrank_list = [1, 1, 1]
+    n_shared = 2
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [1, 2, 1, 7, 8, 7, 1, 2, 1, 16, 17, 16, 22, 23, 22, 16, 17, 16, 1, 2, 1, 7, 8, 7, 1, 2, 1]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == [4, 5, 4, 10, 11, 10, 19, 20, 19, 25, 26, 25, 4, 5, 4, 10, 11, 10]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
+            @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+        end
+
+        irank = 1
+        irank_list = [0, 0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == [1, 2, 1, 7, 8, 7, 1, 2, 1, 16, 17, 16, 22, 23, 22, 16, 17, 16, 1, 2, 1, 7, 8, 7, 1, 2, 1]
+            @test li.local_bottom_vector_indices == vcat(1:3, 7:9, 13:18, 22:24, 28:33, 37:39, 43:45)
+            @test li.top_vector_indices == [4, 5, 4, 10, 11, 10, 19, 20, 19, 25, 26, 25, 4, 5, 4, 10, 11, 10]
+            @test li.global_top_vector_size == 18
+            @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
+            @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
+            @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+        end
+    end
+
     # With the 3rd dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
