@@ -114,10 +114,11 @@ end
 Base.size(Alu::MPIStaticCondensationSerialDense) = size(Alu.local_block_solver)
 Base.size(Alu::MPIStaticCondensationSerialDense, d::Integer) = size(Alu)[d]
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangetab,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
+    local_top_vector_a_block_indices::Trangetab
     local_bottom_vector_indices::Trangeb
     timer::Ttimer
 end
@@ -340,22 +341,6 @@ function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Inte
     return inds
 end
 
-function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
-                             slice_inds::Vector{<:Integer})
-    dimensions = copy(dimensions)
-    dim_sizes = [d.n_local for d ∈ dimensions]
-    result_ranges_left = Tuple(1:dim_sizes[i] for i ∈ 1:dim_to_slice-1)
-    result_ranges_right = Tuple(1:dim_sizes[i] for i ∈ dim_to_slice+1:length(dimensions))
-    inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
-    local_flat_i = 0
-    for i_right ∈ CartesianIndices(result_ranges_right), i_slice ∈ slice_inds,
-            i_left ∈ CartesianIndices(result_ranges_left)
-        local_flat_i += 1
-        indices = CartesianIndex(i_left, i_slice, i_right)
-        inds[local_flat_i] = get_local_flattened_index(indices, dim_sizes)
-    end
-    return inds
-end
 
 struct FakeComm
     rank::Int64
@@ -370,6 +355,7 @@ MPI.Comm_split(comm::FakeComm, color, key) = comm
     global_top_vector_size::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
+    local_top_vector_a_block_indices::Vector{Ti}
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     level_comm::Tcomm
@@ -527,6 +513,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         local_top_vector_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_top_vector_slice_ind:last_top_vector_slice_ind)
+        local_top_vector_a_block_indices = local_top_vector_indices
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=this_group_nrank, irank=this_group_irank,
                               periodic=slice_dim.periodic,
@@ -599,12 +586,13 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             last_top_vector_block_slice_ind = min((group_rank + 1) * slice_step + offset,
                                                   slice_dim.n - (n_groups - 1))
         end
-        local_top_vector_indices =
+        local_top_vector_a_block_indices =
             get_local_ind_slice(level_dimensions, slice_i,
                                 first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
         top_vector_indices = get_ind_slice(level_dimensions, slice_i,
                                            all_top_vector_slice_inds)
+        local_top_vector_indices = top_vector_indices
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=slice_dim.nrank, irank=slice_irank, periodic=false,
                               has_lower_boundary=has_lower_boundary,
@@ -614,9 +602,9 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     level_dimensions[slice_i] = slice_dim
 
     return LevelInfo(; level_dimensions, global_top_vector_size, top_vector_indices,
-                     local_top_vector_indices, bottom_vector_indices,
-                     local_bottom_vector_indices, level_comm, level_distributed_comm,
-                     level_shared_comm),
+                     local_top_vector_indices, local_top_vector_a_block_indices,
+                     bottom_vector_indices, local_bottom_vector_indices, level_comm,
+                     level_distributed_comm, level_shared_comm),
            level_dimensions, next_comm, next_distributed_comm, next_shared_comm
 end
 
@@ -823,6 +811,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             MPIStaticCondensationParallel(length(level_info.top_vector_indices),
                                           this_level_sc,
                                           level_info.local_top_vector_indices,
+                                          level_info.local_top_vector_a_block_indices,
                                           level_info.local_bottom_vector_indices, timer)
     end
 
@@ -838,23 +827,27 @@ end
 function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    @views ldiv!(x, solver, u)
+    block_indices = block_diagonal_solver.block_indices
+    @views ldiv!(x[block_indices], solver, u[block_indices])
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    @views ldiv!(solver, u)
+    block_indices = block_diagonal_solver.block_indices
+    @views ldiv!(solver, u[block_indices])
     return nothing
 end
 function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractMatrix{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    @views ldiv!(x, solver, u)
+    block_indices = block_diagonal_solver.block_indices
+    @views ldiv!(x[block_indices,:], solver, u[block_indices,:])
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    @views ldiv!(solver, u)
+    block_indices = block_diagonal_solver.block_indices
+    @views ldiv!(solver, u[block_indices,:])
     return nothing
 end
 
@@ -1041,8 +1034,9 @@ end
 function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
     @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
         local_top_vector_indices = solver.local_top_vector_indices
+        local_top_vector_a_block_indices = solver.local_top_vector_a_block_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
-        a = @view A[local_top_vector_indices,local_top_vector_indices]
+        a = @view A[local_top_vector_a_block_indices,local_top_vector_a_block_indices]
         b = @view A[local_top_vector_indices,local_bottom_vector_indices]
         c = @view A[local_bottom_vector_indices,local_top_vector_indices]
         d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
