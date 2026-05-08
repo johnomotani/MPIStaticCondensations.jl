@@ -1721,7 +1721,7 @@ function test_split_indices_3d()
             @test li.global_top_vector_size == 12
             @test li.local_top_vector_indices == vcat(16:21, 25:30)
             @test li.local_top_vector_a_block_indices == 25:30
-            @test li.a_block_sub_selection_indices == 1:6
+            @test li.a_block_sub_selection_indices == 7:12
         end
     end
 
@@ -1744,7 +1744,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(4:6, 19:21, 34:36)
             @test li.global_top_vector_size == 18
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
-            @test li.local_top_vector_a_block_indices == vcat(3:6, 13:15, 22:24)
+            @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
         end
 
@@ -1756,7 +1756,7 @@ function test_split_indices_3d()
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(7:9, 13:15, 22:24, 28:30, 37:39, 43:45)
             @test li.local_bottom_vector_indices == vcat(1:3, 7:12, 16:21, 25:27)
-            @test li.top_vector_indices == vcat(10:15, 25:30, 40:45)
+            @test li.top_vector_indices == vcat(10:12, 25:27, 40:42)
             @test li.global_top_vector_size == 18
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
@@ -1813,7 +1813,7 @@ function test_split_indices_3d()
             li = get_level_info(ngrid, nelement_list, periodic_list,
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
-            @test li.bottom_vector_indices == vcat(1:9, 16:18, 22:39)
+            @test li.bottom_vector_indices == vcat(1:9, 16:18, 22:24, 31:39)
             @test li.local_bottom_vector_indices == vcat(1:12, 16:27)
             @test li.top_vector_indices == 19:21
             @test li.global_top_vector_size == 6
@@ -1924,7 +1924,7 @@ function test_split_indices_3d()
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
             @test li.local_bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
-            @test li.top_vector_indices == [2, 5, 11, 14, 17, 20, 23, 26, 29, 32, 35, 41, 44]
+            @test li.top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.global_top_vector_size == 12
             @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.local_top_vector_a_block_indices == [2, 5, 17, 20, 32, 35]
@@ -1939,11 +1939,11 @@ function test_split_indices_3d()
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
             @test li.local_bottom_vector_indices == vcat(1, 3:4, 6:10, 12:13, 15:16, 18:19, 21:25, 27:28, 30:31, 33:34, 36:40, 42:43, 45)
-            @test li.top_vector_indices == [2, 5, 11, 14, 17, 20, 23, 26, 29, 32, 35, 41, 44]
+            @test li.top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.global_top_vector_size == 12
             @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.local_top_vector_a_block_indices == [11, 14, 26, 29, 41, 44]
-            @test li.a_block_sub_selection_indices == vcat(3:4, 8:9, 11:12)
+            @test li.a_block_sub_selection_indices == vcat(3:4, 7:8, 11:12)
         end
     end
 
@@ -1962,7 +1962,7 @@ function test_split_indices_3d()
                                 remove_boundaries_list, nrank_list, irank_list, n_shared,
                                 n_groups, irank)
             @test li.bottom_vector_indices == vcat(1:9, 16, 18:19, 21:24, 31:39)
-            @test li.local_bottom_vector_indices == vcat(1:10, 12:13, 15::27)
+            @test li.local_bottom_vector_indices == vcat(1:10, 12:13, 15:27)
             @test li.top_vector_indices == [17, 20]
             @test li.global_top_vector_size == 4
             @test li.local_top_vector_indices == [11, 14]
