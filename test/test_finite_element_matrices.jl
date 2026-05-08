@@ -108,8 +108,8 @@ end
 
 function get_iranks(nrank_list, rank)
     irank_list = similar(nrank_list)
-    for (i, nrank) ∈ reverse(collect(enumerate(nrank_list)))
-        this_irank, rank = divrem(rank, nrank)
+    for (i, nrank) ∈ enumerate(nrank_list)
+        rank, this_irank = divrem(rank, nrank)
         irank_list[i] = this_irank
     end
     return irank_list

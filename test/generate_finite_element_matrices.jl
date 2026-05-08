@@ -227,7 +227,9 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                             shared_comm::MPI.Comm, allocate_shared_float,
                                             rng, sparse_stencils::Bool)
     rank = MPI.Comm_rank(comm)
-    distributed_comm_size = MPI.Comm_size(distributed_comm)
+    comm_size = MPI.Comm_size(comm)
+    shared_comm_size = MPI.Comm_size(shared_comm)
+    distributed_comm_size = comm_size ÷ shared_comm_size
     shared_comm_rank = MPI.Comm_rank(shared_comm)
 
     local_n = prod(d.n_local for d ∈ dimensions)
@@ -330,7 +332,9 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
                                          shared_comm::MPI.Comm, allocate_shared_float,
                                          rng)
     rank = MPI.Comm_rank(comm)
-    distributed_comm_size = MPI.Comm_size(distributed_comm)
+    comm_size = MPI.Comm_size(comm)
+    shared_comm_size = MPI.Comm_size(shared_comm)
+    distributed_comm_size = comm_size ÷ shared_comm_size
     shared_comm_rank = MPI.Comm_rank(shared_comm)
     n_total = prod(d.n for d ∈ dimensions)
     n_local = prod(d.n_local for d ∈ dimensions)
