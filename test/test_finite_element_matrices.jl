@@ -36,7 +36,8 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
 
     @testset "solve" begin
         ldiv!(Alu, rhs_local)
-        x_global = gather_vector(rhs_local, dimensions, distributed_comm, shared_comm)
+        x_global = gather_vector(rhs_local, dimensions, comm, distributed_comm,
+                                 shared_comm)
         if distributed_rank == 0 && shared_rank == 0
             check_solution = global_matrix \ rhs_global
             @test isapprox(x_global, check_solution;

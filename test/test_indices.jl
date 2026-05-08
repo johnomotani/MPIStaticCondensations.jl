@@ -54,6 +54,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 1:3
             @test li.local_top_vector_indices == 1:3
             @test li.local_top_vector_a_block_indices == 1:3
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -66,6 +67,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 3:4
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 2
@@ -78,6 +80,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:7
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 3
@@ -90,6 +93,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 7:9
             @test li.local_top_vector_indices == 1:3
             @test li.local_top_vector_a_block_indices == 1:3
+            @test li.a_block_sub_selection_indices == 1:3
         end
     end
 
@@ -107,6 +111,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 1:4
             @test li.local_top_vector_indices == 1:4
             @test li.local_top_vector_a_block_indices == 1:4
+            @test li.a_block_sub_selection_indices == 1:4
         end
 
         irank = 1
@@ -119,6 +124,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 1:4
             @test li.local_top_vector_indices == 1:4
             @test li.local_top_vector_a_block_indices == 1:4
+            @test li.a_block_sub_selection_indices == 1:4
         end
 
         irank = 2
@@ -131,6 +137,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:9
             @test li.local_top_vector_indices == 2:5
             @test li.local_top_vector_a_block_indices == 2:5
+            @test li.a_block_sub_selection_indices == 1:4
         end
 
         irank = 3
@@ -143,6 +150,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:9
             @test li.local_top_vector_indices == 2:5
             @test li.local_top_vector_a_block_indices == 2:5
+            @test li.a_block_sub_selection_indices == 1:4
         end
     end
 
@@ -160,6 +168,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 1:4
+            @test li.a_block_sub_selection_indices == 1:4
         end
 
         irank = 1
@@ -172,6 +181,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 1:4
+            @test li.a_block_sub_selection_indices == 1:4
         end
 
         irank = 2
@@ -184,6 +194,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 6:9
+            @test li.a_block_sub_selection_indices == 5:8
         end
 
         irank = 3
@@ -196,6 +207,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 6:9
+            @test li.a_block_sub_selection_indices == 5:8
         end
     end
 
@@ -217,6 +229,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 1:2
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 1
@@ -229,6 +242,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 4:4
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 2
@@ -241,6 +255,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:6
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 3
@@ -253,6 +268,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 8:9
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
     end
 
@@ -270,6 +286,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 1
@@ -282,6 +299,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 4:4
+            @test li.a_block_sub_selection_indices == 3:3
         end
 
         irank = 2
@@ -294,6 +312,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 6:6
+            @test li.a_block_sub_selection_indices == 4:4
         end
 
         irank = 3
@@ -306,6 +325,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 8:9
+            @test li.a_block_sub_selection_indices == 5:6
         end
     end
 
@@ -327,6 +347,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:4
+            @test li.a_block_sub_selection_indices == 1:4
         end
 
         irank = 1
@@ -339,6 +360,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 5:7
         end
 
         irank = 2
@@ -351,6 +373,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
         end
     end
 
@@ -376,6 +399,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:3
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 1
@@ -388,6 +412,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 3:4
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 2
@@ -400,6 +425,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:7
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 3
@@ -412,6 +438,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 7:8
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
     end
 
@@ -429,6 +456,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:4
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -441,6 +469,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:4
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 2
@@ -453,6 +482,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:8
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 3
@@ -465,6 +495,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:8
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
     end
 
@@ -482,6 +513,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -494,6 +526,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 2
@@ -506,6 +539,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
 
         irank = 3
@@ -518,6 +552,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
     end
 
@@ -539,6 +574,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:2
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 1
@@ -551,6 +587,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 4:4
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 2
@@ -563,6 +600,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:6
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 3
@@ -575,6 +613,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 8:8
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
     end
 
@@ -592,6 +631,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 1
@@ -604,6 +644,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 4:4
+            @test li.a_block_sub_selection_indices == 2:2
         end
 
         irank = 2
@@ -616,6 +657,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 6:6
+            @test li.a_block_sub_selection_indices == 3:3
         end
 
         irank = 3
@@ -628,6 +670,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 8:8
+            @test li.a_block_sub_selection_indices == 4:4
         end
     end
 
@@ -649,6 +692,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -661,6 +705,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
 
         irank = 2
@@ -673,6 +718,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
         end
     end
 
@@ -698,6 +744,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:3
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 1
@@ -710,6 +757,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 3:4
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 2
@@ -722,6 +770,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:7
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 3
@@ -734,6 +783,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 7:8
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
     end
 
@@ -751,6 +801,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:4
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -763,6 +814,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:4
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 2
@@ -775,6 +827,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:8
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 3
@@ -787,6 +840,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:8
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
     end
 
@@ -804,6 +858,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -816,6 +871,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 2
@@ -828,6 +884,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
 
         irank = 3
@@ -840,6 +897,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
     end
 
@@ -861,6 +919,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:2
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 1
@@ -873,6 +932,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 4:4
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 2
@@ -885,6 +945,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:6
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 3
@@ -897,6 +958,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 8:8
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
     end
 
@@ -914,6 +976,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 1
@@ -926,6 +989,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 4:4
+            @test li.a_block_sub_selection_indices == 2:2
         end
 
         irank = 2
@@ -938,6 +1002,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 6:6
+            @test li.a_block_sub_selection_indices == 3:3
         end
 
         irank = 3
@@ -950,6 +1015,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 8:8
+            @test li.a_block_sub_selection_indices == 4:4
         end
     end
 
@@ -971,6 +1037,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -983,6 +1050,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
 
         irank = 2
@@ -995,6 +1063,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
         end
     end
 
@@ -1020,6 +1089,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:3
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 1
@@ -1032,6 +1102,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 3:4
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 2
@@ -1044,6 +1115,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:7
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
+            @test li.a_block_sub_selection_indices == 1:2
         end
 
         irank = 3
@@ -1056,6 +1128,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 7:8
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
+            @test li.a_block_sub_selection_indices == 1:2
         end
     end
 
@@ -1073,6 +1146,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:4
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -1085,6 +1159,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:4
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 2
@@ -1097,6 +1172,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:8
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 3
@@ -1109,6 +1185,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:8
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
     end
 
@@ -1126,6 +1203,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -1138,6 +1216,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 2
@@ -1150,6 +1229,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
 
         irank = 3
@@ -1162,6 +1242,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
     end
 
@@ -1183,6 +1264,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 2:2
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 1
@@ -1195,6 +1277,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 4:4
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 2
@@ -1207,6 +1290,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 6:6
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 3
@@ -1219,6 +1303,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == 8:8
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
     end
 
@@ -1236,6 +1321,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 2:2
+            @test li.a_block_sub_selection_indices == 1:1
         end
 
         irank = 1
@@ -1248,6 +1334,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 4:4
+            @test li.a_block_sub_selection_indices == 2:2
         end
 
         irank = 2
@@ -1260,6 +1347,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 6:6
+            @test li.a_block_sub_selection_indices == 3:3
         end
 
         irank = 3
@@ -1272,6 +1360,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 8:8
+            @test li.a_block_sub_selection_indices == 4:4
         end
     end
 
@@ -1293,6 +1382,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
+            @test li.a_block_sub_selection_indices == 1:3
         end
 
         irank = 1
@@ -1305,6 +1395,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
+            @test li.a_block_sub_selection_indices == 4:6
         end
 
         irank = 2
@@ -1317,6 +1408,7 @@ function test_split_indices_1d()
             @test li.top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
         end
     end
 
@@ -1355,6 +1447,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == 1:18
             @test li.local_top_vector_indices == 1:18
             @test li.local_top_vector_a_block_indices == 1:18
+            @test li.a_block_sub_selection_indices == 1:18
         end
 
         irank = 1
@@ -1368,6 +1461,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == 28:45
             @test li.local_top_vector_indices == 10:27
             @test li.local_top_vector_a_block_indices == 10:27
+            @test li.a_block_sub_selection_indices == 1:18
         end
     end
 
@@ -1386,6 +1480,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == [(1:18)...,(28:45)...]
             @test li.local_top_vector_indices == [(1:18)...,(28:45)...]
             @test li.local_top_vector_a_block_indices == 1:18
+            @test li.a_block_sub_selection_indices == 1:18
         end
 
         irank = 1
@@ -1399,6 +1494,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == [(1:18)...,(28:45)...]
             @test li.local_top_vector_indices == [(1:18)...,(28:45)...]
             @test li.local_top_vector_a_block_indices == 28:45
+            @test li.a_block_sub_selection_indices == 19:36
         end
     end
 
@@ -1435,6 +1531,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:6, 16:21, 31:36)
             @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
+            @test li.a_block_sub_selection_indices == 1:18
         end
 
         irank = 1
@@ -1448,6 +1545,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(10:15, 25:30, 40:45)
             @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
             @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
+            @test li.a_block_sub_selection_indices == 1:18
         end
     end
 
@@ -1466,6 +1564,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
+            @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
         end
 
         irank = 1
@@ -1479,6 +1578,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
+            @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
         end
     end
 
@@ -1511,6 +1611,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:2, 6:7, 11:12, 16:17, 21:22, 26:27, 31:32, 36:37, 41:42)
             @test li.local_top_vector_indices == vcat(1:2, 4:5, 7:8, 10:11, 13:14, 16:17, 19:20, 22:23, 25:26)
             @test li.local_top_vector_a_block_indices == vcat(1:2, 4:5, 7:8, 10:11, 13:14, 16:17, 19:20, 22:23, 25:26)
+            @test li.a_block_sub_selection_indices == 1:18
         end
 
         irank = 1
@@ -1524,6 +1625,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(4:5, 9:10, 14:15, 19:20, 24:25, 29:30, 34:35, 39:40, 44:45)
             @test li.local_top_vector_indices == vcat(2:3, 5:6, 8:9, 11:12, 14:15, 17:18, 20:21, 23:24, 26:27)
             @test li.local_top_vector_a_block_indices == vcat(2:3, 5:6, 8:9, 11:12, 14:15, 17:18, 20:21, 23:24, 26:27)
+            @test li.a_block_sub_selection_indices == 1:18
         end
     end
 
@@ -1542,6 +1644,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:2, 4:7, 9:12, 14:17, 19:22, 24:27, 29:32, 34:37, 39:42, 44:45)
             @test li.local_top_vector_indices == vcat(1:2, 4:7, 9:12, 14:17, 19:22, 24:27, 29:32, 34:37, 39:42, 44:45)
             @test li.local_top_vector_a_block_indices == vcat(1:2, 6:7, 11:12, 16:17, 21:22, 26:27, 31:32, 36:37, 41:42)
+            @test li.a_block_sub_selection_indices == vcat(1:2, 5:6, 9:10, 13:14, 17:18, 21:22, 25:26, 29:30, 33:34)
         end
 
         irank = 1
@@ -1555,6 +1658,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:2, 4:7, 9:12, 14:17, 19:22, 24:27, 29:32, 34:37, 39:42, 44:45)
             @test li.local_top_vector_indices == vcat(1:2, 4:7, 9:12, 14:17, 19:22, 24:27, 29:32, 34:37, 39:42, 44:45)
             @test li.local_top_vector_a_block_indices == vcat(4:5, 9:10, 14:15, 19:20, 24:25, 29:30, 34:35, 39:40, 44:45)
+            @test li.a_block_sub_selection_indices == vcat(3:4, 7:8, 11:12, 15:16, 19:20, 23:24, 27:28, 31:32, 35:36)
         end
     end
 
@@ -1591,6 +1695,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:3, 6:8, 11:13, 26:28, 31:33, 36:38, 51:53, 56:58, 61:63, 76:78, 81:83, 86:88)
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 1
@@ -1604,6 +1709,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(3:5, 8:10, 13:15, 28:30, 33:35, 38:40, 53:55, 58:60, 63:65, 78:80, 83:85, 88:90)
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 2
@@ -1617,6 +1723,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(11:13, 16:18, 21:23, 36:38, 41:43, 46:48, 61:63, 66:68, 71:73, 86:88, 91:93, 96:98)
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 3
@@ -1630,6 +1737,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(13:15, 18:20, 23:25, 38:40, 43:45, 48:50, 63:65, 68:70, 73:75, 88:90, 93:95, 98:100)
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 4
@@ -1643,6 +1751,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(126:128, 131:133, 136:138, 151:153, 156:158, 161:163, 176:178, 181:183, 186:188, 201:203, 206:208, 211:213)
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 5
@@ -1656,6 +1765,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(128:130, 133:135, 138:140, 153:155, 158:160, 163:165, 178:180, 183:185, 188:190, 203:205, 208:210, 213:215)
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 6
@@ -1669,6 +1779,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(136:138, 141:143, 146:148, 161:163, 166:168, 171:173, 186:188, 191:193, 196:198, 211:213, 216:218, 221:223)
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 7
@@ -1682,6 +1793,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(138:140, 143:145, 148:150, 163:165, 168:170, 173:175, 188:190, 193:195, 198:200, 213:215, 218:220, 223:225)
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
+            @test li.a_block_sub_selection_indices == 1:36
         end
     end
 
@@ -1726,6 +1838,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:3, 6:8, 11:13, 16:18, 46:48, 51:53, 56:58, 61:63, 91:93, 96:98, 101:103, 106:108)
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 1
@@ -1739,6 +1852,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(3:5, 8:10, 13:15, 18:20, 48:50, 53:55, 58:60, 63:65, 93:95, 98:100, 103:105, 108:110)
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 2
@@ -1752,6 +1866,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(26:28, 31:33, 36:38, 41:43, 71:73, 76:78, 81:83, 86:88, 116:118, 121:123, 126:128, 131:133)
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 3
@@ -1765,6 +1880,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(28:30, 33:35, 38:40, 43:45, 73:75, 78:80, 83:85, 88:90, 118:120, 123:125, 128:130, 133:135)
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 4
@@ -1778,6 +1894,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(91:93, 96:98, 101:103, 106:108, 136:138, 141:143, 146:148, 151:153, 181:183, 186:188, 191:193, 196:198)
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 5
@@ -1791,6 +1908,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(93:95, 98:100, 103:105, 108:110, 138:140, 143:145, 148:150, 153:155, 183:185, 188:190, 193:195, 198:200)
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 6
@@ -1804,6 +1922,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(116:118, 121:123, 126:128, 131:133, 161:163, 166:168, 171:173, 176:178, 206:208, 211:213, 216:218, 221:223)
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 7
@@ -1817,6 +1936,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(118:120, 123:125, 128:130, 133:135, 163:165, 168:170, 173:175, 178:180, 208:210, 213:215, 218:220, 223:225)
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
     end
 
@@ -1853,6 +1973,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(1:4, 10:13, 19:22, 46:49, 55:58, 64:67, 91:94, 100:103, 109:112)
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 1
@@ -1866,6 +1987,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(6:9, 15:18, 24:27, 51:54, 60:63, 69:72, 96:99, 105:108, 114:117)
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 2
@@ -1879,6 +2001,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(19:22, 28:31, 37:40, 64:67, 73:76, 82:85, 109:112, 118:121, 127:130)
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 3
@@ -1892,6 +2015,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(24:27, 33:36, 42:45, 69:72, 78:81, 87:90, 114:117, 123:126, 132:135)
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 4
@@ -1905,6 +2029,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(91:94, 100:103, 109:112, 136:139, 145:148, 154:157, 181:184, 190:193, 199:202)
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 5
@@ -1918,6 +2043,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(96:99, 105:108, 114:117, 141:144, 150:153, 159:162, 186:189, 195:198, 204:207)
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 6
@@ -1931,6 +2057,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(109:112, 118:121, 127:130, 154:157, 163:166, 172:175, 199:202, 208:211, 217:220)
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
+            @test li.a_block_sub_selection_indices == 1:36
         end
 
         irank = 7
@@ -1944,6 +2071,7 @@ function test_split_indices_3d()
             @test li.top_vector_indices == vcat(114:117, 123:126, 132:135, 159:162, 168:171, 177:180, 204:207, 213:216, 222:225)
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
+            @test li.a_block_sub_selection_indices == 1:36
         end
     end
 

@@ -367,12 +367,16 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
 end
 
 function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
-                       distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
-    distributed_comm_rank = MPI.Comm_rank(distributed_comm)
-    distributed_comm_size = MPI.Comm_size(distributed_comm)
+                       comm::Union{MPI.Comm}, distributed_comm::Union{MPI.Comm,Nothing},
+                       shared_comm::MPI.Comm)
+    rank = MPI.Comm_rank(comm)
+    comm_size = MPI.Comm_size(comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
+    shared_comm_size = MPI.Comm_size(shared_comm)
+    distributed_comm_size = comm_size ÷ shared_comm_size
 
-    if distributed_comm_rank == 0 && shared_comm_rank == 0
+    x_global = nothing
+    if rank == 0
         n_total = prod(d.n for d ∈ dimensions)
         x_global_with_dups = fill(NaN, n_total)
 
@@ -395,7 +399,6 @@ function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
         x_global = remove_duplicates_from_global_vector(x_global_with_dups, dimensions)
     elseif shared_comm_rank == 0
         MPI.Send(x_local, distributed_comm; dest=0)
-        x_global = nothing
     end
 
     return x_global
