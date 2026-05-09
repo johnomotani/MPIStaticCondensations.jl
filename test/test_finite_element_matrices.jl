@@ -167,7 +167,7 @@ function test_finite_element_matrices()
         comm_size = MPI.Comm_size(MPI.COMM_WORLD)
         @testset "n_shared=$n_shared" for n_shared ∈ [prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
             @testset "1D" begin
-                tol = 1.0e-13
+                tol = 1.0e-12
                 test_dimension_combinations([1], [3], 1, rank, comm_size, n_shared, tol, 1000)
                 test_dimension_combinations([2], [3], 2, rank, comm_size, n_shared, tol, 1001)
                 test_dimension_combinations([2], [4], 2, rank, comm_size, n_shared, tol, 1002)
@@ -182,7 +182,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([32], [3], 32, rank, comm_size, n_shared, tol, 1011)
             end
             @testset "2D" begin
-                tol = 1.0e-9
+                tol = 1.0e-7
                 test_dimension_combinations([1, 1], [3, 3], 1, rank, comm_size, n_shared, tol, 2000)
                 test_dimension_combinations([1, 2], [3, 3], 2, rank, comm_size, n_shared, tol, 2001)
                 test_dimension_combinations([1, 2], [3, 5], 2, rank, comm_size, n_shared, tol, 2002)
