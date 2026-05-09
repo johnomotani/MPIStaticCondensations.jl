@@ -941,7 +941,7 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T
         local_block_solver = solver.local_block_solver
         if !isa(X, StridedMatrix) || !isa(U, StridedMatrix) || !isa(solver.non_duplicate_indices, Colon)
             for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
-                ldiv!(this_X, local_block_solver, this_U)
+                ldiv!(this_X, solver, this_U)
             end
         else
             ldiv!(X, local_block_solver, U)
@@ -1012,7 +1012,7 @@ function ldiv!(solver::MPIStaticCondensationSerialDense{T}, U::AbstractVectorOrM
             # fall back to the AbstractVector function which can replace it with a
             # contiguous-in-memory buffer.
             for this_U ∈ eachcol(U)
-                ldiv!(local_block_solver, this_U)
+                ldiv!(solver, this_U)
             end
         else # U is an AbstractVector
             # Note if U is a view that was indexed with Vector{<:Integer}, then we need to
@@ -1032,18 +1032,18 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialDense{T}
                U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
         non_duplicate_indices = solver.non_duplicate_indices
-        if !isa(X, StridedVector) || isa(non_duplicate_indices, Colon)
+        if (isa(X, StridedVector) && isa(non_duplicate_indices, Colon))
+            this_X = X
+        else
             # Note if X is a view that was indexed with Vector{<:Integer}, then we need to
             # replace it with a contiguous-in-memory buffer.
             this_X = solver.X_buffer
-        else
-            this_X = X
         end
         ldiv!(this_X, solver.local_block_solver, @view(U[non_duplicate_indices]))
-        if !isa(X, StridedVector) || isa(non_duplicate_indices, Colon)
+        if !(isa(X, StridedVector) && isa(non_duplicate_indices, Colon))
             @views X[non_duplicate_indices] .= this_X
             for (i1, i2) ∈ eachcol(solver.periodic_index_pairs)
-                X[i2] = X_buffer[i1]
+                X[i2] = this_X[i1]
             end
         end
     end
@@ -1060,7 +1060,7 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialDense{T}
             # fall back to the AbstractVector function which can replace it with a
             # contiguous-in-memory buffer.
             for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
-                ldiv!(this_X, local_block_solver, this_U)
+                ldiv!(this_X, solver, this_U)
             end
         end
     end
