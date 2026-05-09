@@ -489,7 +489,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         end
         slice_step = elements_per_group * (ngrid - 1)
         if slice_remove_boundaries
-            slice_points = 1:slice_step:last_slice_ind
+            skip_last = ((n_groups - 1) * slice_step + 1 == last_slice_ind)
+            slice_points = [min(s * slice_step + 1, last_slice_ind) for s ∈ 0:n_groups-skip_last]
         else
             slice_points = slice_step:slice_step:slice_step*(n_groups-1)
             if slice_dim.has_lower_boundary
@@ -743,18 +744,25 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     end
 
     # Create lowest level solver
-    if any(d.periodic for d ∈ lowest_level_dimensions)
+    if any(d.periodic && (d.has_lower_boundary || d.has_upper_boundary) for d ∈ lowest_level_dimensions)
+        for d ∈ lowest_level_dimensions
+            if d.periodic && ((d.has_lower_boundary && !d.has_upper_boundary)
+                              || (!d.has_lower_boundary && d.has_upper_boundary))
+                error("Any periodic dimension (that has not already been split up before "
+                      * "the lowest level) should have both boundaries or neither")
+            end
+        end
         lowest_level_non_duplicate_indices = ind_type[]
         periodic_pairs = Tuple{ind_type,ind_type}[]
         level_cartinds = CartesianIndices(Tuple(d.n for d ∈ lowest_level_dimensions))
         for (flat_i, inds) ∈ enumerate(level_cartinds)
             has_duplicate = false
-            if any(d.periodic && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
+            if any(d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
                 has_duplicate = true
                 pair_i = 0
                 for (d, i) ∈ zip(reverse(dimensions), reverse(Tuple(inds)))
-                    n = d.periodic ? d.n - 1 : d.n
-                    if d.periodic && i == d.n
+                    n = d.periodic && d.has_lower_boundary && d.has_upper_boundary ? d.n - 1 : d.n
+                    if d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n
                         # pair_i corresponds to the first index in this dimension.
                         pair_i = pair_i * n
                     else

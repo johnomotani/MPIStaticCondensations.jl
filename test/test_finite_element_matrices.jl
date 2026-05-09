@@ -63,6 +63,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         end
         resize!(local_win_store_int, 0)
     end
+    MPI.Barrier(shared_comm)
     return nothing
 end
 
@@ -164,7 +165,6 @@ function test_finite_element_matrices()
     @testset "finite element matrices" begin
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
         comm_size = MPI.Comm_size(MPI.COMM_WORLD)
-        n_shared_list = vcat(1, factor(Vector, comm_size))
         @testset "n_shared=$n_shared" for n_shared ∈ [prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
             @testset "1D" begin
                 tol = 1.0e-13
