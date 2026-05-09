@@ -91,6 +91,8 @@ const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 
 abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
+struct MPIStaticCondensationSerialNull{Tf<:AbstractFloat} <: MPIStaticCondensation{Tf} end
+
 struct MPIStaticCondensationSerialSparse{Tf<:AbstractFloat,Ti<:Integer,Tndi,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     local_block_solver::SparseArrays.UMFPACK.UmfpackLU{Tf,Ti}
     U_buffer::Vector{Tf}
@@ -787,7 +789,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     end
     identity = Matrix{data_type}(undef, lowest_level_n, lowest_level_n)
     copyto!(identity, I)
-    if use_sparse
+    if lowest_level_n == 0
+        lowest_level_solver = MPIStaticCondensationSerialNull{data_type}()
+    elseif use_sparse
         lowest_level_solver =
             MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu),
                                               Vector{data_type}(undef, lowest_level_n),
@@ -892,6 +896,23 @@ function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{
     solver = block_diagonal_solver.local_block_solver
     block_indices = block_diagonal_solver.block_indices
     @views ldiv!(solver, u[block_indices,:])
+    return nothing
+end
+
+function lu!(solver::MPIStaticCondensationSerialNull, A::AbstractMatrix)
+    return nothing
+end
+
+function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialNull{T},
+               U::AbstractVector{T}) where T
+    return nothing
+end
+function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialNull{T},
+               U::AbstractMatrix{T}) where T
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationSerialNull{T},
+               U::AbstractVectorOrMatrix{T}) where T
     return nothing
 end
 
