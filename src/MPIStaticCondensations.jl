@@ -517,6 +517,13 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         ngrid = slice_dim.ngrid
         procs_per_group = (shared_comm_size + n_groups - 1) ÷ n_groups
         group_rank = shared_comm_rank ÷ procs_per_group
+        next_comm = MPI.Comm_split(next_comm, group_rank, 0)
+        next_shared_comm = MPI.Comm_split(next_shared_comm, group_rank, 0)
+        if MPI.Comm_rank(next_shared_comm) == 0
+            next_distributed_comm = MPI.COMM_SELF
+        else
+            next_distributed_comm = nothing
+        end
         if group_rank == n_groups - 1
             this_group_nelement = slice_dim.nelement - group_rank * elements_per_group
         else
