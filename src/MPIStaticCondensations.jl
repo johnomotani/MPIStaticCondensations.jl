@@ -422,6 +422,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
 
     slice_dim = level_dimensions[slice_i]
     slice_remove_boundaries = slice_dim.periodic || slice_dim.remove_boundaries
+    slice_dim_n = slice_dim.n
     slice_irank = slice_dim.irank
     slice_nrank = slice_dim.nrank
     last_slice_ind = length(slice_dim.global_inds)
@@ -524,17 +525,15 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         else
             next_distributed_comm = MPI.COMM_NULL
         end
-        if group_rank == n_groups - 1
-            this_group_nelement = slice_dim.nelement - group_rank * elements_per_group
-        else
-            this_group_nelement = elements_per_group
-        end
+        this_group_nelement = (min((group_rank + 1) * elements_per_group,
+                                   slice_dim.nelement)
+                               - min(group_rank * elements_per_group, slice_dim.nelement))
         slice_step = elements_per_group * (ngrid - 1)
         if slice_remove_boundaries
             skip_last = ((n_groups - 1) * slice_step + 1 == last_slice_ind)
             slice_points = [min(s * slice_step + 1, last_slice_ind) for s ∈ 0:n_groups-skip_last]
         else
-            slice_points = slice_step:slice_step:slice_step*(n_groups-1)
+            slice_points = slice_step:slice_step:min(slice_step*(n_groups-1), slice_dim_n)
             if slice_dim.has_lower_boundary
                 slice_points = slice_points .+ 1
             end
