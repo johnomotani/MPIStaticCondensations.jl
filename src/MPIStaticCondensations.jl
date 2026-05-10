@@ -620,7 +620,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                     has_upper_boundary = d.has_upper_boundary
                 end
                 new_d = Dimension(; nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
-                                  irank=d.irank, periodic=d.periodic,
+                                  irank=d.irank, periodic=false,
                                   has_lower_boundary=has_lower_boundary,
                                   has_upper_boundary=has_upper_boundary,
                                   remove_boundaries=false)
