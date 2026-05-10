@@ -2,6 +2,8 @@ using MPIStaticCondensations
 using MPIStaticCondensations: FakeComm, split_dimension, pick_dimension_to_split
 using Test
 
+const ngrid = 3
+
 function get_level_info(ngrid, nelement_list, periodic_list, remove_boundaries_list,
                         nrank_list, irank_list, n_shared, n_groups, irank;
                         optimize_schur_complement_size=true)
@@ -29,9 +31,7 @@ function get_level_info(ngrid, nelement_list, periodic_list, remove_boundaries_l
     return level_info
 end
 
-function test_split_indices_1d()
-    ngrid = 3
-
+function test_split_indices_1d_2group()
     nelement_list = [4]
     periodic_list = [false]
     remove_boundaries_list = [false]
@@ -319,6 +319,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_4group()
+    nelement_list = [4]
+    periodic_list = [false]
+    remove_boundaries_list = [false]
+
     # With 4 groups, the global index division is:
     # -------===-----===-----===-------
     # | 1:2 ∥ 3 ∥ 4 ∥ 5 ∥ 6 ∥ 7 ∥ 8:9 |
@@ -509,6 +517,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_3group()
+    nelement_list = [4]
+    periodic_list = [false]
+    remove_boundaries_list = [false]
+
     # With 3 groups, the global index division is:
     # -------===-------===-
     # | 1:4 ∥ 5 ∥ 6:8 ∥ 9 |
@@ -584,6 +600,10 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_2group_periodic()
     nelement_list = [4]
     periodic_list = [true]
     remove_boundaries_list = [false]
@@ -871,6 +891,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_4group_periodic()
+    nelement_list = [4]
+    periodic_list = [true]
+    remove_boundaries_list = [false]
+
     # With 4 groups, the global index division is:
     # -------===-----===-----===-------
     # | 1:2 ∥ 3 ∥ 4 ∥ 5 ∥ 6 ∥ 7 ∥ 8:9 |
@@ -1061,6 +1089,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_3group_periodic()
+    nelement_list = [4]
+    periodic_list = [true]
+    remove_boundaries_list = [false]
+
     # With 3 groups, the global index division is:
     # -------===-------===-
     # | 1:4 ∥ 5 ∥ 6:8 ∥ 9 |
@@ -1136,6 +1172,10 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_2group_remove_boundaries()
     nelement_list = [4]
     periodic_list = [false]
     remove_boundaries_list = [true]
@@ -1423,6 +1463,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_4group_remove_boundaries()
+    nelement_list = [4]
+    periodic_list = [false]
+    remove_boundaries_list = [true]
+
     # With 4 groups, the global index division is:
     # -------===-----===-----===-------
     # | 1:2 ∥ 3 ∥ 4 ∥ 5 ∥ 6 ∥ 7 ∥ 8:9 |
@@ -1613,6 +1661,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_3group_remove_boundaries()
+    nelement_list = [4]
+    periodic_list = [false]
+    remove_boundaries_list = [true]
+
     # With 3 groups, the global index division is:
     # -------===-------===-
     # | 1:4 ∥ 5 ∥ 6:8 ∥ 9 |
@@ -1688,6 +1744,10 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_2group_periodic_remove_boundaries()
     nelement_list = [4]
     periodic_list = [true]
     remove_boundaries_list = [true]
@@ -1975,6 +2035,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_4group_periodic_remove_boundaries()
+    nelement_list = [4]
+    periodic_list = [true]
+    remove_boundaries_list = [true]
+
     # With 4 groups, the global index division is:
     # -------===-----===-----===-------
     # | 1:2 ∥ 3 ∥ 4 ∥ 5 ∥ 6 ∥ 7 ∥ 8:9 |
@@ -2165,6 +2233,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_3group_periodic_remove_boundaries()
+    nelement_list = [4]
+    periodic_list = [true]
+    remove_boundaries_list = [true]
+
     # With 3 groups, the global index division is:
     # -------===-------===-
     # | 1:4 ∥ 5 ∥ 6:8 ∥ 9 |
@@ -2240,6 +2316,10 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_2group_oddnelement()
     # With 2 groups, the global index division is:
     # -------===-------
     # | 1:4 ∥ 5 ∥ 6:7 |
@@ -2350,6 +2430,10 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_2group_oddnelement_periodic()
     # With 2 groups for a periodic dimension, the global index division is:
     # -------===-------
     # | 1:4 ∥ 5 ∥ 6,1 |
@@ -2407,6 +2491,14 @@ function test_split_indices_1d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_1d_2group_oddnelement_periodic_remove_boundaries()
+    # With 2 groups for a periodic dimension, the global index division is:
+    # -------===-------
+    # | 1:4 ∥ 5 ∥ 6,1 |
+    # -------===-------
     nelement_list = [3]
     periodic_list = [true]
     remove_boundaries_list = [true]
@@ -2463,9 +2555,7 @@ function test_split_indices_1d()
     return nothing
 end
 
-function test_split_indices_3d()
-    ngrid = 3
-
+function test_split_indices_3d_112()
     # With the 3rd dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
@@ -2646,6 +2736,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_fff()
     # With the 2nd dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
@@ -2830,6 +2924,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_fft()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [false, false, true]
@@ -3000,6 +3098,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_ftf()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [false, true, false]
@@ -3170,6 +3272,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_ftt()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [false, true, true]
@@ -3340,6 +3446,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_tff()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [true, false, false]
@@ -3510,6 +3620,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_tft()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [true, false, true]
@@ -3680,6 +3794,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_ttf()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [true, true, false]
@@ -3850,6 +3968,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fff_ttt()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, false]
     remove_boundaries_list = [true, true, true]
@@ -4020,6 +4142,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fft_fff()
     # With the 2nd dimension divided in two and the 3rd dimension periodic, the global
     # index division is (where columns are the right-most index, rows are the centre
     # index, and indices within each cell are the left-most index):
@@ -4204,6 +4330,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_fft_fft()
     nelement_list = [1, 2, 1]
     periodic_list = [false, false, true]
     remove_boundaries_list = [false, false, true]
@@ -4374,6 +4504,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_ftf_fff()
     # With the 2nd dimension divided in two and the 2nd dimension periodic, the global
     # index division is (where columns are the right-most index, rows are the centre
     # index, and indices within each cell are the left-most index):
@@ -4558,6 +4692,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_ftf_ftf()
     nelement_list = [1, 2, 1]
     periodic_list = [false, true, false]
     remove_boundaries_list = [false, true, false]
@@ -4728,6 +4866,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_ftt_fff()
     # With the 2nd dimension divided in two and the 2nd and 3rd dimensions periodic, the
     # global index division is (where columns are the right-most index, rows are the
     # centre index, and indices within each cell are the left-most index):
@@ -4912,6 +5054,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_tff_fff()
     # With the 2nd dimension divided in two and the 1st dimension periodic, the global
     # index division is (where columns are the right-most index, rows are the centre
     # index, and indices within each cell are the left-most index):
@@ -5096,6 +5242,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_tff_tff()
     nelement_list = [1, 2, 1]
     periodic_list = [true, false, false]
     remove_boundaries_list = [true, false, false]
@@ -5266,6 +5416,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_tft_fff()
     # With the 2nd dimension divided in two and the 1st and 3rd dimensions periodic, the
     # global index division is (where columns are the right-most index, rows are the
     # centre index, and indices within each cell are the left-most index):
@@ -5450,6 +5604,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_ttf_fff()
     # With the 2nd dimension divided in two and the 1st and 2nd dimensions periodic, the
     # global index division is (where columns are the right-most index, rows are the
     # centre index, and indices within each cell are the left-most index):
@@ -5634,6 +5792,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_121_ttt_fff()
     # With the 2nd dimension divided in two and the 1st, 2nd, and 3rd dimensions periodic,
     # the global index division is (where columns are the right-most index, rows are the
     # centre index, and indices within each cell are the left-most index):
@@ -5818,6 +5980,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_211()
     # With the 3rd dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
@@ -5998,6 +6164,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_224()
     # With the 3rd dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
@@ -6333,6 +6503,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_242()
     # With the 2nd dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
@@ -6676,6 +6850,10 @@ function test_split_indices_3d()
         end
     end
 
+    return nothing
+end
+
+function test_split_indices_3d_422()
     # With the 1st dimension divided in two, the global index division is (where columns
     # are the right-most index, rows are the centre index, and indices within each cell
     # are the left-most index):
@@ -7564,8 +7742,44 @@ end
 
 function test_indices()
     @testset "Test index splitting" begin
-        @testset "test_split_indices_1d" test_split_indices_1d()
-        @testset "test_split_indices_3d" test_split_indices_3d()
+        @testset "test_split_indices_1d_2group" test_split_indices_1d_2group()
+        @testset "test_split_indices_1d_4group" test_split_indices_1d_4group()
+        @testset "test_split_indices_1d_3group" test_split_indices_1d_3group()
+        @testset "test_split_indices_1d_2group_periodic" test_split_indices_1d_2group_periodic()
+        @testset "test_split_indices_1d_4group_periodic" test_split_indices_1d_4group_periodic()
+        @testset "test_split_indices_1d_3group_periodic" test_split_indices_1d_3group_periodic()
+        @testset "test_split_indices_1d_2group_remove_boundaries" test_split_indices_1d_2group_remove_boundaries()
+        @testset "test_split_indices_1d_4group_remove_boundaries" test_split_indices_1d_4group_remove_boundaries()
+        @testset "test_split_indices_1d_3group_remove_boundaries" test_split_indices_1d_3group_remove_boundaries()
+        @testset "test_split_indices_1d_2group_periodic_remove_boundaries" test_split_indices_1d_2group_periodic_remove_boundaries()
+        @testset "test_split_indices_1d_4group_periodic_remove_boundaries" test_split_indices_1d_4group_periodic_remove_boundaries()
+        @testset "test_split_indices_1d_3group_periodic_remove_boundaries" test_split_indices_1d_3group_periodic_remove_boundaries()
+        @testset "test_split_indices_1d_2group_oddnelement" test_split_indices_1d_2group_oddnelement()
+        @testset "test_split_indices_1d_2group_oddnelement_periodic" test_split_indices_1d_2group_oddnelement_periodic()
+        @testset "test_split_indices_1d_2group_oddnelement_periodic_remove_boundaries" test_split_indices_1d_2group_oddnelement_periodic_remove_boundaries()
+        @testset "test_split_indices_3d_112" test_split_indices_3d_112()
+        @testset "test_split_indices_3d_121_fff_fff" test_split_indices_3d_121_fff_fff()
+        @testset "test_split_indices_3d_121_fff_fft" test_split_indices_3d_121_fff_fft()
+        @testset "test_split_indices_3d_121_fff_ftf" test_split_indices_3d_121_fff_ftf()
+        @testset "test_split_indices_3d_121_fff_ftt" test_split_indices_3d_121_fff_ftt()
+        @testset "test_split_indices_3d_121_fff_tff" test_split_indices_3d_121_fff_tff()
+        @testset "test_split_indices_3d_121_fff_tft" test_split_indices_3d_121_fff_tft()
+        @testset "test_split_indices_3d_121_fff_ttf" test_split_indices_3d_121_fff_ttf()
+        @testset "test_split_indices_3d_121_fff_ttt" test_split_indices_3d_121_fff_ttt()
+        @testset "test_split_indices_3d_121_fft_fff" test_split_indices_3d_121_fft_fff()
+        @testset "test_split_indices_3d_121_fft_fft" test_split_indices_3d_121_fft_fft()
+        @testset "test_split_indices_3d_121_ftf_fff" test_split_indices_3d_121_ftf_fff()
+        @testset "test_split_indices_3d_121_ftf_ftf" test_split_indices_3d_121_ftf_ftf()
+        @testset "test_split_indices_3d_121_ftt_fff" test_split_indices_3d_121_ftt_fff()
+        @testset "test_split_indices_3d_121_tff_fff" test_split_indices_3d_121_tff_fff()
+        @testset "test_split_indices_3d_121_tff_tff" test_split_indices_3d_121_tff_tff()
+        @testset "test_split_indices_3d_121_tft_fff" test_split_indices_3d_121_tft_fff()
+        @testset "test_split_indices_3d_121_ttf_fff" test_split_indices_3d_121_ttf_fff()
+        @testset "test_split_indices_3d_121_ttt_fff" test_split_indices_3d_121_ttt_fff()
+        @testset "test_split_indices_3d_211" test_split_indices_3d_211()
+        @testset "test_split_indices_3d_224" test_split_indices_3d_224()
+        @testset "test_split_indices_3d_242" test_split_indices_3d_242()
+        @testset "test_split_indices_3d_422" test_split_indices_3d_422()
         @testset "test_pick_dimension_to_split" test_pick_dimension_to_split()
     end
 end
