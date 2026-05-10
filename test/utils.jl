@@ -22,7 +22,8 @@ function get_comms(shared_nproc, with_comm=false)
     else
         local_win_store_float = MPI.Win[]
         allocate_array_float = (dims...; comm=shared_comm)->begin
-            if shared_rank == 0
+            this_shared_rank = MPI.Comm_rank(comm)
+            if this_shared_rank == 0
                 dims_local = dims
             else
                 dims_local = Tuple(0 for _ ∈ dims)
@@ -30,7 +31,7 @@ function get_comms(shared_nproc, with_comm=false)
             win, array_temp = MPI.Win_allocate_shared(Array{Float64}, dims_local, comm)
             array = MPI.Win_shared_query(Array{Float64}, dims, win; rank=0)
             push!(local_win_store_float, win)
-            if shared_rank == 0
+            if this_shared_rank == 0
                 array .= NaN
             end
             MPI.Barrier(comm)
@@ -44,7 +45,8 @@ function get_comms(shared_nproc, with_comm=false)
     else
         local_win_store_int = MPI.Win[]
         allocate_array_int = (dims...; comm=shared_comm)->begin
-            if shared_rank == 0
+            this_shared_rank = MPI.Comm_rank(comm)
+            if this_shared_rank == 0
                 dims_local = dims
             else
                 dims_local = Tuple(0 for _ ∈ dims)
@@ -52,7 +54,7 @@ function get_comms(shared_nproc, with_comm=false)
             win, array_temp = MPI.Win_allocate_shared(Array{Int64}, dims_local, comm)
             array = MPI.Win_shared_query(Array{Int64}, dims, win; rank=0)
             push!(local_win_store_int, win)
-            if shared_rank == 0
+            if this_shared_rank == 0
                 array .= typemin(Int64)
             end
             MPI.Barrier(comm)
