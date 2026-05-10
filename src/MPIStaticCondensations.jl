@@ -157,6 +157,18 @@ struct Dimension{Ti<:Integer}
         if nelement % nrank != 0
             error("`nrank=$nrank` does not divide nelement=$nelement")
         end
+        if nelement < 0
+            error("nelement=$nelement cannot be negative")
+        end
+        if ngrid < 0
+            error("ngrid=$ngrid cannot be negative")
+        end
+        if nrank < 1
+            error("nrank=$nrank must be positive")
+        end
+        if irank < 0
+            error("irank=$irank cannot be negative")
+        end
 
         nelement_local = nelement ÷ nrank
 
