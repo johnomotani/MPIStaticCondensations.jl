@@ -522,7 +522,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         if MPI.Comm_rank(next_shared_comm) == 0
             next_distributed_comm = MPI.COMM_SELF
         else
-            next_distributed_comm = nothing
+            next_distributed_comm = MPI.COMM_NULL
         end
         if group_rank == n_groups - 1
             this_group_nelement = slice_dim.nelement - group_rank * elements_per_group
@@ -881,6 +881,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 (args...) -> allocate_shared_int(args...; comm=level_shared_comm)
         end
 
+        if synchronize_shared === nothing
+            level_synchronize_shared = nothing
+        else
+            level_synchronize_shared = () -> synchronize_shared(; comm=level_shared_comm)
+        end
+
         this_level_sc =
             mpi_schur_complement(A_block_solver, data_type, data_type, data_type,
                                  level_info.top_vector_indices,
@@ -890,7 +896,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  distributed_comm=level_info.level_distributed_comm,
                                  allocate_shared_float=level_allocate_shared_float,
                                  allocate_shared_int=level_allocate_shared_int,
-                                 synchronize_shared=synchronize_shared,
+                                 synchronize_shared=level_synchronize_shared,
                                  use_sparse=use_sparse, separate_Ainv_B=separate_Ainv_B,
                                  parallel_schur=level_parallel_schur,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
