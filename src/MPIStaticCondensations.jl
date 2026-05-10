@@ -397,19 +397,22 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     slice_irank = slice_dim.irank
     slice_nrank = slice_dim.nrank
     last_slice_ind = length(slice_dim.global_inds)
+    top_vector_slice_dim_n = slice_dim.n - (n_groups - 1)
     if slice_remove_boundaries
         # Once dimension has been sliced at least once, the periodic boundary is removed,
         # so the dimension is effectively no longer periodic, and also does not include
         # lower and upper boundaries.
         slice_dim = Dimension(; nelement=slice_dim.nelement, ngrid=slice_dim.ngrid,
                               nrank=slice_dim.nrank, irank=slice_irank,
-                              periodic=false, has_lower_boundary=false,
-                              has_upper_boundary=false, remove_boundaries=false)
+                              periodic=false,
+                              has_lower_boundary=slice_dim.irank==0 ? false : slice_dim.has_lower_boundary,
+                              has_upper_boundary=slice_dim.irank==slice_dim.nrank-1 ? false : slice_dim.has_upper_boundary,
+                              remove_boundaries=false)
+        top_vector_slice_dim_n -= 2
     end
 
     elements_per_group = (slice_dim.nelement + n_groups - 1) ÷ n_groups
 
-    top_vector_slice_dim_n = slice_dim.n - (n_groups - 1)
     if elements_per_group * (n_groups - 1) ≥ slice_dim.nelement && slice_remove_boundaries
         # The last element does not actually contain any points, so the last 'boundary'
         # point is actually the final grid point in slice_dim, which was already removed

@@ -56,6 +56,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:3
             @test li.local_top_vector_a_block_indices == 1:3
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 1
@@ -70,6 +72,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -84,6 +88,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 3
@@ -98,6 +104,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:3
             @test li.local_top_vector_a_block_indices == 1:3
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -117,6 +125,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:4
             @test li.local_top_vector_a_block_indices == 1:4
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -131,6 +141,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:4
             @test li.local_top_vector_a_block_indices == 1:4
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -145,6 +157,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:5
             @test li.local_top_vector_a_block_indices == 2:5
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 3
@@ -159,6 +173,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:5
             @test li.local_top_vector_a_block_indices == 2:5
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -178,6 +194,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 1:4
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -192,6 +210,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 1:4
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -206,6 +226,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 6:9
             @test li.a_block_sub_selection_indices == 5:8
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 3
@@ -220,6 +242,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:9)...]
             @test li.local_top_vector_a_block_indices == 6:9
             @test li.a_block_sub_selection_indices == 5:8
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -243,6 +267,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -257,6 +283,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -271,6 +299,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -285,6 +315,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -304,6 +336,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -318,6 +352,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 4:4
             @test li.a_block_sub_selection_indices == 3:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -332,6 +368,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -346,6 +384,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [1,2,4,6,8,9]
             @test li.local_top_vector_a_block_indices == 8:9
             @test li.a_block_sub_selection_indices == 5:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -369,6 +409,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:4
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -383,6 +425,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 5:7
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -397,6 +441,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(1:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
             @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -424,6 +470,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 1
@@ -438,6 +486,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -452,6 +502,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 3
@@ -466,6 +518,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -485,6 +539,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -499,6 +555,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -513,6 +571,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -527,6 +587,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -546,6 +608,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -560,6 +624,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -574,6 +640,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -588,6 +656,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -611,6 +681,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -625,6 +697,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -639,6 +713,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -653,6 +729,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -672,6 +750,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -686,6 +766,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 4:4
             @test li.a_block_sub_selection_indices == 2:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -700,6 +782,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 3:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -714,6 +798,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 8:8
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -737,6 +823,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -751,6 +839,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -765,6 +855,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
             @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -792,6 +884,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 1
@@ -806,6 +900,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -820,6 +916,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 3
@@ -834,6 +932,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -853,6 +953,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -867,6 +969,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -881,6 +985,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -895,6 +1001,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -914,6 +1022,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -928,6 +1038,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -942,6 +1054,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -956,6 +1070,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -979,6 +1095,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -993,6 +1111,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1007,6 +1127,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -1021,6 +1143,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1040,6 +1164,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1054,6 +1180,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 4:4
             @test li.a_block_sub_selection_indices == 2:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1068,6 +1196,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 3:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -1082,6 +1212,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 8:8
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1105,6 +1237,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1119,6 +1253,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1133,6 +1269,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
             @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1160,6 +1298,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 1
@@ -1174,6 +1314,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1188,6 +1330,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:3
             @test li.local_top_vector_a_block_indices == 2:3
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
 
         irank = 3
@@ -1202,6 +1346,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 1:2
             @test li.local_top_vector_a_block_indices == 1:2
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1221,6 +1367,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1235,6 +1383,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1249,6 +1399,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -1263,6 +1415,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:4
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1282,6 +1436,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1296,6 +1452,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1310,6 +1468,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -1324,6 +1484,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1347,6 +1509,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1361,6 +1525,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1375,6 +1541,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -1389,6 +1557,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == 2:2
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1408,6 +1578,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 2:2
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1422,6 +1594,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 4:4
             @test li.a_block_sub_selection_indices == 2:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1436,6 +1610,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 3:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 3
@@ -1450,6 +1626,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [2,4,6,8]
             @test li.local_top_vector_a_block_indices == 8:8
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1473,6 +1651,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1487,6 +1667,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 6:8
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 2
@@ -1501,6 +1683,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == [(2:4)...,(6:8)...]
             @test li.local_top_vector_a_block_indices == 1:0
             @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1528,6 +1712,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(1:4, 6:7)
             @test li.local_top_vector_a_block_indices == 1:4
             @test li.a_block_sub_selection_indices == 1:4
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1542,6 +1728,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(1:4, 6:7)
             @test li.local_top_vector_a_block_indices == 6:7
             @test li.a_block_sub_selection_indices == 5:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
         end
     end
 
@@ -1565,6 +1753,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(2:4, 6)
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1579,6 +1769,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(2:4, 6)
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1606,6 +1798,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(2:4, 6)
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1620,6 +1814,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(2:4, 6)
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1643,6 +1839,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(2:4, 6)
             @test li.local_top_vector_a_block_indices == 2:4
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
 
         irank = 1
@@ -1657,6 +1855,8 @@ function test_split_indices_1d()
             @test li.local_top_vector_indices == vcat(2:4, 6)
             @test li.local_top_vector_a_block_indices == 6:6
             @test li.a_block_sub_selection_indices == 4:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
         end
     end
 
@@ -1697,6 +1897,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 1:18
             @test li.local_top_vector_a_block_indices == 1:18
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -1712,6 +1918,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:27
             @test li.local_top_vector_a_block_indices == 10:27
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -1732,6 +1944,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [(1:18)...,(28:45)...]
             @test li.local_top_vector_a_block_indices == 1:18
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -1747,6 +1965,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [(1:18)...,(28:45)...]
             @test li.local_top_vector_a_block_indices == 28:45
             @test li.a_block_sub_selection_indices == 19:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -1785,6 +2009,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -1800,6 +2030,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
             @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -1820,6 +2056,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
             @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -1835,6 +2077,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
             @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -1859,6 +2107,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:15
             @test li.local_top_vector_a_block_indices == 10:15
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -1874,6 +2128,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 13:18
             @test li.local_top_vector_a_block_indices == 13:18
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -1894,6 +2154,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(16:21, 25:30)
             @test li.local_top_vector_a_block_indices == 16:21
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -1909,6 +2175,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(16:21, 25:30)
             @test li.local_top_vector_a_block_indices == 25:30
             @test li.a_block_sub_selection_indices == 7:12
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -1933,6 +2205,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -1948,6 +2226,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -1968,6 +2252,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
             @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -1983,6 +2273,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
             @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2007,6 +2303,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 13:15
             @test li.local_top_vector_a_block_indices == 13:15
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2022,6 +2324,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 13:15
             @test li.local_top_vector_a_block_indices == 13:15
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2042,6 +2350,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(19:21, 25:27)
             @test li.local_top_vector_a_block_indices == 19:21
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2057,6 +2371,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(19:21, 25:27)
             @test li.local_top_vector_a_block_indices == 25:27
             @test li.a_block_sub_selection_indices == 4:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2081,6 +2401,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [2, 5, 11, 14, 20, 23]
             @test li.local_top_vector_a_block_indices == [2, 5, 11, 14, 20, 23]
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2096,6 +2422,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [5, 8, 14, 17, 23, 26]
             @test li.local_top_vector_a_block_indices == [5, 8, 14, 17, 23, 26]
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2116,6 +2448,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.local_top_vector_a_block_indices == [2, 5, 17, 20, 32, 35]
             @test li.a_block_sub_selection_indices == vcat(1:2, 5:6, 9:10)
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2131,6 +2469,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.local_top_vector_a_block_indices == [11, 14, 26, 29, 41, 44]
             @test li.a_block_sub_selection_indices == vcat(3:4, 7:8, 11:12)
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2155,6 +2499,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [11, 14]
             @test li.local_top_vector_a_block_indices == [11, 14]
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2170,6 +2520,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [14, 17]
             @test li.local_top_vector_a_block_indices == [14, 17]
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2190,6 +2546,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [17, 20, 26, 29]
             @test li.local_top_vector_a_block_indices == [17, 20]
             @test li.a_block_sub_selection_indices == 1:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2205,6 +2567,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [17, 20, 26, 29]
             @test li.local_top_vector_a_block_indices == [26, 29]
             @test li.a_block_sub_selection_indices == 3:4
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2229,6 +2597,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [5, 14, 23]
             @test li.local_top_vector_a_block_indices == [5, 14, 23]
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2244,6 +2618,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [5, 14, 23]
             @test li.local_top_vector_a_block_indices == [5, 14, 23]
             @test li.a_block_sub_selection_indices == 1:3
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2264,6 +2644,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [5, 11, 20, 26, 35, 41]
             @test li.local_top_vector_a_block_indices == [5, 20, 35]
             @test li.a_block_sub_selection_indices == [1, 3, 5]
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2279,6 +2665,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [5, 11, 20, 26, 35, 41]
             @test li.local_top_vector_a_block_indices == [11, 26, 41]
             @test li.a_block_sub_selection_indices == [2, 4, 6]
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2303,6 +2695,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [14]
             @test li.local_top_vector_a_block_indices == [14]
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2318,6 +2716,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [14]
             @test li.local_top_vector_a_block_indices == [14]
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2338,6 +2742,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [20, 26]
             @test li.local_top_vector_a_block_indices == [20]
             @test li.a_block_sub_selection_indices == 1:1
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2353,6 +2763,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [20, 26]
             @test li.local_top_vector_a_block_indices == [26]
             @test li.a_block_sub_selection_indices == 2:2
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2391,6 +2807,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2406,6 +2828,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
             @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2426,6 +2854,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
             @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2441,6 +2875,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
             @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2465,6 +2905,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:15
             @test li.local_top_vector_a_block_indices == 10:15
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2480,6 +2926,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 13:18
             @test li.local_top_vector_a_block_indices == 13:18
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2500,6 +2952,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(16:21, 25:30)
             @test li.local_top_vector_a_block_indices == 16:21
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -2515,6 +2973,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(16:21, 25:30)
             @test li.local_top_vector_a_block_indices == 25:30
             @test li.a_block_sub_selection_indices == 7:12
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
     end
 
@@ -2553,6 +3017,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2568,6 +3038,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2588,6 +3064,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
             @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2603,6 +3085,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
             @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2627,6 +3115,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2642,6 +3136,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2662,6 +3162,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
             @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2677,6 +3183,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
             @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2715,6 +3227,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2730,6 +3248,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2750,6 +3274,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
             @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2765,6 +3295,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
             @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2803,6 +3339,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2818,6 +3360,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
             @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2838,6 +3386,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
             @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2853,6 +3407,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
             @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2877,6 +3437,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [2, 5, 11, 14, 20, 23]
             @test li.local_top_vector_a_block_indices == [2, 5, 11, 14, 20, 23]
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2892,6 +3458,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [5, 8, 14, 17, 23, 26]
             @test li.local_top_vector_a_block_indices == [5, 8, 14, 17, 23, 26]
             @test li.a_block_sub_selection_indices == 1:6
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2912,6 +3484,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.local_top_vector_a_block_indices == [2, 5, 17, 20, 32, 35]
             @test li.a_block_sub_selection_indices == vcat(1:2, 5:6, 9:10)
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2927,6 +3505,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == [2, 5, 11, 14, 17, 20, 26, 29, 32, 35, 41, 44]
             @test li.local_top_vector_a_block_indices == [11, 14, 26, 29, 41, 44]
             @test li.a_block_sub_selection_indices == vcat(3:4, 7:8, 11:12)
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -2965,6 +3549,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:15, 19:24)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 10:15, 19:24)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -2980,6 +3570,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:9, 13:18, 22:27)
             @test li.local_top_vector_a_block_indices == vcat(4:9, 13:18, 22:27)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3000,6 +3596,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(1:6, 16:21, 31:36)
             @test li.a_block_sub_selection_indices == vcat(1:6, 13:18, 25:30)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3015,6 +3617,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:6, 10:21, 25:36, 40:45)
             @test li.local_top_vector_a_block_indices == vcat(10:15, 25:30, 40:45)
             @test li.a_block_sub_selection_indices == vcat(7:12, 19:24, 31:36)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3053,6 +3661,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3068,6 +3682,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3088,6 +3708,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
             @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3103,6 +3729,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
             @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3141,6 +3773,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3156,6 +3794,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 13:15, 22:24)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 13:15, 22:24)
             @test li.a_block_sub_selection_indices == 1:9
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3176,6 +3820,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(4:6, 19:21, 34:36)
             @test li.a_block_sub_selection_indices == vcat(1:3, 7:9, 13:15)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3191,6 +3841,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:6, 10:12, 19:21, 25:27, 34:36, 40:42)
             @test li.local_top_vector_a_block_indices == vcat(10:12, 25:27, 40:42)
             @test li.a_block_sub_selection_indices == vcat(4:6, 10:12, 16:18)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3225,6 +3881,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:2, 4:5, 7:8, 10:11, 13:14, 16:17, 19:20, 22:23, 25:26)
             @test li.local_top_vector_a_block_indices == vcat(1:2, 4:5, 7:8, 10:11, 13:14, 16:17, 19:20, 22:23, 25:26)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3240,6 +3902,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(2:3, 5:6, 8:9, 11:12, 14:15, 17:18, 20:21, 23:24, 26:27)
             @test li.local_top_vector_a_block_indices == vcat(2:3, 5:6, 8:9, 11:12, 14:15, 17:18, 20:21, 23:24, 26:27)
             @test li.a_block_sub_selection_indices == 1:18
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3260,6 +3928,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:2, 4:7, 9:12, 14:17, 19:22, 24:27, 29:32, 34:37, 39:42, 44:45)
             @test li.local_top_vector_a_block_indices == vcat(1:2, 6:7, 11:12, 16:17, 21:22, 26:27, 31:32, 36:37, 41:42)
             @test li.a_block_sub_selection_indices == vcat(1:2, 5:6, 9:10, 13:14, 17:18, 21:22, 25:26, 29:30, 33:34)
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3275,6 +3949,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:2, 4:7, 9:12, 14:17, 19:22, 24:27, 29:32, 34:37, 39:42, 44:45)
             @test li.local_top_vector_a_block_indices == vcat(4:5, 9:10, 14:15, 19:20, 24:25, 29:30, 34:35, 39:40, 44:45)
             @test li.a_block_sub_selection_indices == vcat(3:4, 7:8, 11:12, 15:16, 19:20, 23:24, 27:28, 31:32, 35:36)
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3313,6 +3993,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 1
@@ -3328,6 +4014,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 2
@@ -3343,6 +4035,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 3
@@ -3358,6 +4056,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 1:36
             @test li.local_top_vector_a_block_indices == 1:36
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == false
         end
 
         irank = 4
@@ -3373,6 +4077,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 5
@@ -3388,6 +4098,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 6
@@ -3403,6 +4119,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 7
@@ -3418,6 +4140,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == 10:45
             @test li.local_top_vector_a_block_indices == 10:45
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == false
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3464,6 +4192,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3479,6 +4213,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 2
@@ -3494,6 +4234,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 3
@@ -3509,6 +4255,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 4
@@ -3524,6 +4276,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 5
@@ -3539,6 +4297,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:12, 16:27, 31:42)
             @test li.local_top_vector_a_block_indices == vcat(1:12, 16:27, 31:42)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 6
@@ -3554,6 +4318,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 7
@@ -3569,6 +4339,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(4:15, 19:30, 34:45)
             @test li.local_top_vector_a_block_indices == vcat(4:15, 19:30, 34:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
@@ -3607,6 +4383,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 1
@@ -3622,6 +4404,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 2
@@ -3637,6 +4425,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 3
@@ -3652,6 +4446,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 4
@@ -3667,6 +4467,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 5
@@ -3682,6 +4488,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 6
@@ -3696,6 +4508,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.local_top_vector_a_block_indices == vcat(1:4, 6:9, 11:14, 16:19, 21:24, 26:29, 31:34, 36:39, 41:44)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == false
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
 
         irank = 7
@@ -3711,6 +4529,12 @@ function test_split_indices_3d()
             @test li.local_top_vector_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.local_top_vector_a_block_indices == vcat(2:5, 7:10, 12:15, 17:20, 22:25, 27:30, 32:35, 37:40, 42:45)
             @test li.a_block_sub_selection_indices == 1:36
+            @test li.level_dimensions[1].has_lower_boundary == false
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[3].has_lower_boundary == true
+            @test li.level_dimensions[3].has_upper_boundary == true
         end
     end
 
