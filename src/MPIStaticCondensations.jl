@@ -423,6 +423,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     slice_dim = level_dimensions[slice_i]
     slice_remove_boundaries = slice_dim.periodic || slice_dim.remove_boundaries
     slice_dim_n = slice_dim.n
+    slice_dim_nelement = slice_dim.nelement
     slice_irank = slice_dim.irank
     slice_nrank = slice_dim.nrank
     last_slice_ind = length(slice_dim.global_inds)
@@ -530,8 +531,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                                - min(group_rank * elements_per_group, slice_dim.nelement))
         slice_step = elements_per_group * (ngrid - 1)
         if slice_remove_boundaries
-            skip_last = ((n_groups - 1) * slice_step + 1 == last_slice_ind)
-            slice_points = [min(s * slice_step + 1, last_slice_ind) for s ∈ 0:n_groups-skip_last]
+            n_slices = (slice_dim_nelement + elements_per_group - 1) ÷ elements_per_group
+            slice_points = [min(s * slice_step + 1, last_slice_ind) for s ∈ 0:n_slices]
         else
             slice_points = slice_step:slice_step:min(slice_step*(n_groups-1), slice_dim_n)
             if slice_dim.has_lower_boundary
@@ -542,7 +543,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             vcat(local_bottom_vector_indices,
                  get_local_ind_slice(level_dimensions, slice_i, slice_points))
         if slice_remove_boundaries
-            first_local_top_vector_slice_ind = slice_points[group_rank+1] + 1
+            first_local_top_vector_slice_ind = slice_points[min(group_rank+1,end)] + 1
             has_lower_boundary = false
             last_local_top_vector_slice_ind = slice_points[min(group_rank+2,end)] - 1
             has_upper_boundary = false
@@ -558,7 +559,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 has_lower_boundary = slice_dim.has_lower_boundary
                 first_top_vector_block_slice_ind = 1
             else
-                first_local_top_vector_slice_ind = slice_points[group_rank] + 1
+                first_local_top_vector_slice_ind = slice_points[min(group_rank,end)] + 1
                 has_lower_boundary = false
                 first_top_vector_block_slice_ind = group_rank * slice_step + 1
                 if slice_dim.has_lower_boundary
@@ -569,7 +570,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 last_local_top_vector_slice_ind = last_slice_ind
                 has_upper_boundary = slice_dim.has_upper_boundary
             else
-                last_local_top_vector_slice_ind = slice_points[group_rank+1] - 1
+                last_local_top_vector_slice_ind = slice_points[min(group_rank+1,end)] - 1
                 has_upper_boundary = false
             end
             # Maximum last 'block slice-dimension ind' is the total slice dimension
