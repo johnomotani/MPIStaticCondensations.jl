@@ -175,22 +175,38 @@ struct Dimension{Ti<:Integer}
         # Assume a continuous-Galerkin finite element discretization where adjacent
         # elements share a boundary point. `ngrid` counts the points in a single element,
         # but two of these are shared (except at the ends of the grid).
-        n = nelement * (ngrid - 1) + 1
-        n_local = nelement_local * (ngrid - 1) + 1
+        if nelement == 0
+            n = 0
+        else
+            n = nelement * (ngrid - 1) + 1
+        end
+        if nelement_local == 0
+            n_local = 0
+        else
+            n_local = nelement_local * (ngrid - 1) + 1
+        end
         first_global_ind = irank * nelement_local * (ngrid - 1) + 1
         last_global_ind = (irank + 1) * nelement_local * (ngrid - 1) + 1
 
         if !has_lower_boundary
-            n -= 1
-            n_local -= 1
+            if nelement > 0
+                n -= 1
+            end
             if irank == 0
+                if nelement_local > 0
+                    n_local -= 1
+                end
                 first_global_ind += 1
             end
         end
         if !has_upper_boundary
-            n -= 1
-            n_local -= 1
+            if nelement > 0
+                n -= 1
+            end
             if irank == nrank - 1
+                if nelement_local > 0
+                    n_local -= 1
+                end
                 last_global_ind -= 1
             end
         end
@@ -415,10 +431,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         # so the dimension is effectively no longer periodic, and also does not include
         # lower and upper boundaries.
         slice_dim = Dimension(; nelement=slice_dim.nelement, ngrid=slice_dim.ngrid,
-                              nrank=slice_dim.nrank, irank=slice_irank,
-                              periodic=false,
-                              has_lower_boundary=slice_dim.irank==0 ? false : slice_dim.has_lower_boundary,
-                              has_upper_boundary=slice_dim.irank==slice_dim.nrank-1 ? false : slice_dim.has_upper_boundary,
+                              nrank=slice_dim.nrank, irank=slice_irank, periodic=false,
+                              has_lower_boundary=false, has_upper_boundary=false,
                               remove_boundaries=false)
         top_vector_slice_dim_n -= 2
     end
@@ -437,7 +451,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     if is_distributed_slice
         # When dimension is distributed, split on block boundaries.
         blocks_per_group = (slice_dim.nrank + n_groups - 1) ÷ n_groups
-        group_rank = distributed_comm_rank ÷ blocks_per_group
+        group_rank = slice_dim.irank ÷ blocks_per_group
         next_comm = MPI.Comm_split(next_comm, group_rank, 0)
         if shared_comm_rank == 0
             next_distributed_comm = MPI.Comm_split(next_distributed_comm, group_rank, 0)
@@ -463,13 +477,15 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 vcat(local_bottom_vector_indices,
                      get_local_ind_slice(level_dimensions, slice_i, 1:1))
             first_top_vector_slice_ind = 2
+        else
+            first_top_vector_slice_ind = 1
+        end
+        if group_rank > 0
             slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                                   nrank=this_group_nrank, irank=this_group_irank,
                                   periodic=slice_dim.periodic, has_lower_boundary=false,
                                   has_upper_boundary=slice_dim.has_upper_boundary,
                                   remove_boundaries=false)
-        else
-            first_top_vector_slice_ind = 1
         end
         if (slice_irank + 1 ∈ block_boundaries) || (slice_remove_boundaries && slice_irank == slice_nrank - 1)
             # Upper boundary on this block is a split.
@@ -478,13 +494,15 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                      get_local_ind_slice(level_dimensions, slice_i,
                                          last_slice_ind:last_slice_ind))
             last_top_vector_slice_ind = last_slice_ind - 1
+        else
+            last_top_vector_slice_ind = last_slice_ind
+        end
+        if group_rank != n_groups - 1
             slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                                   nrank=this_group_nrank, irank=this_group_irank,
                                   periodic=slice_dim.periodic,
                                   has_lower_boundary=slice_dim.has_lower_boundary,
                                   has_upper_boundary=false, remove_boundaries=false)
-        else
-            last_top_vector_slice_ind = last_slice_ind
         end
         local_top_vector_indices =
             get_local_ind_slice(level_dimensions, slice_i,
