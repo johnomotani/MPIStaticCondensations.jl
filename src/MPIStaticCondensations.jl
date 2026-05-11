@@ -568,7 +568,11 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                 last_local_top_vector_slice_ind = last_slice_ind
                 has_upper_boundary = slice_dim.has_upper_boundary
             else
-                last_local_top_vector_slice_ind = slice_points[min(group_rank+1,end)] - 1
+                if group_rank < length(slice_points)
+                    last_local_top_vector_slice_ind = slice_points[group_rank+1] - 1
+                else
+                    last_local_top_vector_slice_ind = last_slice_ind
+                end
                 has_upper_boundary = false
             end
             # Maximum last 'block slice-dimension ind' is the total slice dimension
