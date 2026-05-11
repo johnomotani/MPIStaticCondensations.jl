@@ -549,6 +549,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             last_top_vector_a_block_slice_ind = min((group_rank + 1) * slice_step,
                                                     last_local_top_vector_slice_ind)
         else
+            is_last_group_in_slice_dim = (group_rank + 1) * elements_per_group ≥ slice_dim_nelement
             if group_rank == 0
                 first_local_top_vector_slice_ind = 1
                 has_lower_boundary = slice_dim.has_lower_boundary
@@ -561,7 +562,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
                     first_top_vector_a_block_slice_ind += 1
                 end
             end
-            if group_rank == n_groups - 1
+            if is_last_group_in_slice_dim
                 last_local_top_vector_slice_ind = last_slice_ind
                 has_upper_boundary = slice_dim.has_upper_boundary
             else
