@@ -422,7 +422,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
 
     slice_dim = level_dimensions[slice_i]
     slice_remove_boundaries = slice_dim.periodic || slice_dim.remove_boundaries
-    slice_dim_n = slice_dim.n
+    slice_dim_n_local = slice_dim.n_local
     slice_dim_nelement = slice_dim.nelement
     slice_irank = slice_dim.irank
     slice_nrank = slice_dim.nrank
@@ -534,10 +534,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             n_slices = (slice_dim_nelement + elements_per_group - 1) ÷ elements_per_group
             slice_points = [min(s * slice_step + 1, last_slice_ind) for s ∈ 0:n_slices]
         else
-            slice_points = slice_step:slice_step:min(slice_step*(n_groups-1), slice_dim_n)
-            if slice_dim.has_lower_boundary
-                slice_points = slice_points .+ 1
-            end
+            offset = slice_dim.has_lower_boundary ? 1 : 0
+            slice_points = slice_step+offset:slice_step:min(slice_step*(n_groups-1)+offset, slice_dim_n_local)
         end
         local_bottom_vector_indices =
             vcat(local_bottom_vector_indices,
