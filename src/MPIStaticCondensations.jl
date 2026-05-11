@@ -512,8 +512,8 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         procs_per_group = (shared_comm_size + n_groups - 1) ÷ n_groups
         group_rank = shared_comm_rank ÷ procs_per_group
         next_comm = MPI.Comm_split(next_comm, group_rank, 0)
-        next_shared_comm = MPI.Comm_split(next_shared_comm, group_rank, 0)
-        if MPI.Comm_rank(next_shared_comm) == 0
+        next_shared_comm = MPI.Comm_split(next_shared_comm, group_rank ≥ n_active_groups ? nothing : group_rank, 0)
+        if next_shared_comm != MPI.COMM_NULL && MPI.Comm_rank(next_shared_comm) == 0
             next_distributed_comm = MPI.COMM_SELF
         else
             next_distributed_comm = MPI.COMM_NULL
@@ -766,7 +766,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         # `MPIStaticCondensationParallel` could not have its type fully specified by the
         # types of the input arguments anyway.
         level_info_list = Vector{LevelInfo}(undef, n_levels - 1)
-        level = 0
         for (level, n_groups) ∈ enumerate(vcat(n_blocks_factors,
                                                shared_comm_size_factors))
             this_level_info, this_level_dimensions, this_level_comm,
@@ -775,9 +774,19 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                 optimize_schur_complement_size, this_level_comm,
                                 this_level_distributed_comm, this_level_shared_comm)
             level_info_list[level] = this_level_info
+            if length(this_level_info.a_block_sub_selection_indices) == 0
+                # This process does not participate in the solves at lower levels.
+                n_levels = level + 1
+                resize!(level_info_list, n_levels - 1)
+                break
+            end
         end
 
-        lowest_level_n = length(level_info_list[end].local_top_vector_a_block_indices)
+        if length(level_info_list) > 0
+            lowest_level_n = length(level_info_list[end].local_top_vector_a_block_indices)
+        else
+            lowest_level_n = 0
+        end
         lowest_level_dimensions = this_level_dimensions
     end
 
