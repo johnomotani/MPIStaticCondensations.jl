@@ -545,23 +545,20 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             has_lower_boundary = false
             last_local_top_vector_slice_ind = slice_points[min(group_rank+2,end)] - 1
             has_upper_boundary = false
-            first_top_vector_block_slice_ind = group_rank * slice_step + 1
-            # Maximum last 'block slice-dimension ind' is the total slice dimension size
-            # minus the number of slice points (=n_groups-1), minus the two boundary
-            # points that are removed.
-            last_top_vector_block_slice_ind = min((group_rank + 1) * slice_step,
-                                                  slice_dim.n - (n_groups - 1) - 2)
+            first_top_vector_a_block_slice_ind = group_rank * slice_step + 2
+            last_top_vector_a_block_slice_ind = min((group_rank + 1) * slice_step,
+                                                    last_local_top_vector_slice_ind)
         else
             if group_rank == 0
                 first_local_top_vector_slice_ind = 1
                 has_lower_boundary = slice_dim.has_lower_boundary
-                first_top_vector_block_slice_ind = 1
+                first_top_vector_a_block_slice_ind = 1
             else
                 first_local_top_vector_slice_ind = slice_points[min(group_rank,end)] + 1
                 has_lower_boundary = false
-                first_top_vector_block_slice_ind = group_rank * slice_step + 1
+                first_top_vector_a_block_slice_ind = group_rank * slice_step + 1
                 if slice_dim.has_lower_boundary
-                    first_top_vector_block_slice_ind += 1
+                    first_top_vector_a_block_slice_ind += 1
                 end
             end
             if group_rank == n_groups - 1
@@ -582,15 +579,15 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
             else
                 offset = 0
             end
-            last_top_vector_block_slice_ind = min((group_rank + 1) * slice_step + offset,
-                                                  slice_dim.n - (n_groups - 1))
+            last_top_vector_a_block_slice_ind =
+                min((group_rank + 1) * slice_step + offset, last_local_top_vector_slice_ind)
         end
         all_top_vector_slice_inds = [i for i ∈ 1:last_slice_ind if i ∉ slice_points]
         local_top_vector_indices = get_local_ind_slice(level_dimensions, slice_i,
                                                        all_top_vector_slice_inds)
         local_top_vector_a_block_indices =
             get_local_ind_slice(level_dimensions, slice_i,
-                                first_local_top_vector_slice_ind:last_local_top_vector_slice_ind)
+                                first_top_vector_a_block_slice_ind:last_top_vector_a_block_slice_ind)
         slice_dim = Dimension(; nelement=this_group_nelement, ngrid=slice_dim.ngrid,
                               nrank=slice_dim.nrank, irank=slice_irank, periodic=false,
                               has_lower_boundary=has_lower_boundary,
