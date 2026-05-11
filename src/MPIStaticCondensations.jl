@@ -518,9 +518,14 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         else
             next_distributed_comm = MPI.COMM_NULL
         end
-        this_group_nelement = (min((group_rank + 1) * elements_per_group,
+        # Want to include the last processes, that have no work to do, in the 'last
+        # group', which we can do by hacking `this_group_nelement` to be the same for the
+        # processes that have no work as it was for the last group that did have work.
+        last_group_rank = n_active_groups - 1
+        this_group_nelement = (min((last_group_rank + 1) * elements_per_group,
                                    slice_dim.nelement)
-                               - min(group_rank * elements_per_group, slice_dim.nelement))
+                               - min(last_group_rank * elements_per_group,
+                                     slice_dim.nelement))
         slice_step = elements_per_group * (ngrid - 1)
         if slice_remove_boundaries
             n_slices = (slice_dim_nelement + elements_per_group - 1) ÷ elements_per_group
