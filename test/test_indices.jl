@@ -595,9 +595,9 @@ function test_split_indices_1d_3group()
             @test li.a_block_sub_selection_indices == 1:0
             @test li.level_dimensions[1].has_lower_boundary == false
             @test li.level_dimensions[1].has_upper_boundary == true
-            @test li.level_dimensions[1].n == 0
-            @test li.level_dimensions[1].n_local == 0
-            @test li.level_dimensions[1].nelement == 0
+            @test li.level_dimensions[1].n == 4
+            @test li.level_dimensions[1].n_local == 4
+            @test li.level_dimensions[1].nelement == 2
             @test li.level_dimensions[1].ngrid == 3
             @test li.level_dimensions[1].nrank == 1
             @test li.level_dimensions[1].irank == 0
@@ -1167,9 +1167,9 @@ function test_split_indices_1d_3group_periodic()
             @test li.a_block_sub_selection_indices == 1:0
             @test li.level_dimensions[1].has_lower_boundary == false
             @test li.level_dimensions[1].has_upper_boundary == false
-            @test li.level_dimensions[1].n == 0
-            @test li.level_dimensions[1].n_local == 0
-            @test li.level_dimensions[1].nelement == 0
+            @test li.level_dimensions[1].n == 3
+            @test li.level_dimensions[1].n_local == 3
+            @test li.level_dimensions[1].nelement == 2
             @test li.level_dimensions[1].ngrid == 3
             @test li.level_dimensions[1].nrank == 1
             @test li.level_dimensions[1].irank == 0
@@ -1739,9 +1739,9 @@ function test_split_indices_1d_3group_remove_boundaries()
             @test li.a_block_sub_selection_indices == 1:0
             @test li.level_dimensions[1].has_lower_boundary == false
             @test li.level_dimensions[1].has_upper_boundary == false
-            @test li.level_dimensions[1].n == 0
-            @test li.level_dimensions[1].n_local == 0
-            @test li.level_dimensions[1].nelement == 0
+            @test li.level_dimensions[1].n == 3
+            @test li.level_dimensions[1].n_local == 3
+            @test li.level_dimensions[1].nelement == 2
             @test li.level_dimensions[1].ngrid == 3
             @test li.level_dimensions[1].nrank == 1
             @test li.level_dimensions[1].irank == 0
@@ -2311,9 +2311,9 @@ function test_split_indices_1d_3group_periodic_remove_boundaries()
             @test li.a_block_sub_selection_indices == 1:0
             @test li.level_dimensions[1].has_lower_boundary == false
             @test li.level_dimensions[1].has_upper_boundary == false
-            @test li.level_dimensions[1].n == 0
-            @test li.level_dimensions[1].n_local == 0
-            @test li.level_dimensions[1].nelement == 0
+            @test li.level_dimensions[1].n == 3
+            @test li.level_dimensions[1].n_local == 3
+            @test li.level_dimensions[1].nelement == 2
             @test li.level_dimensions[1].ngrid == 3
             @test li.level_dimensions[1].nrank == 1
             @test li.level_dimensions[1].irank == 0
