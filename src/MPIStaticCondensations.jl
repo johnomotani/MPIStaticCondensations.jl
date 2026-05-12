@@ -273,8 +273,16 @@ function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Inte
     distributed_dims = findall(d -> d.nrank > 1, dimensions)
     if optimise_schur_complement_size
         if !isempty(distributed_dims)
-            idim = last_argmax(d.n for d ∈ dimensions[distributed_dims])
-            return distributed_dims[idim]
+            # When a distributed dimension is being split, require that the dimension can
+            # be split exactly by n_groups - this is not in principle strictly necessary,
+            # but if it is not true then load balance becomes tricky because, for example,
+            # some shared-memory block may own parts of two decoupled sections of the 'A
+            # matrix' (top left block of the 2x2 block matrix), and would then have to
+            # participate in the solves for both 'a blocks'.
+            candidate_dimensions = [i for i ∈ distributed_dims
+                                    if dimensions[i].nrank % n_groups == 0]
+            idim = last_argmax(d.n for d ∈ dimensions[candidate_dimensions])
+            return candidate_dimensions[idim]
         else
             dims_to_divide = findall(d.nelement > 1 for d ∈ dimensions)
             idim = last_argmax(d.n for d ∈ dimensions[dims_to_divide])
