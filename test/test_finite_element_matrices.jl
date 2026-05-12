@@ -117,7 +117,6 @@ function get_iranks(nrank_list, rank)
     return irank_list
 end
 
-using Debugger
 function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                                      comm_size, n_shared, tol, this_seed;
                                      all_use_sparse=true, all_sparse_stencils=true)
