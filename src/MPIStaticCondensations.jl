@@ -812,7 +812,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             if any(d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
                 has_duplicate = true
                 pair_i = 0
-                for (d, i) ∈ zip(reverse(dimensions), reverse(Tuple(inds)))
+                for (d, i) ∈ zip(reverse(lowest_level_dimensions), reverse(Tuple(inds)))
                     n = d.periodic && d.has_lower_boundary && d.has_upper_boundary ? d.n - 1 : d.n
                     if d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n
                         # pair_i corresponds to the first index in this dimension.
