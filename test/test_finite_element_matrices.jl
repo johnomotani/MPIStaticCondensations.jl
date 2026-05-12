@@ -156,8 +156,8 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
-                periodic_list ∈ (all_periodic ? bool_perms : fill(false, length(this_nelement_list))),
-                remove_boundaries_list ∈ (all_remove_boundaries ? bool_perms : fill(false, length(this_nelement_list)))
+                periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
+                remove_boundaries_list ∈ (all_remove_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),))
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
             dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
