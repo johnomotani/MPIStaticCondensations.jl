@@ -791,7 +791,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     end
 
     # Create lowest level solver
-    if any(d.periodic && (d.has_lower_boundary || d.has_upper_boundary) for d ∈ lowest_level_dimensions)
+    if lowest_level_n > 0 && any(d.periodic && (d.has_lower_boundary || d.has_upper_boundary) for d ∈ lowest_level_dimensions)
         for d ∈ lowest_level_dimensions
             if d.periodic && ((d.has_lower_boundary && !d.has_upper_boundary)
                               || (!d.has_lower_boundary && d.has_upper_boundary))
