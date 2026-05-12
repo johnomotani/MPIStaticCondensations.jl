@@ -522,10 +522,15 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         # group', which we can do by hacking `this_group_nelement` to be the same for the
         # processes that have no work as it was for the last group that did have work.
         last_group_rank = n_active_groups - 1
-        this_group_nelement = (min((last_group_rank + 1) * elements_per_group,
+        last_group_nelement = (min((last_group_rank + 1) * elements_per_group,
                                    slice_dim.nelement)
                                - min(last_group_rank * elements_per_group,
                                      slice_dim.nelement))
+        if group_rank ≥ last_group_rank
+            this_group_nelement = last_group_nelement
+        else
+            this_group_nelement = elements_per_group
+        end
         slice_step = elements_per_group * (ngrid - 1)
         if slice_remove_boundaries
             n_slices = (slice_dim_nelement + elements_per_group - 1) ÷ elements_per_group
