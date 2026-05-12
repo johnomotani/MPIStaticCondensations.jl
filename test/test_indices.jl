@@ -7525,6 +7525,295 @@ function test_split_indices_edge_cases()
 
     end
 
+    nelement_list = [4, 4]
+    ngrid_list = [3, 5]
+    periodic_list = [true, false]
+    remove_boundaries_list = [false, false]
+
+    n_groups = 3
+    nrank_list = [1, 1]
+    n_shared = 9
+    @testset "nelement_list=$nelement_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank_list=$nrank_list, n_shared=$n_shared, n_groups=$n_groups" begin
+        irank = 0
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 1:72
+            @test li.a_block_sub_selection_indices == 1:72
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 1
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 1:72
+            @test li.a_block_sub_selection_indices == 1:72
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 2
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 1:72
+            @test li.a_block_sub_selection_indices == 1:72
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == true
+            @test li.level_dimensions[2].has_upper_boundary == false
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 3
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 82:153
+            @test li.a_block_sub_selection_indices == 73:144
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 4
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 82:153
+            @test li.a_block_sub_selection_indices == 73:144
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 5
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 82:153
+            @test li.a_block_sub_selection_indices == 73:144
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 6
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 7
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+
+        irank = 8
+        irank_list = [0, 0]
+        @testset "irank=$irank, irank_list=$irank_list" begin
+            li = get_level_info(ngrid_list, nelement_list, periodic_list,
+                                remove_boundaries_list, nrank_list, irank_list, n_shared,
+                                n_groups, irank)
+            @test li.bottom_vector_indices == vcat(73:80, 73)
+            @test li.local_bottom_vector_indices == 73:81
+            @test li.top_vector_indices == vcat(1:8, 1, 10:17, 10, 19:26, 19, 28:35, 28, 37:44, 37, 46:53, 46, 55:62, 55, 64:71, 64, 82:89, 82, 91:98, 91, 100:107, 100, 109:116, 109, 118:125, 118, 127:134, 127, 136:143, 136, 145:152, 145)
+            @test li.global_top_vector_size == 144
+            @test li.local_top_vector_indices == vcat(1:72, 82:153)
+            @test li.local_top_vector_a_block_indices == 1:0
+            @test li.a_block_sub_selection_indices == 1:0
+            @test li.level_dimensions[1].has_lower_boundary == true
+            @test li.level_dimensions[1].has_upper_boundary == true
+            @test li.level_dimensions[2].has_lower_boundary == false
+            @test li.level_dimensions[2].has_upper_boundary == true
+            @test li.level_dimensions[1].n == 9
+            @test li.level_dimensions[1].n_local == 9
+            @test li.level_dimensions[1].nelement == 4
+            @test li.level_dimensions[1].ngrid == 3
+            @test li.level_dimensions[1].nrank == 1
+            @test li.level_dimensions[1].irank == 0
+            @test li.level_dimensions[2].n == 8
+            @test li.level_dimensions[2].n_local == 8
+            @test li.level_dimensions[2].nelement == 2
+            @test li.level_dimensions[2].ngrid == 5
+            @test li.level_dimensions[2].nrank == 1
+            @test li.level_dimensions[2].irank == 0
+        end
+    end
+
     return nothing
 end
 
