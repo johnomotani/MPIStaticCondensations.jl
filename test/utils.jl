@@ -16,11 +16,10 @@ function get_comms(shared_nproc, with_comm=false)
     distributed_comm = MPI.Comm_split(MPI.COMM_WORLD, distributed_color,
                                       distributed_rank)
 
-    local_win_store_float = nothing
+    local_win_store_float = MPI.Win[]
     if shared_comm == MPI.COMM_SELF && !with_comm
         allocate_array_float = (args...)->zeros(Float64, args...)
     else
-        local_win_store_float = MPI.Win[]
         allocate_array_float = (dims...; comm=shared_comm)->begin
             this_shared_rank = MPI.Comm_rank(comm)
             if this_shared_rank == 0
@@ -39,11 +38,10 @@ function get_comms(shared_nproc, with_comm=false)
         end
     end
 
-    local_win_store_int = nothing
+    local_win_store_int = MPI.Win[]
     if shared_comm == MPI.COMM_SELF && !with_comm
         allocate_array_int = (args...)->zeros(Float64, args...)
     else
-        local_win_store_int = MPI.Win[]
         allocate_array_int = (dims...; comm=shared_comm)->begin
             this_shared_rank = MPI.Comm_rank(comm)
             if this_shared_rank == 0

@@ -22,8 +22,8 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
 
     global_matrix, local_matrix =
         assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
-                                           shared_comm, allocate_shared_float, rng,
-                                           sparse_stencils)
+                                           shared_comm, allocate_shared_float,
+                                           allocate_shared_int, rng, sparse_stencils)
     rhs_global, rhs_local =
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
@@ -65,59 +65,6 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     end
     MPI.Barrier(shared_comm)
     return nothing
-end
-
-function generate_bool_permutations(n::Integer)
-    return generate_bool_permutations(Val(n))
-end
-function generate_bool_permutations(N::Val)
-    perms = Vector{Bool}[]
-    for inds ∈ CartesianIndices(ntuple(i->2, N))
-        this_perm = [Bool(i-1) for i ∈ Tuple(inds)]
-        push!(perms, this_perm)
-    end
-    return perms
-end
-
-function get_nrank_permutations(nelement_list, nrank)
-    nrank_list = Vector{Int64}[]
-    ndim = length(nelement_list)
-    nrank_factors = factor(Vector, nrank)
-    function recursive_push_nrank!(remaining_nrank_factors, this_nrank_list, dim)
-        if dim == 1
-            remaining_nrank = prod(remaining_nrank_factors; init=1)
-            if nelement_list[1] % remaining_nrank == 0
-                this_nrank_list[1] = remaining_nrank
-                push!(nrank_list, this_nrank_list)
-            end
-            return nothing
-        end
-        for this_factors ∈ unique(collect(combinations(remaining_nrank_factors)))
-            this_nrank = prod(this_factors; init=1)
-            if nelement_list[dim] % this_nrank == 0
-                new_nrank_list = copy(this_nrank_list)
-                new_nrank_list[dim] = this_nrank
-                new_remaining_nrank_factors = copy(remaining_nrank_factors)
-                for f ∈ this_factors
-                    i = searchsortedfirst(new_remaining_nrank_factors, f)
-                    popat!(new_remaining_nrank_factors, i)
-                end
-                recursive_push_nrank!(new_remaining_nrank_factors, new_nrank_list, dim - 1)
-            end
-        end
-        return nothing
-    end
-    recursive_push_nrank!(nrank_factors, zeros(ndim), ndim)
-    return nrank_list
-end
-
-function get_iranks(nrank_list, rank)
-    irank_list = similar(nrank_list)
-    for (i, nrank) ∈ enumerate(nrank_list)
-        rank, this_irank = divrem(rank, nrank)
-        irank_list[i] = this_irank
-    end
-    return irank_list
 end
 
 function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
