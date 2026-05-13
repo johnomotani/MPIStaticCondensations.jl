@@ -244,20 +244,32 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                             comm::MPI.Comm,
                                             distributed_comm::Union{MPI.Comm,Nothing},
                                             shared_comm::MPI.Comm, allocate_shared_float,
-                                            rng, sparse_stencils::Bool)
+                                            allocate_shared_int, rng,
+                                            sparse_stencils::Bool; return_sparse=false)
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
     distributed_comm_size = comm_size ÷ shared_comm_size
+    distributed_comm_rank = rank ÷ shared_comm_size
     shared_comm_rank = MPI.Comm_rank(shared_comm)
 
     local_n = prod(d.n_local for d ∈ dimensions)
-    local_matrix = allocate_shared_float(local_n, local_n)
-    global_matrix = nothing
+    if return_sparse
+        local_data = nothing
+        global_data = nothing
+        this_block_global_i = nothing
+        this_block_global_j = nothing
+        local_i = nothing
+        local_j = nothing
+        n_local = allocate_shared_int(1)
+    else
+        local_matrix = allocate_shared_float(local_n, local_n)
+        global_matrix = nothing
+    end
     if rank == 0
-        data, global_i, global_j = construct_sparse_finite_element_matrix(dimensions, rng,
-                                                                          sparse_stencils,
-                                                                          false)
+        data, global_i, global_j =
+            construct_sparse_finite_element_matrix(Tuple(dimensions), rng,
+                                                   sparse_stencils, false)
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
                                    for irank ∈ 0:distributed_comm_size-1]
@@ -275,43 +287,109 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         data_to_distribute = copy(data)
         data_to_distribute ./= overlap_count
 
-        for irank ∈ 1:distributed_comm_size-1
-            local_sparse_inds = local_block_sparse_indices[irank+1]
-            local_i = local_i_list[irank+1]
-            local_j = local_j_list[irank+1]
+        if return_sparse
+            for irank ∈ 1:distributed_comm_size-1
+                local_sparse_inds = local_block_sparse_indices[irank+1]
 
-            local_matrix .= 0
-            for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
-                local_matrix[i,j] = data_to_distribute[isparse]
+                n_local[] = length(local_sparse_inds)
+
+                MPI.Send(n_local, distributed_comm; dest=irank)
+                MPI.Send(data_to_distribute[local_sparse_inds], distributed_comm;
+                         dest=irank)
+                MPI.Send(global_i[local_sparse_inds], distributed_comm; dest=irank)
+                MPI.Send(global_j[local_sparse_inds], distributed_comm; dest=irank)
+                MPI.Send(local_i_list[irank+1], distributed_comm; dest=irank)
+                MPI.Send(local_j_list[irank+1], distributed_comm; dest=irank)
             end
-            MPI.Send(local_matrix, distributed_comm; dest=irank)
-        end
+        else
+            for irank ∈ 1:distributed_comm_size-1
+                local_sparse_inds = local_block_sparse_indices[irank+1]
+                local_i = local_i_list[irank+1]
+                local_j = local_j_list[irank+1]
 
-        local_sparse_inds = local_block_sparse_indices[1]
-        local_i = local_i_list[1]
-        local_j = local_j_list[1]
-        local_matrix .= 0
-        for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
-            local_matrix[i,j] = data_to_distribute[isparse]
+                local_matrix .= 0
+                for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
+                    local_matrix[i,j] = data_to_distribute[isparse]
+                end
+                MPI.Send(local_matrix, distributed_comm; dest=irank)
+            end
         end
 
         apply_periodicity_to_indices!(global_i, dimensions)
         apply_periodicity_to_indices!(global_j, dimensions)
 
-        # Assemble global matrix
-        n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
-        global_matrix = zeros(n, n)
-        # Cannot broadcast data into global_matrix using global_i and global_j because
-        # once periodicity is accounted for there will be duplicate indices, whose
-        # corresponding entries must be summed.
-        for (entry, i, j) ∈ zip(data, global_i, global_j)
-            global_matrix[i,j] += entry
+        local_sparse_inds = local_block_sparse_indices[1]
+
+        if return_sparse
+            global_data = data
+            n_local[] = length(local_sparse_inds)
+            MPI.Barrier(shared_comm)
+            local_data = allocate_shared_float(n_local[])
+            this_block_global_i = allocate_shared_int(n_local[])
+            this_block_global_j = allocate_shared_int(n_local[])
+            local_i = allocate_shared_int(n_local[])
+            local_j = allocate_shared_int(n_local[])
+            local_data .= data[local_sparse_inds]
+            this_block_global_i .= global_i[local_sparse_inds]
+            this_block_global_j .= global_j[local_sparse_inds]
+            local_i .= local_i_list[1]
+            local_j .= local_j_list[1]
+        else
+            local_i = local_i_list[1]
+            local_j = local_j_list[1]
+            local_matrix .= 0
+            for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
+                local_matrix[i,j] = data_to_distribute[isparse]
+            end
+
+            # Assemble global matrix
+            n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
+            global_matrix = zeros(n, n)
+            # Cannot broadcast data into global_matrix using global_i and global_j because
+            # once periodicity is accounted for there will be duplicate indices, whose
+            # corresponding entries must be summed.
+            for (entry, i, j) ∈ zip(data, global_i, global_j)
+                global_matrix[i,j] += entry
+            end
         end
-    elseif shared_comm_rank == 0
-        MPI.Recv!(local_matrix, distributed_comm; source=0)
+    elseif return_sparse && distributed_comm_rank == 0
+        MPI.Barrier(shared_comm)
+        local_data = allocate_shared_float(n_local[])
+        this_block_global_i = allocate_shared_int(n_local[])
+        this_block_global_j = allocate_shared_int(n_local[])
+        local_i = allocate_shared_int(n_local[])
+        local_j = allocate_shared_int(n_local[])
+    else
+        if return_sparse
+            n_local = allocate_shared_int(1)
+            if shared_comm_rank == 0
+                MPI.Recv!(n_local, distributed_comm; source=0)
+            end
+            MPI.Barrier(shared_comm)
+            local_data = allocate_shared_float(n_local[])
+            this_block_global_i = allocate_shared_int(n_local[])
+            this_block_global_j = allocate_shared_int(n_local[])
+            local_i = allocate_shared_int(n_local[])
+            local_j = allocate_shared_int(n_local[])
+            if shared_comm_rank == 0
+                MPI.Recv!(local_data, distributed_comm; source=0)
+                MPI.Recv!(this_block_global_i, distributed_comm; source=0)
+                MPI.Recv!(this_block_global_j, distributed_comm; source=0)
+                MPI.Recv!(local_i, distributed_comm; source=0)
+                MPI.Recv!(local_j, distributed_comm; source=0)
+            end
+        else
+            if shared_comm_rank == 0
+                MPI.Recv!(local_matrix, distributed_comm; source=0)
+            end
+        end
     end
 
-    return global_matrix, local_matrix
+    if return_sparse
+        return global_data, local_data, this_block_global_i, this_block_global_j, local_i, local_j
+    else
+        return global_matrix, local_matrix
+    end
 end
 
 function remove_duplicates_from_global_vector(x_global_with_dups,
@@ -427,4 +505,57 @@ function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
     end
 
     return x_global
+end
+
+function generate_bool_permutations(n::Integer)
+    return generate_bool_permutations(Val(n))
+end
+function generate_bool_permutations(N::Val)
+    perms = Vector{Bool}[]
+    for inds ∈ CartesianIndices(ntuple(i->2, N))
+        this_perm = [Bool(i-1) for i ∈ Tuple(inds)]
+        push!(perms, this_perm)
+    end
+    return perms
+end
+
+function get_nrank_permutations(nelement_list, nrank)
+    nrank_list = Vector{Int64}[]
+    ndim = length(nelement_list)
+    nrank_factors = factor(Vector, nrank)
+    function recursive_push_nrank!(remaining_nrank_factors, this_nrank_list, dim)
+        if dim == 1
+            remaining_nrank = prod(remaining_nrank_factors; init=1)
+            if nelement_list[1] % remaining_nrank == 0
+                this_nrank_list[1] = remaining_nrank
+                push!(nrank_list, this_nrank_list)
+            end
+            return nothing
+        end
+        for this_factors ∈ unique(collect(combinations(remaining_nrank_factors)))
+            this_nrank = prod(this_factors; init=1)
+            if nelement_list[dim] % this_nrank == 0
+                new_nrank_list = copy(this_nrank_list)
+                new_nrank_list[dim] = this_nrank
+                new_remaining_nrank_factors = copy(remaining_nrank_factors)
+                for f ∈ this_factors
+                    i = searchsortedfirst(new_remaining_nrank_factors, f)
+                    popat!(new_remaining_nrank_factors, i)
+                end
+                recursive_push_nrank!(new_remaining_nrank_factors, new_nrank_list, dim - 1)
+            end
+        end
+        return nothing
+    end
+    recursive_push_nrank!(nrank_factors, zeros(ndim), ndim)
+    return nrank_list
+end
+
+function get_iranks(nrank_list, rank)
+    irank_list = similar(nrank_list)
+    for (i, nrank) ∈ enumerate(nrank_list)
+        rank, this_irank = divrem(rank, nrank)
+        irank_list[i] = this_irank
+    end
+    return irank_list
 end
