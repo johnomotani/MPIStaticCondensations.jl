@@ -151,6 +151,9 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
             use_sparse ∈ use_sparse_list,
             optimize_schur_complement_size ∈ (all_optimize_schur_complement_size ? (true, false) : (true,)),
             sparse_stencils ∈ sparse_stencils_list
+        if rank == 0
+            println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, optimize_schur_complement_size=$optimize_schur_complement_size, sparse_stencils=$sparse_stencils")
+        end
 
         @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
@@ -158,6 +161,9 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
                 periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
                 remove_boundaries_list ∈ (all_remove_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),))
+            if rank == 0
+                println("  - n_shared=$n_shared, ($use_sparse, $optimize_schur_complement_size, $sparse_stencils), this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list")
+            end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
             dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
