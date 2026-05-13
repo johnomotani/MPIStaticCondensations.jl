@@ -696,6 +696,26 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
 end
 
 """
+    mpi_static_condensation(dimensions::Vector{<:Dimension};
+                            comm::MPI.Comm=MPI.COMM_WORLD,
+                            distributed_comm::Union{MPI.Comm,Nothing}=missing,
+                            shared_comm::MPI.Comm=MPI.COMM_SELF,
+                            allocate_shared_float::Union{Function,Nothing}=nothing,
+                            allocate_shared_int::Union{Function,Nothing}=nothing,
+                            synchronize_shared::Union{Function,Nothing}=nothing,
+                            schur_tile_size::Union{Nothing,Integer}=nothing,
+                            use_sparse::Bool=true, separate_Ainv_B::Bool=false,
+                            optimize_schur_complement_size::Bool=true,
+                            timer::Union{Nothing,TimerOutput}=nothing,
+                            check_lu::Bool=false)
+
+`dimensions` is a length-\$d\$ Vector of `Dimension` objects, which can be created with
+`create_dimension()`, which describe the structure of the \$d\$-dimensional
+continuous-finite-element grid.  The right-hand-side and solution vectors are flattened
+(aka. linear-indexed) versions of the \$d\$-dimensional array representing a variable on
+the finite element grid. The order of `dimensions` corresponds to the order of the indices
+in the multi-dimensional array. For a description of the discretization, see the
+`create_dimensions()` docstring.
 
 `comm` is divided into equally sized shared-memory blocks. `shared_comm` represents the
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
@@ -711,17 +731,20 @@ solver, and within the MPISchurComplement solvers.
 `separate_Ainv_B` is passed through to the MPISchurComplement constructors.
 
 `optimize_schur_complement_size` sets the strategy used to pick which dimension to split
-at each level. The default strategy (`true`) splits the largest (according to value of
-`n`) dimension remaining at each level, in order to minimise the size of the Schur
-complement block. The alternative strategy (`false`) tries to optimise load balance by
-considering first dimensions whose remaining `nelement` value can be exactly divided by
-the group size (picking the largest of these), and only considering other dimensions if no
-dimension can be exactly divided. In either case, dimensions that are distributed over
-different shared-memory MPI blocks are divided first, until the locally-owned parts of all
-dimensions are contained within the same shared-memory MPI block. The two strategies will
-be equivalent as long as the largest dimension at each level is anyway exactly divisible,
-which may often be the case (e.g. if the number of processes is a power of 2, and
-`nelement` of the dimensions contain enough factors of 2).
+at each level, when splitting between shared-memory processes (for distributed-memory the
+group size is always required to exactly divide the number of elements, to be consistent
+with the distributed-memory domain-decomposition). The default strategy (`true`) splits
+the largest (according to value of `n`) dimension remaining at each level, in order to
+minimise the size of the Schur complement block. The alternative strategy (`false`) tries
+to optimise load balance by considering first dimensions whose remaining `nelement` value
+can be exactly divided by the group size (picking the largest of these), and only
+considering other dimensions if no dimension can be exactly divided. In either case,
+dimensions that are distributed over different shared-memory MPI blocks are divided first,
+until the locally-owned parts of all dimensions are contained within the same
+shared-memory MPI block. The two strategies will be equivalent as long as the largest
+dimension at each level is anyway exactly divisible, which may often be the case (e.g. if
+the number of processes is a power of 2, and `nelement` of the dimensions contain enough
+factors of 2).
 
 `timer` can be passed a `TimerOutput` object to collect run timings.
 
