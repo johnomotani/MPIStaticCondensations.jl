@@ -220,7 +220,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([2, 2, 2], [3, 4, 5], 8, rank, comm_size, n_shared, tol, 3001; all_use_sparse=false, all_sparse_stencils=false)
                 test_dimension_combinations([2, 3, 4], [3, 4, 5], 24, rank, comm_size, n_shared, tol, 3002; all_use_sparse=false, all_sparse_stencils=false)
                 if comm_size ≥ 8
-                    test_dimension_combinations([8, 8, 8], [3, 3, 3], 512, rank, comm_size, n_shared, tol, 3003; all_use_sparse=false, all_optimize_schur_complement_size=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false)
+                    test_dimension_combinations([8, 8, 8], [3, 4, 5], 512, rank, comm_size, n_shared, tol, 3003; all_use_sparse=false, all_optimize_schur_complement_size=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false)
                 end
                 if comm_size ≥ 16
                     test_dimension_combinations([9, 9, 32], [3, 3, 3], 2592, rank, comm_size, n_shared, tol, 3004; all_use_sparse=false, all_optimize_schur_complement_size=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false)
