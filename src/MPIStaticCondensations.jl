@@ -317,17 +317,7 @@ function pick_dimension_to_split(dimensions::Vector{<:Dimension}, n_groups::Inte
     error("Case not handled - this should never happen")
 end
 
-function get_flattened_index(indices::CartesianIndex, dimensions::Vector{<:Dimension})
-    flat_i = 0
-    for (i, dim) ∈ zip(reverse(Tuple(indices)), reverse(dimensions))
-        flat_i = flat_i * dim.n + dim.global_inds[i] - 1
-    end
-    # So far constructed a 0-based index, so convert to 1-based.
-    flat_i += 1
-    return flat_i
-end
-
-function get_local_flattened_index(indices::CartesianIndex, dim_sizes::Vector{<:Integer})
+function get_local_flattened_index(indices::CartesianIndex, dim_sizes::Tuple)
     flat_i = 0
     for (i, n) ∈ zip(reverse(Tuple(indices)), reverse(dim_sizes))
         flat_i = flat_i * n + i - 1
@@ -339,9 +329,15 @@ end
 
 function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                              slice_inds::OrdinalRange{<:Integer})
-    dimensions = copy(dimensions)
-    dim_sizes = [d.n_local for d ∈ dimensions]
-    result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dim_sizes[i] for i ∈ 1:length(dimensions))
+    dim_sizes = Tuple(d.n_local for d ∈ dimensions)
+    result_ranges = Tuple(i == dim_to_slice ? slice_inds : 1:dim_sizes[i]
+                          for i ∈ 1:length(dimensions))
+    return get_local_ind_slice(Tuple(dimensions), dim_to_slice, slice_inds, dim_sizes,
+                               result_ranges)
+end
+function get_local_ind_slice(dimensions::Tuple, dim_to_slice::Integer,
+                             slice_inds::OrdinalRange{<:Integer}, dim_sizes::Tuple,
+                             result_ranges::Tuple)
     inds = fill(eltype(slice_inds)(-1), prod(length(r) for r ∈ result_ranges))
     for (local_flat_i, i) ∈ enumerate(CartesianIndices(result_ranges))
         inds[local_flat_i] = get_local_flattened_index(i, dim_sizes)
@@ -351,15 +347,19 @@ end
 
 function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Integer,
                              slice_inds::Vector{<:Integer})
-    # When `slice_inds` is a Vector, not an OrdinalRange, cannot use CartesianIndices on
-    # it, so have to do more complicated loops.
-    dimensions = copy(dimensions)
     result_ranges_left = Tuple(1:dimensions[i].n_local for i ∈ 1:dim_to_slice-1)
     result_ranges_right = Tuple(1:dimensions[i].n_local for i ∈ dim_to_slice+1:length(dimensions))
+    dim_sizes = Tuple(d.n_local for d ∈ dimensions)
+    return get_local_ind_slice(slice_inds, result_ranges_left, result_ranges_right,
+                               dim_sizes)
+end
+function get_local_ind_slice(slice_inds::Vector{<:Integer}, result_ranges_left::Tuple,
+                             result_ranges_right::Tuple, dim_sizes::Tuple)
+    # When `slice_inds` is a Vector, not an OrdinalRange, cannot use CartesianIndices on
+    # it, so have to do more complicated loops.
     inds = fill(eltype(slice_inds)(-1),
                 prod(length(r) for r ∈ result_ranges_left; init=1) * length(slice_inds) *
                 prod(length(r) for r ∈ result_ranges_right; init=1))
-    dim_sizes = [d.n_local for d ∈ dimensions]
     local_flat_i = 0
     for i_right ∈ CartesianIndices(result_ranges_right), i_slice ∈ slice_inds,
             i_left ∈ CartesianIndices(result_ranges_left)
@@ -371,8 +371,13 @@ function get_local_ind_slice(dimensions::Vector{<:Dimension}, dim_to_slice::Inte
 end
 
 function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{<:Integer})
+    n_local_tuple = Tuple(d.n_local for d ∈ dimensions)
+    return get_global_indices(dimensions, local_inds, n_local_tuple)
+end
+function get_global_indices(dimensions::Vector{<:Dimension},
+                            local_inds::Vector{<:Integer}, n_local_tuple)
     global_inds = similar(local_inds)
-    cartinds = CartesianIndices(Tuple(d.n_local for d ∈ dimensions))
+    cartinds = CartesianIndices(n_local_tuple)
     for (i, ind) ∈ enumerate(local_inds)
         cart_i = cartinds[ind]
         global_i = 0
@@ -695,6 +700,42 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
            level_dimensions, next_comm, next_distributed_comm, next_shared_comm
 end
 
+function get_lowest_level_duplicates(ind_type::Type,
+                                     lowest_level_dimensions::Vector{<:Dimension})
+    n_tuple = Tuple(d.n for d ∈ lowest_level_dimensions)
+    return get_lowest_level_duplicates(ind_type, lowest_level_dimensions, n_tuple)
+end
+function get_lowest_level_duplicates(ind_type::Type,
+                                     lowest_level_dimensions::Vector{<:Dimension},
+                                     n_tuple::Tuple)
+    lowest_level_non_duplicate_indices = ind_type[]
+    periodic_pairs = Tuple{ind_type,ind_type}[]
+    level_cartinds = CartesianIndices(n_tuple)
+    for (flat_i, inds) ∈ enumerate(level_cartinds)
+        has_duplicate = false
+        if any(d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
+            has_duplicate = true
+            pair_i = 0
+            for (d, i) ∈ zip(reverse(lowest_level_dimensions), reverse(Tuple(inds)))
+                n = d.periodic && d.has_lower_boundary && d.has_upper_boundary ? d.n - 1 : d.n
+                if d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n
+                    # pair_i corresponds to the first index in this dimension.
+                    pair_i = pair_i * n
+                else
+                    pair_i = pair_i * n + i - 1
+                end
+            end
+            pair_i += 1
+            push!(periodic_pairs, (pair_i, flat_i))
+        end
+        if !has_duplicate
+            push!(lowest_level_non_duplicate_indices, flat_i)
+        end
+    end
+
+    return lowest_level_non_duplicate_indices, periodic_pairs
+end
+
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
                             comm::MPI.Comm=MPI.COMM_WORLD,
@@ -835,30 +876,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                       * "the lowest level) should have both boundaries or neither")
             end
         end
-        lowest_level_non_duplicate_indices = ind_type[]
-        periodic_pairs = Tuple{ind_type,ind_type}[]
-        level_cartinds = CartesianIndices(Tuple(d.n for d ∈ lowest_level_dimensions))
-        for (flat_i, inds) ∈ enumerate(level_cartinds)
-            has_duplicate = false
-            if any(d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n for (d, i) ∈ zip(lowest_level_dimensions, Tuple(inds)))
-                has_duplicate = true
-                pair_i = 0
-                for (d, i) ∈ zip(reverse(lowest_level_dimensions), reverse(Tuple(inds)))
-                    n = d.periodic && d.has_lower_boundary && d.has_upper_boundary ? d.n - 1 : d.n
-                    if d.periodic && d.has_lower_boundary && d.has_upper_boundary && i == d.n
-                        # pair_i corresponds to the first index in this dimension.
-                        pair_i = pair_i * n
-                    else
-                        pair_i = pair_i * n + i - 1
-                    end
-                end
-                pair_i += 1
-                push!(periodic_pairs, (pair_i, flat_i))
-            end
-            if !has_duplicate
-                push!(lowest_level_non_duplicate_indices, flat_i)
-            end
-        end
+        lowest_level_non_duplicate_indices, periodic_pairs =
+            get_lowest_level_duplicates(ind_type, lowest_level_dimensions)
         lowest_level_periodic_index_pairs = zeros(ind_type, 2, length(periodic_pairs))
         for (i, pair) ∈ enumerate(periodic_pairs)
             lowest_level_periodic_index_pairs[:,i] .= pair

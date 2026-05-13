@@ -67,9 +67,12 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     return nothing
 end
 
-function generate_bool_permutations(n)
+function generate_bool_permutations(n::Integer)
+    return generate_bool_permutations(Val(n))
+end
+function generate_bool_permutations(N::Val)
     perms = Vector{Bool}[]
-    for inds ∈ CartesianIndices(Tuple(2 for _ ∈ 1:n))
+    for inds ∈ CartesianIndices(ntuple(i->2, N))
         this_perm = [Bool(i-1) for i ∈ Tuple(inds)]
         push!(perms, this_perm)
     end

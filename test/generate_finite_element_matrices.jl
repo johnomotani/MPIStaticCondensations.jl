@@ -3,7 +3,7 @@ using MPIStaticCondensations: Dimension
 using MPI
 
 function get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
-    combined_inds = Tuple((iel - 1) * (ng - 1) + igr for (ng, iel, igr) ∈ zip(ngrid_tuple, Tuple(ielement), Tuple(igrid)))
+    combined_inds = [(iel - 1) * (ng - 1) + igr for (ng, iel, igr) ∈ zip(ngrid_tuple, ielement, igrid)]
     i_flat = 0
     for (i, n) ∈ zip(reverse(combined_inds), reverse(n_tuple))
         i_flat = n * i_flat + i - 1
@@ -11,55 +11,62 @@ function get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
     return i_flat + 1
 end
 
-function construct_sparse_finite_element_matrix(dimensions::Vector{<:Dimension}, rng,
+function construct_sparse_finite_element_matrix(dimensions::Tuple, rng,
                                                 sparse_stencils::Bool,
                                                 handle_periodicity::Bool=true)
 
     data = Float64[]
     global_inds = Tuple{Int64,Int64}[]
-    element_indices = CartesianIndices(Tuple(d.ngrid for d ∈ dimensions))
-    n_tuple = Tuple(d.n for d ∈ dimensions)
-    ngrid_tuple = Tuple(d.ngrid for d ∈ dimensions)
+    n_tuple = map(d->d.n, dimensions)
+    ngrid_tuple = map(d->d.ngrid, dimensions)
+    nelement_tuple = map(d->d.nelement, dimensions)
+    element_indices = CartesianIndices(ngrid_tuple)
     counter = 0
     if sparse_stencils
         nd = length(dimensions)
-        for ielement ∈ CartesianIndices(Tuple(d.nelement for d ∈ dimensions))
+        for ielement ∈ CartesianIndices(nelement_tuple)
             istart = counter
             for igrid ∈ element_indices, d ∈ nd, this_jgrid ∈ 1:ngrid_tuple[d]
-                jgrid = CartesianIndex(Tuple(this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd))
-                global_i = get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
-                global_j = get_flattened_index(n_tuple, ngrid_tuple, ielement, jgrid)
+                jgrid = [this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd]
+                if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
+                        && any(jg == 1 && je > 1 for (jg, je) ∈ zip(jgrid, Tuple(ielement))))
+                    # Avoid repeated global index pairs.
+                    continue
+                end
+                global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
+                global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), jgrid)
                 i = (global_i, global_j)
-                if i ∉ global_inds
-                    # Search global_inds to avoid appending repeats.
-                    push!(global_inds, i)
-                    if igrid == jgrid
-                        # Add 1 to diagonal to ensure matrix is invertible.
-                        push!(data, 1.0 + rand(rng))
-                        counter += 1
-                    else
-                        push!(data, rand(rng))
-                        counter += 1
-                    end
+                # Search global_inds to avoid appending repeats.
+                push!(global_inds, i)
+                if [Tuple(igrid)...] == jgrid
+                    # Add 1 to diagonal to ensure matrix is invertible.
+                    push!(data, 1.0 + rand(rng))
+                    counter += 1
+                else
+                    push!(data, rand(rng))
+                    counter += 1
                 end
             end
             iend = counter
         end
     else
-        for ielement ∈ CartesianIndices(Tuple(d.nelement for d ∈ dimensions))
+        for ielement ∈ CartesianIndices(nelement_tuple)
             for igrid ∈ element_indices, jgrid ∈ element_indices
-                global_i = get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
-                global_j = get_flattened_index(n_tuple, ngrid_tuple, ielement, jgrid)
+                if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
+                        && any(jg == 1 && je > 1 for (jg, je) ∈ zip(Tuple(jgrid), Tuple(ielement))))
+                    # Avoid repeated global index pairs.
+                    continue
+                end
+                global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
+                global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(jgrid))
                 i = (global_i, global_j)
-                if i ∉ global_inds
-                    # Search global_inds to avoid appending repeats.
-                    push!(global_inds, i)
-                    if igrid == jgrid
-                        # Add 1 to diagonal to ensure matrix is invertible.
-                        push!(data, 1.0 + rand(rng))
-                    else
-                        push!(data, rand(rng))
-                    end
+                # Search global_inds to avoid appending repeats.
+                push!(global_inds, i)
+                if igrid == jgrid
+                    # Add 1 to diagonal to ensure matrix is invertible.
+                    push!(data, 1.0 + rand(rng))
+                else
+                    push!(data, rand(rng))
                 end
             end
         end
@@ -123,7 +130,13 @@ function get_sparse_indices_for_local_block(global_i, global_j, dimensions, iran
                          periodic=d.periodic, remove_boundaries=d.remove_boundaries)
         for (d, irank) ∈ zip(dimensions, irank_list)
     ]
-    global_cartinds = CartesianIndices(Tuple(d.n for d ∈ local_dimensions))
+    n_tuple = Tuple(d.n for d ∈ local_dimensions)
+    return get_sparse_indices_for_local_block(global_i, global_j, local_dimensions,
+                                              irank_list, n_tuple)
+end
+function get_sparse_indices_for_local_block(global_i, global_j, local_dimensions,
+                                            irank_list, n_tuple::Tuple)
+    global_cartinds = CartesianIndices(n_tuple)
     local_sparse_inds = Int64[]
     local_i = Int64[]
     local_j = Int64[]
@@ -155,7 +168,7 @@ function get_sparse_indices_for_all_local_blocks(global_i, global_j, dimensions,
     return local_block_sparse_indices, local_i_list, local_j_list
 end
 
-function get_rhs_indices_for_local_block(dimensions, irank_list)
+function get_rhs_indices_for_local_block(dimensions, irank_list::AbstractVector)
     local_dimensions = [
         create_dimension(; nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank, irank=irank,
                          periodic=d.periodic, remove_boundaries=d.remove_boundaries)
@@ -168,6 +181,9 @@ function get_rhs_indices_for_local_block(dimensions, irank_list)
         return irank*nelement_local*ngrid_minus_one+1:(irank+1)*nelement_local*ngrid_minus_one+1
     end
     dim_ranges = Tuple(get_dim_range(d) for d in local_dimensions)
+    return get_rhs_indices_for_local_block(dimensions, dim_ranges)
+end
+function get_rhs_indices_for_local_block(dimensions, dim_ranges::Tuple)
     local_inds = zeros(Int64, prod(length(r) for r ∈ dim_ranges))
     for (local_i, inds) ∈ enumerate(CartesianIndices(dim_ranges))
         flat_i = 0
@@ -202,8 +218,11 @@ function apply_periodicity_to_indices!(global_inds, dimensions)
         # Nothing to do.
         return nothing
     end
-
-    global_cartinds = CartesianIndices(Tuple(d.n for d ∈ dimensions))
+    n_tuple = Tuple(d.n for d ∈ dimensions)
+    return apply_periodicity_to_indices!(global_inds, dimensions, n_tuple)
+end
+function apply_periodicity_to_indices!(global_inds, dimensions, n_tuple::Tuple)
+    global_cartinds = CartesianIndices(n_tuple)
     for (sparse_i, flat_i) ∈ enumerate(global_inds)
         inds = global_cartinds[flat_i]
         new_flat_i = 0
@@ -295,12 +314,18 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     return global_matrix, local_matrix
 end
 
-function remove_duplicates_from_global_vector(x_global_with_dups, dimensions::Vector{<:Dimension})
+function remove_duplicates_from_global_vector(x_global_with_dups,
+                                              dimensions::Vector{<:Dimension})
+    n_tuple = Tuple(d.n for d ∈ dimensions)
+    return remove_duplicates_from_global_vector(x_global_with_dups, dimensions, n_tuple)
+end
+function remove_duplicates_from_global_vector(x_global_with_dups,
+                                              dimensions::Vector{<:Dimension},
+                                              n_tuple::Tuple)
     if any(d.periodic for d ∈ dimensions)
         n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
         x_global = fill(NaN, n)
         counter = 0
-        n_tuple = Tuple(d.n for d ∈ dimensions)
         global_cartinds = CartesianIndices(n_tuple)
         for i_global ∈ 1:length(x_global_with_dups)
             inds = global_cartinds[i_global]
