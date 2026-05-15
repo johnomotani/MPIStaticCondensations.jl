@@ -400,6 +400,7 @@ MPI.Comm_split(comm::FakeComm, color, key) = comm
 
 @kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
     level_dimensions::Vector{Dimension{Ti}}
+    global_size::Ti
     global_top_vector_size::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
@@ -682,6 +683,7 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
         end
     end
 
+    global_size = prod(d.n for d ∈ dimensions)
     global_top_vector_size =
         top_vector_slice_dim_n * prod(level_dimensions[i].n
                                       for i ∈ 1:length(level_dimensions) if i ≠ slice_i;
@@ -692,11 +694,11 @@ function split_dimension(dimensions::Vector{<:Dimension}, n_groups::Integer,
     bottom_vector_indices = get_global_indices(dimensions, local_bottom_vector_indices)
     top_vector_indices = get_global_indices(dimensions, local_top_vector_indices)
 
-    return LevelInfo(; level_dimensions, global_top_vector_size, top_vector_indices,
-                     local_top_vector_indices, local_top_vector_a_block_indices,
-                     a_block_sub_selection_indices, bottom_vector_indices,
-                     local_bottom_vector_indices, level_comm, level_distributed_comm,
-                     level_shared_comm),
+    return LevelInfo(; level_dimensions, global_size, global_top_vector_size,
+                     top_vector_indices, local_top_vector_indices,
+                     local_top_vector_a_block_indices, a_block_sub_selection_indices,
+                     bottom_vector_indices, local_bottom_vector_indices, level_comm,
+                     level_distributed_comm, level_shared_comm),
            level_dimensions, next_comm, next_distributed_comm, next_shared_comm
 end
 
@@ -962,8 +964,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
         this_level_solver =
-            MPIStaticCondensationParallel(length(level_info.top_vector_indices),
-                                          this_level_sc,
+            MPIStaticCondensationParallel(level_info.global_size, this_level_sc,
                                           level_info.local_top_vector_indices,
                                           level_info.local_top_vector_a_block_indices,
                                           level_info.local_bottom_vector_indices, timer)
@@ -1042,7 +1043,7 @@ end
 
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T},
                U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation serial sparse ldiv! $(size(solver, 1))" begin
         non_duplicate_indices = solver.non_duplicate_indices
         # Note if X or U are views that were indexed with Vector{<:Integer}, then we need
         # to replace them with contiguous-in-memory buffers.
@@ -1069,7 +1070,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T},
                U::AbstractMatrix{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! serial sparse $(size(solver, 1))" begin
         # Note if X or U are views that were indexed with Vector{<:Integer}, then we need
         # to fall back to the AbstractVector function which can replace them with
         # contiguous-in-memory buffers.
@@ -1085,7 +1086,7 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialSparse{T
     return nothing
 end
 function ldiv!(solver::MPIStaticCondensationSerialSparse{T}, U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! serial sparse $(size(solver, 1))" begin
         non_duplicate_indices = solver.non_duplicate_indices
         U_buffer = solver.U_buffer
         U_buffer .= @view U[non_duplicate_indices]
@@ -1137,7 +1138,7 @@ function lu!(solver::MPIStaticCondensationSerialDense, A::AbstractMatrix)
 end
 
 function ldiv!(solver::MPIStaticCondensationSerialDense{T}, U::AbstractVectorOrMatrix{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! serial dense $(size(solver, 1))" begin
         local_block_solver = solver.local_block_solver
         non_duplicate_indices = solver.non_duplicate_indices
         if isa(U, StridedVecOrMat) && isa(non_duplicate_indices, Colon)
@@ -1165,7 +1166,7 @@ function ldiv!(solver::MPIStaticCondensationSerialDense{T}, U::AbstractVectorOrM
 end
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialDense{T},
                U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! serial dense $(size(solver, 1))" begin
         non_duplicate_indices = solver.non_duplicate_indices
         if (isa(X, StridedVector) && isa(non_duplicate_indices, Colon))
             this_X = X
@@ -1186,7 +1187,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialDense{T}
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationSerialDense{T},
                U::AbstractMatrix{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! serial dense $(size(solver, 1))" begin
         local_block_solver = solver.local_block_solver
         if isa(X, StridedMatrix) && isa(solver.non_duplicate_indices, Colon)
             ldiv!(X, local_block_solver, U)
@@ -1218,7 +1219,7 @@ end
 
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         local_top_vector_indices = solver.local_top_vector_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
         x = @view X[local_top_vector_indices]
@@ -1230,7 +1231,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
     return nothing
 end
 function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         local_top_vector_indices = solver.local_top_vector_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
@@ -1242,7 +1243,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractMatrix{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         local_top_vector_indices = solver.local_top_vector_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
         for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
@@ -1256,7 +1257,7 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
     return nothing
 end
 function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractMatrix{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(U))" begin
+    @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         local_top_vector_indices = solver.local_top_vector_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
