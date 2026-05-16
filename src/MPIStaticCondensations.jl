@@ -120,8 +120,12 @@ struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIS
     n::Ti
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
+    this_shared_local_top_vector_indices::Tranget
     local_top_vector_a_block_indices::Trangetab
     local_bottom_vector_indices::Trangeb
+    this_shared_local_bottom_vector_indices::Trangeb
+    u_buffer::Vector{Tf}
+    v_buffer::Vector{Tf}
     timer::Ttimer
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
@@ -963,11 +967,29 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  parallel_schur=level_parallel_schur,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
+        u_buffer = fill(data_type(NaN), length(level_info.local_top_vector_indices))
+        v_buffer = fill(data_type(NaN), length(level_info.local_bottom_vector_indices))
+        # Need to create a version of local_top_vector_indices and
+        # local_bottom_vector_indices that is split into ranges to be handled in parallel
+        # by all the processes in the shared-memory block.
+        this_shared_comm_size = MPI.Comm_size(level_shared_comm)
+        this_shared_comm_rank = MPI.Comm_rank(level_shared_comm)
+        ntop = length(level_info.local_top_vector_indices)
+        top_points_per_proc = (ntop + this_shared_comm_size - 1) ÷ this_shared_comm_size
+        top_subset = this_shared_comm_rank*top_points_per_proc+1:min((this_shared_comm_rank+1)*top_points_per_proc,ntop)
+        this_shared_local_top_vector_indices = level_info.local_top_vector_indices[top_subset]
+        nbottom = length(level_info.local_bottom_vector_indices)
+        bottom_points_per_proc = (nbottom + this_shared_comm_size - 1) ÷ this_shared_comm_size
+        bottom_subset = this_shared_comm_rank*bottom_points_per_proc+1:min((this_shared_comm_rank+1)*bottom_points_per_proc,nbottom)
+        this_shared_local_bottom_vector_indices = level_info.local_bottom_vector_indices[bottom_subset]
         this_level_solver =
             MPIStaticCondensationParallel(level_info.global_size, this_level_sc,
                                           level_info.local_top_vector_indices,
+                                          this_shared_local_top_vector_indices,
                                           level_info.local_top_vector_a_block_indices,
-                                          level_info.local_bottom_vector_indices, timer)
+                                          level_info.local_bottom_vector_indices,
+                                          this_shared_local_bottom_vector_indices,
+                                          u_buffer, v_buffer, timer)
     end
 
     return this_level_solver
@@ -1056,11 +1078,27 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationSerialSparse{T
             this_U = U
         else
             this_U = solver.U_buffer
-            this_U .= @view U[non_duplicate_indices]
+            if isa(non_duplicate_indices, Colon)
+                for i ∈ eachindex(this_U, U)
+                    this_U[i] = U[i]
+                end
+            else
+                for (i1, i2) ∈ enumerate(non_duplicate_indices)
+                    this_U[i1] = U[i2]
+                end
+            end
         end
         ldiv!(this_X, solver.local_block_solver, this_U)
         if !(isa(X, StridedVector) && isa(non_duplicate_indices, Colon))
-            @views X[non_duplicate_indices] .= this_X
+            if isa(non_duplicate_indices, Colon)
+                for i ∈ eachindex(X, this_X)
+                    X[i] = this_X[i]
+                end
+            else
+                for (i1, i2) ∈ enumerate(non_duplicate_indices)
+                    X[i2] = this_X[i1]
+                end
+            end
             for (i1, i2) ∈ eachcol(solver.periodic_index_pairs)
                 X[i2] = this_X[i1]
             end
@@ -1220,24 +1258,51 @@ end
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
-        local_top_vector_indices = solver.local_top_vector_indices
-        local_bottom_vector_indices = solver.local_bottom_vector_indices
-        x = @view X[local_top_vector_indices]
-        u = @view U[local_top_vector_indices]
-        y = @view X[local_bottom_vector_indices]
-        v = @view U[local_bottom_vector_indices]
-        ldiv!(x, y, solver.local_block_solver, u, v)
+        # MPISchurComplement allows the RHS and solution vectors to be the same array.
+        # It is slightly faster to copy the data to/from local buffers than to use @view
+        # with Vector{Int64} indices.
+        this_shared_local_top_vector_indices = solver.this_shared_local_top_vector_indices
+        this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
+        u = solver.u_buffer
+        v = solver.v_buffer
+        for (i1, i2) ∈ enumerate(this_shared_local_top_vector_indices)
+            u[i1] = U[i2]
+        end
+        for (i1, i2) ∈ enumerate(this_shared_local_bottom_vector_indices)
+            v[i1] = U[i2]
+        end
+        ldiv!(u, v, solver.local_block_solver, u, v)
+        for (i2, i1) ∈ enumerate(this_shared_local_top_vector_indices)
+            X[i1] = u[i2]
+        end
+        for (i2, i1) ∈ enumerate(this_shared_local_bottom_vector_indices)
+            X[i1] = v[i2]
+        end
     end
     return nothing
 end
 function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
-        local_top_vector_indices = solver.local_top_vector_indices
-        local_bottom_vector_indices = solver.local_bottom_vector_indices
-        u = @view U[local_top_vector_indices]
-        v = @view U[local_bottom_vector_indices]
+        # It is slightly faster to copy the data to/from local buffers than to use @view
+        # with Vector{Int64} indices.
+        this_shared_local_top_vector_indices = solver.this_shared_local_top_vector_indices
+        this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
+        u = solver.u_buffer
+        v = solver.v_buffer
+        for (i1, i2) ∈ enumerate(this_shared_local_top_vector_indices)
+            u[i1] = U[i2]
+        end
+        for (i1, i2) ∈ enumerate(this_shared_local_bottom_vector_indices)
+            v[i1] = U[i2]
+        end
         ldiv!(u, v, solver.local_block_solver, u, v)
+        for (i2, i1) ∈ enumerate(this_shared_local_top_vector_indices)
+            U[i1] = u[i2]
+        end
+        for (i2, i1) ∈ enumerate(this_shared_local_bottom_vector_indices)
+            U[i1] = v[i2]
+        end
     end
     return nothing
 end
