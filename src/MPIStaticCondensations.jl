@@ -1244,14 +1244,8 @@ end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
-        local_top_vector_indices = solver.local_top_vector_indices
-        local_bottom_vector_indices = solver.local_bottom_vector_indices
         for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
-            x = @view this_X[local_top_vector_indices]
-            u = @view this_U[local_top_vector_indices]
-            y = @view this_X[local_bottom_vector_indices]
-            v = @view this_U[local_bottom_vector_indices]
-            ldiv!(x, y, solver.local_block_solver, u, v)
+            ldiv!(this_X, solver, this_U)
         end
     end
     return nothing
@@ -1259,12 +1253,8 @@ end
 function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
-        local_top_vector_indices = solver.local_top_vector_indices
-        local_bottom_vector_indices = solver.local_bottom_vector_indices
         for this_U ∈ eachcol(U)
-            u = @view this_U[local_top_vector_indices]
-            v = @view this_U[local_bottom_vector_indices]
-            ldiv!(u, v, solver.local_block_solver, u, v)
+            ldiv!(solver, this_U)
         end
     end
     return nothing
