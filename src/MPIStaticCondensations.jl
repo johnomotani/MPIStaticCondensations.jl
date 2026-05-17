@@ -133,10 +133,17 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIStaticCondensation{Tf},Trange}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Factorization{Tf},Trange}
     n::Ti
     local_block_solver::Tsolver
     block_indices::Trange
+    function BlockDiagonalSolver{Tf}(n::Ti, block_indices) where {Tf, Ti <: Integer}
+        block_size = length(block_indices)
+        identity = spzeros(Tf, block_size, block_size)
+        copyto!(identity, I)
+        local_block_solver = lu(identity)
+        return new{Tf,Ti,typeof(local_block_solver),typeof(block_indices)}(n, local_block_solver, block_indices)
+    end
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
 Base.size(Alu::BlockDiagonalSolver, d::Integer) = size(Alu)[d]
@@ -918,6 +925,15 @@ function get_lowest_level_duplicates(ind_type::Type,
     return lowest_level_non_duplicate_indices, periodic_pairs
 end
 
+function generate_possible_multipliers(multiplier_list, v::Val{N}, ind_type::Type) where N
+    sizes = ntuple(i->length(multiplier_list), v)
+    possible_multipliers = Vector{ind_type}[]
+    for inds ∈ CartesianIndices(sizes)
+        push!(possible_multipliers, [multiplier_list[i] for i ∈ Tuple(inds)])
+    end
+    return possible_multipliers
+end
+
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
                             comm::MPI.Comm=MPI.COMM_WORLD,
@@ -1008,177 +1024,174 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     n_blocks_factors = factor(Vector, n_blocks)
     shared_comm_size_factors = factor(Vector, shared_comm_size)
 
-    n_levels = length(n_blocks_factors) + length(shared_comm_size_factors) + 1
+    # Not sure if this is necessarily the most efficient choice for all grids and numbers
+    # of processes - everything following should work for any set of block_sizes, so other
+    # choices could be made here.
+    block_sizes_list = [ones(ind_type, length(dimensions))]
+    nelement_list = [d.nelement for d ∈ dimensions]
+    nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+    while true
+        previous_block_sizes = block_sizes_list[end]
+        this_block_sizes = previous_block_sizes .* 2
+        local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
+        total_local_nblock = prod(local_nblock_list)
+        if any(this_block_sizes .≥ nelement_list) || total_local_nblock ≥ shared_comm_size
+            # Make final block sizes such that no process owns more than one block.
+            possible_multipliers = Vector{ind_type}[]
+            multiplier_list = (1, 2, 3, 5)
+            possible_multipliers =
+                generate_possible_multipliers(multiplier_list, Val(length(dimensions)),
+                                              ind_type)
+            possible_block_sizes = [m .* previous_block_sizes
+                                    for m ∈ possible_multipliers]
+
+            # Remove 'possibilities' with more local blocks than `shared_comm_size`.
+            filter!(bs->(prod(@. (nelement_local_list + bs - 1) ÷ bs) ≤ shared_comm_size),
+                    possible_block_sizes)
+
+            # Remove 'possibilities' where any block size is greater than the
+            # corresponding nelement_local.
+            filter!(bs->all(bs .≤ nelement_local_list), possible_block_sizes)
+
+            # From the remaining possibilities, cut down to those with the largest number
+            # of blocks, i.e. the smallest total block size.
+            possible_total_block_sizes = [prod(bs) for bs ∈ possible_block_sizes]
+            possible_block_sizes = possible_block_sizes[possible_total_block_sizes .== minimum(possible_total_block_sizes)]
+
+            # Pick the remaining possibility with the 'squarest' blocks, guesstimated by
+            # the ratio of maximum(bs) / minimum(bs).
+            possible_squareness = [minimum(bs) / maximum(bs)
+                                   for bs ∈ possible_block_sizes]
+            # Minimum of possible_squareness may not be unique, but no more criteria to
+            # use to choose, so just take the first minimum.
+            choice_arg = argmax(possible_squareness)
+            final_block_sizes = possible_block_sizes[choice_arg]
+
+            if final_block_sizes != previous_block_sizes
+                # If the final choice is the same as previous_block_sizes, then the
+                # multipliers are all 1 and we just leave block_sizes_list as is.
+                push!(block_sizes_list, final_block_sizes)
+            end
+            break
+        end
+        push!(block_sizes_list, this_block_sizes)
+    end
 
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
                                              nrank=d.nrank, irank=d.irank, periodic=false,
                                              remove_boundaries=(d.periodic || d.remove_boundaries))
                                    for d ∈ dimensions]
 
-    if n_levels == 1
-        lowest_level_n = prod(d.n for d ∈ dimensions)
-        lowest_level_dimensions = dimensions
-    else
-        this_level_dimensions = dimensions
-        this_level_comm = comm
-        this_level_distributed_comm = distributed_comm
-        this_level_shared_comm = shared_comm
-
-        # Vector{LevelInfo} is not type stable because of the unspecified type parameters
-        # of LevelInfo, but that does not matter here because this is just a constructor
-        # function, and the nested nature of the solve means that the final
-        # `MPIStaticCondensationParallel` could not have its type fully specified by the
-        # types of the input arguments anyway.
-        level_info_list = Vector{LevelInfo}(undef, n_levels - 1)
-        for (level, n_groups) ∈ enumerate(vcat(n_blocks_factors,
-                                               shared_comm_size_factors))
-            this_level_info, this_level_dimensions, this_level_comm,
-            this_level_distributed_comm, this_level_shared_comm =
-                split_dimension(this_level_dimensions, n_groups,
-                                optimize_schur_complement_size, this_level_comm,
-                                this_level_distributed_comm, this_level_shared_comm)
-            level_info_list[level] = this_level_info
-            if length(this_level_info.a_block_sub_selection_indices) == 0
-                # This process does not participate in the solves at lower levels.
-                n_levels = level + 1
-                resize!(level_info_list, n_levels - 1)
-                break
-            end
-        end
-
-        if length(level_info_list) > 0
-            lowest_level_n = length(level_info_list[end].local_top_vector_a_block_indices)
+    n_levels = length(block_sizes_list)
+    level_info_list = Vector{LevelInfo}(undef, n_levels)
+    level_local_indices = collect(1:prod(d.n_local for d ∈ dimensions))
+    level_global_size = prod(d.n for d ∈ dimensions)
+    for (level, block_sizes) ∈ enumerate(block_sizes_list)
+        if level == n_levels
+            # Only handle periodicity on the final level
+            dims = dimensions
         else
-            lowest_level_n = 0
+            dims = dimensions_without_periodic
         end
-        lowest_level_dimensions = this_level_dimensions
+        this_level_info = split_matrix(dims, level_local_indices, block_sizes,
+                                       level_global_size, distributed_comm, shared_comm)
+        level_info_list[level] = this_level_info
+        level_local_indices = this_level_info.local_bottom_vector_indices
+        level_global_size = this_level_info.global_bottom_vector_size
     end
 
     # Create lowest level solver
-    if lowest_level_n > 0 && any(d.periodic && (d.has_lower_boundary || d.has_upper_boundary) for d ∈ lowest_level_dimensions)
-        for d ∈ lowest_level_dimensions
-            if d.periodic && ((d.has_lower_boundary && !d.has_upper_boundary)
-                              || (!d.has_lower_boundary && d.has_upper_boundary))
-                error("Any periodic dimension (that has not already been split up before "
-                      * "the lowest level) should have both boundaries or neither")
-            end
-        end
-        lowest_level_non_duplicate_indices, periodic_pairs =
-            get_lowest_level_duplicates(ind_type, lowest_level_dimensions)
-        lowest_level_periodic_index_pairs = zeros(ind_type, 2, length(periodic_pairs))
-        for (i, pair) ∈ enumerate(periodic_pairs)
-            lowest_level_periodic_index_pairs[:,i] .= pair
-        end
-        lowest_level_n = length(lowest_level_non_duplicate_indices)
-    else
-        lowest_level_non_duplicate_indices = (:)
-        lowest_level_periodic_index_pairs = zeros(ind_type, 2, 0)
-    end
-    identity = Matrix{data_type}(undef, lowest_level_n, lowest_level_n)
-    copyto!(identity, I)
-    if lowest_level_n == 0
-        lowest_level_solver = MPIStaticCondensationSerialNull{data_type}()
-    elseif use_sparse
-        lowest_level_solver =
-            MPIStaticCondensationSerialSparse(lu(sparse(identity); check=check_lu),
-                                              Vector{data_type}(undef, lowest_level_n),
-                                              Vector{data_type}(undef, lowest_level_n),
-                                              lowest_level_non_duplicate_indices,
-                                              lowest_level_periodic_index_pairs,
-                                              timer, check_lu)
-    else
-        lowest_level_solver =
-            MPIStaticCondensationSerialDense(lu(identity; check=check_lu),
-                                             Vector{data_type}(undef, lowest_level_n),
-                                             lowest_level_non_duplicate_indices,
-                                             lowest_level_periodic_index_pairs,
-                                             timer, check_lu)
-    end
+    last_level_info = level_info_list[end]
+    last_A_block_solver =
+        BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
+                                       last_level_info.a_block_sub_selection_indices)
+    # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
+    # long as the last Schur complement matrix is not too small.
+    last_parallel_schur = last_level_info.global_bottom_vector_size ≥ 1024
+    last_level_sc =
+        mpi_schur_complement(last_A_block_solver, data_type, data_type, data_type,
+                             last_level_info.top_vector_indices,
+                             last_level_info.bottom_vector_indices; comm=comm,
+                             shared_comm=shared_comm, distributed_comm=distributed_comm,
+                             allocate_shared_float=allocate_shared_float,
+                             allocate_shared_int=allocate_shared_int,
+                             synchronize_shared=synchronize_shared, use_sparse=use_sparse,
+                             sparse_Ainv_B=true,
+                             parallel_schur=last_parallel_schur, skip_factorization=true,
+                             schur_tile_size=schur_tile_size, check_lu=check_lu,
+                             timer=timer)
+    last_u_buffer = fill(data_type(NaN), length(last_level_info.local_top_vector_indices))
+    last_v_buffer = fill(data_type(NaN), length(last_level_info.local_bottom_vector_indices))
+    # Need to create a version of local_top_vector_indices and
+    # local_bottom_vector_indices that is split into ranges to be handled in parallel
+    # by all the processes in the shared-memory block.
+    ntop = length(last_level_info.local_top_vector_indices)
+    top_points_per_proc = (ntop + shared_comm_size - 1) ÷ shared_comm_size
+    top_subset = shared_comm_rank*top_points_per_proc+1:min((shared_comm_rank+1)*top_points_per_proc,ntop)
+    last_shared_local_top_vector_indices = last_level_info.local_top_vector_indices[top_subset]
+    nbottom = length(last_level_info.local_bottom_vector_indices)
+    bottom_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
+    bottom_subset = shared_comm_rank*bottom_points_per_proc+1:min((shared_comm_rank+1)*bottom_points_per_proc,nbottom)
+    last_shared_local_bottom_vector_indices = last_level_info.local_bottom_vector_indices[bottom_subset]
+    this_level_schur_solver =
+        MPIStaticCondensationParallel(last_level_info.global_size, last_level_sc,
+                                      last_level_info.local_top_vector_indices,
+                                      last_shared_local_top_vector_indices,
+                                      last_level_info.local_top_vector_a_block_indices,
+                                      last_level_info.local_bottom_vector_indices,
+                                      last_shared_local_bottom_vector_indices,
+                                      last_u_buffer, last_v_buffer, timer)
 
-    this_level_solver = lowest_level_solver
-    for level ∈ n_levels-1:-1:1
-        level_info = level_info_list[level]
-
-        # A_block_solver has its `lu!()` function called from within the
-        # MPISchurComplement solver. At that point a view that gives the top-left 'A'
-        # block of the matrix has already been constructed (using
-        # `level_info.top_vector_indices`), and is passed to A_block_solver, which needs
-        # to select its block out of that.
-        A_block_solver = BlockDiagonalSolver(level_info.global_top_vector_size,
-                                             this_level_solver,
-                                             level_info.a_block_sub_selection_indices)
-
-        # Use a parallelized dense-matrix LU solver for the Schur complement solve as long
-        # as the Schur complement matrix is not too small.
-        level_parallel_schur = length(level_info.bottom_vector_indices) ≥ 1024
-
-        level_shared_comm = level_info.level_shared_comm
-
-        if allocate_shared_float === nothing
-            level_allocate_shared_float = nothing
-        else
-            level_allocate_shared_float =
-                (args...) -> allocate_shared_float(args...; comm=level_shared_comm)
-        end
-
-        if allocate_shared_int === nothing
-            level_allocate_shared_int = nothing
-        else
-            level_allocate_shared_int =
-                (args...) -> allocate_shared_int(args...; comm=level_shared_comm)
-        end
-
-        if synchronize_shared === nothing
-            level_synchronize_shared = nothing
-        else
-            level_synchronize_shared = () -> synchronize_shared(; comm=level_shared_comm)
-        end
-
+    for this_level_info ∈ level_info_list[end-1:-1:1]
+        this_A_block_solver =
+            BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
+                                           this_level_info.a_block_sub_selection_indices)
+        # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
+        # long as the last Schur complement matrix is not too small.
         this_level_sc =
-            mpi_schur_complement(A_block_solver, data_type, data_type, data_type,
-                                 level_info.top_vector_indices,
-                                 level_info.bottom_vector_indices;
-                                 comm=level_info.level_comm,
-                                 shared_comm=level_shared_comm,
-                                 distributed_comm=level_info.level_distributed_comm,
-                                 allocate_shared_float=level_allocate_shared_float,
-                                 allocate_shared_int=level_allocate_shared_int,
-                                 synchronize_shared=level_synchronize_shared,
-                                 use_sparse=use_sparse, separate_Ainv_B=separate_Ainv_B,
-                                 parallel_schur=level_parallel_schur,
-                                 skip_factorization=true, schur_tile_size=schur_tile_size,
-                                 check_lu=check_lu, timer=timer)
-        u_buffer = fill(data_type(NaN), length(level_info.local_top_vector_indices))
-        v_buffer = fill(data_type(NaN), length(level_info.local_bottom_vector_indices))
+            mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
+                                 this_level_info.top_vector_indices,
+                                 this_level_info.bottom_vector_indices; comm=comm,
+                                 shared_comm=shared_comm, distributed_comm=distributed_comm,
+                                 allocate_shared_float=allocate_shared_float,
+                                 allocate_shared_int=allocate_shared_int,
+                                 synchronize_shared=synchronize_shared, use_sparse=use_sparse,
+                                 sparse_Ainv_B=true,
+                                 parallel_schur=this_level_schur_solver, skip_factorization=true,
+                                 schur_tile_size=schur_tile_size, check_lu=check_lu,
+                                 timer=timer)
+        this_u_buffer = fill(data_type(NaN), length(this_level_info.local_top_vector_indices))
+        this_v_buffer = fill(data_type(NaN), length(this_level_info.local_bottom_vector_indices))
         # Need to create a version of local_top_vector_indices and
         # local_bottom_vector_indices that is split into ranges to be handled in parallel
         # by all the processes in the shared-memory block.
-        this_shared_comm_size = MPI.Comm_size(level_shared_comm)
-        this_shared_comm_rank = MPI.Comm_rank(level_shared_comm)
-        ntop = length(level_info.local_top_vector_indices)
-        top_points_per_proc = (ntop + this_shared_comm_size - 1) ÷ this_shared_comm_size
-        top_subset = this_shared_comm_rank*top_points_per_proc+1:min((this_shared_comm_rank+1)*top_points_per_proc,ntop)
-        this_shared_local_top_vector_indices = level_info.local_top_vector_indices[top_subset]
-        nbottom = length(level_info.local_bottom_vector_indices)
-        bottom_points_per_proc = (nbottom + this_shared_comm_size - 1) ÷ this_shared_comm_size
-        bottom_subset = this_shared_comm_rank*bottom_points_per_proc+1:min((this_shared_comm_rank+1)*bottom_points_per_proc,nbottom)
-        this_shared_local_bottom_vector_indices = level_info.local_bottom_vector_indices[bottom_subset]
-        this_level_solver =
-            MPIStaticCondensationParallel(level_info.global_size, this_level_sc,
-                                          level_info.local_top_vector_indices,
+        ntop = length(this_level_info.local_top_vector_indices)
+        top_points_per_proc = (ntop + shared_comm_size - 1) ÷ shared_comm_size
+        top_subset = shared_comm_rank*top_points_per_proc+1:min((shared_comm_rank+1)*top_points_per_proc,ntop)
+        this_shared_local_top_vector_indices = this_level_info.local_top_vector_indices[top_subset]
+        nbottom = length(this_level_info.local_bottom_vector_indices)
+        bottom_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
+        bottom_subset = shared_comm_rank*bottom_points_per_proc+1:min((shared_comm_rank+1)*bottom_points_per_proc,nbottom)
+        this_shared_local_bottom_vector_indices = this_level_info.local_bottom_vector_indices[bottom_subset]
+        this_level_schur_solver =
+            MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
+                                          this_level_info.local_top_vector_indices,
                                           this_shared_local_top_vector_indices,
-                                          level_info.local_top_vector_a_block_indices,
-                                          level_info.local_bottom_vector_indices,
+                                          this_level_info.local_top_vector_a_block_indices,
+                                          this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
-                                          u_buffer, v_buffer, timer)
+                                          this_u_buffer, this_v_buffer, timer)
     end
+    # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
+    # the full matrix solver.
+    solver = this_level_schur_solver
 
-    return this_level_solver
+    return solver
 end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
-    lu!(solver, A)
+    lu!(solver, sparse(A))
     return nothing
 end
 
