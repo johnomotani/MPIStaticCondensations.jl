@@ -150,12 +150,12 @@ struct Dimension{Ti<:Integer}
     irank::Ti
     global_inds::Vector{Ti}
     periodic::Bool
-    has_lower_boundary::Bool
-    has_upper_boundary::Bool
+    #has_lower_boundary::Bool
+    #has_upper_boundary::Bool
     remove_boundaries::Bool
 
     function Dimension(; nelement::Ti, ngrid::Ti, nrank::Ti, irank::Ti, periodic::Bool,
-                       has_lower_boundary::Bool, has_upper_boundary::Bool,
+                       #has_lower_boundary::Bool, has_upper_boundary::Bool,
                        remove_boundaries::Bool) where Ti <: Integer
 
         if nelement % nrank != 0
@@ -192,36 +192,38 @@ struct Dimension{Ti<:Integer}
         first_global_ind = irank * nelement_local * (ngrid - 1) + 1
         last_global_ind = (irank + 1) * nelement_local * (ngrid - 1) + 1
 
-        if !has_lower_boundary
-            if nelement > 0
-                n -= 1
-            end
-            if irank == 0
-                if nelement_local > 0
-                    n_local -= 1
-                end
-                first_global_ind += 1
-            end
-        end
-        if !has_upper_boundary
-            if nelement > 0
-                n -= 1
-            end
-            if irank == nrank - 1
-                if nelement_local > 0
-                    n_local -= 1
-                end
-                last_global_ind -= 1
-            end
-        end
+        #if !has_lower_boundary
+        #    if nelement > 0
+        #        n -= 1
+        #    end
+        #    if irank == 0
+        #        if nelement_local > 0
+        #            n_local -= 1
+        #        end
+        #        first_global_ind += 1
+        #    end
+        #end
+        #if !has_upper_boundary
+        #    if nelement > 0
+        #        n -= 1
+        #    end
+        #    if irank == nrank - 1
+        #        if nelement_local > 0
+        #            n_local -= 1
+        #        end
+        #        last_global_ind -= 1
+        #    end
+        #end
 
         global_inds = collect(first_global_ind:last_global_ind)
         if periodic && irank == nrank - 1
             global_inds[end] = 1
         end
 
+        #return new{Ti}(n, n_local, nelement, ngrid, nrank, irank, global_inds, periodic,
+        #               has_lower_boundary, has_upper_boundary, remove_boundaries)
         return new{Ti}(n, n_local, nelement, ngrid, nrank, irank, global_inds, periodic,
-                       has_lower_boundary, has_upper_boundary, remove_boundaries)
+                       remove_boundaries)
     end
 end
 
@@ -403,18 +405,186 @@ MPI.Comm_size(comm::FakeComm) = comm.size
 MPI.Comm_split(comm::FakeComm, color, key) = comm
 
 @kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
-    level_dimensions::Vector{Dimension{Ti}}
+    #level_dimensions::Vector{Dimension{Ti}}
     global_size::Ti
-    global_top_vector_size::Ti
+    global_bottom_vector_size::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     local_top_vector_a_block_indices::Vector{Ti}
     a_block_sub_selection_indices::Tasub
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
-    level_comm::Tcomm
-    level_distributed_comm::Tdcomm
-    level_shared_comm::Tcomm
+    #level_comm::Tcomm
+    #level_distributed_comm::Tdcomm
+    #level_shared_comm::Tcomm
+end
+
+function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti},
+                      block_sizes::Vector{Ti}, global_size::Ti,
+                      distributed_comm::MPI.Comm,
+                      shared_comm::MPI.Comm) where Ti <: Integer
+    if length(dimensions) != length(block_sizes)
+        error("dimensions and block_sizes should be the same length")
+    end
+
+    # Divide the grid into blocks where the number of elements in a block in each
+    # dimension is given by `block_sizes`.
+    boundary_indices = Ti[]
+    function get_boundary_indices!(idim, this_dim, flat_i)
+        if this_dim ≤ 0
+            push!(boundary_indices, flat_i + 1)
+            return nothing
+        end
+
+        next_dim = this_dim - 1
+        d = dimensions[this_dim]
+        n = d.n
+        flat_i *= n
+
+        if idim == this_dim
+            bs = block_sizes[idim]
+            nelement_local = d.nelement ÷ d.nrank
+            ngrid = d.ngrid
+
+            if d.remove_boundaries || d.periodic
+                # Always add first and last points to 'boundary points'.
+                get_boundary_indices!(idim, next_dim, flat_i)
+                get_boundary_indices!(idim, next_dim, flat_i + n - 1)
+            else
+                # Keep boundary points on first/last shared-memory blocks of processes.
+                if d.irank > 0
+                    get_boundary_indices!(idim, next_dim, flat_i)
+                end
+                if d.irank < d.nrank - 1
+                    get_boundary_indices!(idim, next_dim, flat_i + n - 1)
+                end
+            end
+
+            # Add the interior boundary points
+            nblocks = nelement_local ÷ bs
+            for b ∈ 1:nblocks-1
+                # Note we do not `+1` to boundary here because it is more convenient to
+                # construct `flat_i` as a 0-based index, and only convert to 1-based just
+                # before pushing into `boundary_indices`.
+                boundary = b * bs * (ngrid - 1)
+                if boundary < n
+                    get_boundary_indices!(idim, next_dim, flat_i + boundary)
+                end
+            end
+        else
+            # Add all points from `d`.
+            for i ∈ 0:n-1
+                get_boundary_indices!(idim, next_dim, flat_i + i)
+            end
+        end
+
+        return nothing
+    end
+    for idim ∈ 1:length(dimensions)
+        get_boundary_indices!(idim, length(dimensions), 0)
+    end
+    # There will be duplicated points in block_boundary_indices. Sort the list and remove
+    # the duplicates.
+    sort!(boundary_indices)
+    unique!(boundary_indices)
+
+    # Interior indices are all the indices in local_indices that are not boundary indices.
+    interior_indices = setdiff(local_indices, boundary_indices)
+
+    # Get interior indices of the blocks that should be inverted by this processor.
+    nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+    nblocks_list = [(nelement + bs - 1) ÷ bs
+                    for (nelement, bs) ∈ zip(nelement_local_list, block_sizes)]
+    total_nblocks = prod(nblocks_list)
+    shared_comm_rank = MPI.Comm_rank(shared_comm)
+    shared_comm_size = MPI.Comm_size(shared_comm)
+    blocks_per_proc = (total_nblocks + shared_com_size - 1) ÷ shared_comm_size
+    this_proc_blocks = shared_comm_rank*blocks_per_proc+1:min((shared_comm_rank+1)*blocks_per_proc,total_nblocks)
+    block_interior_indices = Ti[]
+    function get_block_interior_points!(b)
+        iblock = zeros(length(dimensions))
+        temp = b
+        for (idim, nb) ∈ enumerate(nblocks_list)
+            temp, iblock[idim] = divrem(temp, nb)
+        end
+        function get_interior_from_dim!(this_dim, flat_i)
+            if this_dim ≤ 0
+                push!(block_interior_indices, flat_i + 1)
+                return nothing
+            end
+            next_dim = this_dim - 1
+            d = dimensions[this_dim]
+            n = d.n
+            ngrid = d.ngrid
+            nelement_local = d.nelement ÷ d.nrank
+            flat_i *= n
+            this_block = iblock[this_dim]
+            bs = block_sizes[this_dim]
+            first_element = (this_block - 1) * bs + 1
+            last_element = min(this_block * bs, nelement_local)
+            if d.irank == 0 && first_element == 1 && (d.remove_boundaries || d.periodic)
+                first_interior_point = 1
+            else
+                first_interior_point = (first_element - 1) * (ngrid - 1) + 2
+            end
+            if d.irank == d.nrank - 1 && last_element == nelement_local && (d.remove_boundaries || d.periodic)
+                last_interior_point = n
+            else
+                last_interior_point = last_element * (ngrid - 1)
+            end
+            for i ∈ first_interior_point:last_interior_point
+                get_interior_from_dim!(next_dim, flat_i + i - 1)
+            end
+            return nothing
+        end
+        get_interior_from_dim!(length(dimensions), 0)
+        return nothing
+    end
+    for b ∈ this_proc_blocks
+        get_block_interior_points!(b)
+    end
+    sort!(block_interior_indices)
+    unique!(block_interior_indices)
+    # Find the points from interior_indices that are part of block_interior_indices.
+    # Generally this will not be all the points in block_interior_indices.
+    i_count = 1
+    bi_count = 1
+    local_top_vector_a_block_indices = Ti[]
+    a_block_sub_selection_indices = Ti[]
+    # The following search relies on both `interior_indices` and `block_interior_indices`
+    # being sorted.
+    while i_count ≤ length(interior_indices) && bi_count ≤ length(block_interior_indices)
+        i = interior_indices[i_count]
+        bi = block_interior_indices[bi_count]
+        if i == bi
+            push!(local_top_vector_a_block_indices, i)
+            push!(a_block_sub_selection_indices, i_count)
+            i_count += 1
+            bi_count += 1
+        elseif i < bi
+            i_count += 1
+        else
+            bi_count += 1
+        end
+    end
+
+    # Simplest way to get the global_bottom_vector_size is to first calculate the size of
+    # the 'top vector' then subtract it from `global_size`. This is simplest because the
+    # 'top vector' does not have any points that are duplicated between different
+    # shared-memory blocks of processes, so we don't have to worry about double-counting.
+    top_vector_size = Ref(length(interior_indices))
+    if shared_comm_rank == 0
+        MPI.Allreduce!(top_vector_size, +, distributed_comm)
+    end
+    MPI.Bcast!(top_vector_size, shared_comm; root=0)
+    global_bottom_vector_size = global_size - top_vector_size[]
+
+    return LevelInfo(; global_size, global_bottom_vector_size,
+                     top_vector_indices=get_global_indices(dimensions, interior_indices),
+                     local_top_vector_indices=interior_indices,
+                     local_top_vector_a_block_indices, a_block_sub_selection_indices,
+                     bottom_vector_indices=get_global_indices(dimensions, boundary_indices),
+                     local_bottom_vector_indices=boundary_indices)
 end
 
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
