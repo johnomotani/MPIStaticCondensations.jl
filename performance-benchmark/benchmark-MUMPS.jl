@@ -34,8 +34,8 @@ function set_global_rhs!(mumps, rhs_global)
 end
 
 function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                   dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
-                   allocate_shared_int, nmat, nrhs, matrix_repeats,
+                   dimensions, level_multiplier, comm, distributed_comm, shared_comm,
+                   allocate_shared_float, allocate_shared_int, nmat, nrhs, matrix_repeats,
                    rhs_repeats, timer)
 
     total_size = prod(d.n for d ∈ dimensions)

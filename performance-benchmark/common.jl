@@ -80,7 +80,7 @@ function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
     return rhs, rhs_global
 end
 
-function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, timer=nothing) where T
+function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, level_multiplier, timer=nothing) where T
     rng = StableRNG(seed)
 
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
@@ -91,7 +91,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     ndim = length(params.nelement_list)
 
     if distributed_rank == 0 && shared_rank == 0
-        println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), $params")
+        println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), level_multiplier=$level_multiplier, $params")
     end
 
     # For now, only distribute the last dimension.
@@ -119,8 +119,8 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                               allocate_shared_float)
     x_temp = allocate_shared_float(length(rhs))
     run_solver(x_temp, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-               dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
-               allocate_shared_int, 1, 1, 1, 1, timer)
+               dimensions, level_multiplier, comm, distributed_comm, shared_comm,
+               allocate_shared_float, allocate_shared_int, 1, 1, 1, 1, timer)
 
     if timer !== nothing
         reset_timer!(timer)
@@ -138,8 +138,9 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
                 run_solver(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                           dimensions, comm, distributed_comm, shared_comm,
-                           allocate_shared_float, allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer)
+                           dimensions, level_multiplier, comm, distributed_comm,
+                           shared_comm, allocate_shared_float, allocate_shared_int, nmat,
+                           nrhs, matrix_repeats, rhs_repeats, timer)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)
@@ -181,7 +182,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                 return "[" * join(v, ",") * "]"
             end
             open(joinpath(run_dir, "benchmarks_$label.txt"), "a") do io
-                println(io, "$nproc $ns $ndim $total_size $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list))")
+                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list))")
             end
         end
     end
@@ -197,13 +198,15 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
     comm_size = MPI.Comm_size(MPI.COMM_WORLD)
 
     if use_shared
-        n_shared_values = [prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
+        n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
+        level_multiplier_values = collect(2:16)
     else
         n_shared_values = 1
+        level_multiplier_values = [1]
     end
     for n_shared ∈ n_shared_values
-        for p ∈ params
-            run_benchmark(run_solver, p, seed, label, n_shared, use_shared)
+        for p ∈ params, lm ∈ level_multiplier_values
+            run_benchmark(run_solver, p, seed, label, n_shared, use_shared, lm)
             seed += 1
         end
     end

@@ -7,7 +7,7 @@ using StatsBase
 include("common.jl")
 
 function run_UMFPACK(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                     dimensions, comm, distributed_comm, shared_comm,
+                     dimensions, level_multiplier, comm, distributed_comm, shared_comm,
                      allocate_shared_float, allocate_shared_int, nmat, nrhs,
                      matrix_repeats, rhs_repeats, timer)
     if MPI.Comm_size(comm) > 1
@@ -45,6 +45,6 @@ BLAS.set_num_threads(1)
 println("UMFPACK benchmark")
 println("=================\n")
 
-benchmark(run_UMFPACK, params_1d, seed_1d, "UMFPACK_1d")
-benchmark(run_UMFPACK, params_2d, seed_2d, "UMFPACK_2d")
-benchmark(run_UMFPACK, params_3d, seed_3d, "UMFPACK_3d")
+benchmark(run_UMFPACK, params_1d, seed_1d, "UMFPACK_1d"; use_shared=false)
+benchmark(run_UMFPACK, params_2d, seed_2d, "UMFPACK_2d"; use_shared=false)
+benchmark(run_UMFPACK, params_3d, seed_3d, "UMFPACK_3d"; use_shared=false)
