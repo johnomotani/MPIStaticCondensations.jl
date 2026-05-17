@@ -254,8 +254,9 @@ function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
                           irank::Integer, periodic::Bool, remove_boundaries::Bool=false)
     # As this function creates the top-level Dimension, it always includes boundary
     # points.
-    return Dimension(; nelement, ngrid, nrank, irank, periodic, has_lower_boundary=true,
-                     has_upper_boundary=true, remove_boundaries)
+    #return Dimension(; nelement, ngrid, nrank, irank, periodic, has_lower_boundary=true,
+    #                 has_upper_boundary=true, remove_boundaries)
+    return Dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
 end
 
 # Find the index of the last instance of the maximum in `x`.
@@ -402,9 +403,12 @@ struct FakeComm
 end
 MPI.Comm_rank(comm::FakeComm) = comm.rank
 MPI.Comm_size(comm::FakeComm) = comm.size
-MPI.Comm_split(comm::FakeComm, color, key) = comm
+#MPI.Comm_split(comm::FakeComm, color, key) = comm
+MPI.Allreduce!(buff, op, comm::FakeComm) = buff # This is not a sensible result!
+MPI.Bcast!(buff, comm::FakeComm; root=nothing) = buff # This is not a sensible result!
 
-@kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
+#@kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
+@kwdef struct LevelInfo{Ti,Tasub}
     #level_dimensions::Vector{Dimension{Ti}}
     global_size::Ti
     global_bottom_vector_size::Ti
@@ -421,8 +425,8 @@ end
 
 function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti},
                       block_sizes::Vector{Ti}, global_size::Ti,
-                      distributed_comm::MPI.Comm,
-                      shared_comm::MPI.Comm) where Ti <: Integer
+                      distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
+                      shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     if length(dimensions) != length(block_sizes)
         error("dimensions and block_sizes should be the same length")
     end
@@ -439,6 +443,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
         next_dim = this_dim - 1
         d = dimensions[this_dim]
         n = d.n
+        n_local = d.n_local
         flat_i *= n
 
         if idim == this_dim
@@ -449,14 +454,14 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
             if d.remove_boundaries || d.periodic
                 # Always add first and last points to 'boundary points'.
                 get_boundary_indices!(idim, next_dim, flat_i)
-                get_boundary_indices!(idim, next_dim, flat_i + n - 1)
+                get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
             else
                 # Keep boundary points on first/last shared-memory blocks of processes.
                 if d.irank > 0
                     get_boundary_indices!(idim, next_dim, flat_i)
                 end
                 if d.irank < d.nrank - 1
-                    get_boundary_indices!(idim, next_dim, flat_i + n - 1)
+                    get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
                 end
             end
 
@@ -467,13 +472,13 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
                 # construct `flat_i` as a 0-based index, and only convert to 1-based just
                 # before pushing into `boundary_indices`.
                 boundary = b * bs * (ngrid - 1)
-                if boundary < n
+                if boundary < n_local
                     get_boundary_indices!(idim, next_dim, flat_i + boundary)
                 end
             end
         else
             # Add all points from `d`.
-            for i ∈ 0:n-1
+            for i ∈ 0:n_local-1
                 get_boundary_indices!(idim, next_dim, flat_i + i)
             end
         end
@@ -498,15 +503,16 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
     total_nblocks = prod(nblocks_list)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
-    blocks_per_proc = (total_nblocks + shared_com_size - 1) ÷ shared_comm_size
+    blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
     this_proc_blocks = shared_comm_rank*blocks_per_proc+1:min((shared_comm_rank+1)*blocks_per_proc,total_nblocks)
     block_interior_indices = Ti[]
     function get_block_interior_points!(b)
-        iblock = zeros(length(dimensions))
-        temp = b
+        iblock = zeros(Ti, length(dimensions))
+        temp = b - 1
         for (idim, nb) ∈ enumerate(nblocks_list)
             temp, iblock[idim] = divrem(temp, nb)
         end
+        iblock .+= 1
         function get_interior_from_dim!(this_dim, flat_i)
             if this_dim ≤ 0
                 push!(block_interior_indices, flat_i + 1)
@@ -522,12 +528,12 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
             bs = block_sizes[this_dim]
             first_element = (this_block - 1) * bs + 1
             last_element = min(this_block * bs, nelement_local)
-            if d.irank == 0 && first_element == 1 && (d.remove_boundaries || d.periodic)
+            if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
                 first_interior_point = 1
             else
                 first_interior_point = (first_element - 1) * (ngrid - 1) + 2
             end
-            if d.irank == d.nrank - 1 && last_element == nelement_local && (d.remove_boundaries || d.periodic)
+            if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
                 last_interior_point = n
             else
                 last_interior_point = last_element * (ngrid - 1)
@@ -1003,6 +1009,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     shared_comm_size_factors = factor(Vector, shared_comm_size)
 
     n_levels = length(n_blocks_factors) + length(shared_comm_size_factors) + 1
+
+    dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
+                                             nrank=d.nrank, irank=d.irank, periodic=false,
+                                             remove_boundaries=(d.periodic || d.remove_boundaries))
+                                   for d ∈ dimensions]
 
     if n_levels == 1
         lowest_level_n = prod(d.n for d ∈ dimensions)
