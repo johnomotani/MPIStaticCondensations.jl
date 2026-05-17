@@ -38,17 +38,26 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
                       zip(nelement_list, ngrid_list, periodic_list,
                           remove_boundaries_list, nrank_list, irank_list)]
 
+    dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
+                                             nrank=d.nrank, irank=d.irank, periodic=false,
+                                             remove_boundaries=(d.periodic || d.remove_boundaries))
+                                   for d ∈ dimensions]
     #level_info = first(split_dimension(dimensions, n_groups, optimize_schur_complement_size,
     #                                   comm, distributed_comm, shared_comm))
     this_global_size = prod(d.n for d ∈ dimensions)
     local_size = prod(d.n_local for d ∈ dimensions)
     local_indices = collect(1:local_size)
+    n_levels = length(block_sizes_list)
     level_info = Any[]
     for (level, bs) ∈ enumerate(block_sizes_list)
-#@enter split_matrix(dimensions, local_indices, bs, this_global_size,
-#                  distributed_comm, shared_comm)
-        li = split_matrix(dimensions, local_indices, bs, this_global_size,
-                          distributed_comm, shared_comm)
+        if level == n_levels
+            # Only handle periodicity on the final level
+            dims = dimensions
+        else
+            dims = dimensions_without_periodic
+        end
+        li = split_matrix(dims, local_indices, bs, this_global_size, distributed_comm,
+                          shared_comm)
         push!(level_info, li)
         this_global_size = li.global_bottom_vector_size
         local_indices = li.local_bottom_vector_indices
@@ -82,11 +91,11 @@ function test_split_indices_1d_2proc()
             @test li[1].bottom_vector_indices == [3, 5]
             @test li[1].local_bottom_vector_indices == [3, 5]
             @test li[2].top_vector_indices == [3]
-            @test li[2].local_top_vector_indices == [3]
-            @test li[2].local_top_vector_a_block_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == [1]
             @test li[2].a_block_sub_selection_indices == [1]
             @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [5]
+            @test li[2].local_bottom_vector_indices == [2]
         end
 
         irank = 1
@@ -101,8 +110,8 @@ function test_split_indices_1d_2proc()
             @test li[1].bottom_vector_indices == [5, 7]
             @test li[1].local_bottom_vector_indices == [1, 3]
             @test li[2].top_vector_indices == [7]
-            @test li[2].local_top_vector_indices == [3]
-            @test li[2].local_top_vector_a_block_indices == [3]
+            @test li[2].local_top_vector_indices == [2]
+            @test li[2].local_top_vector_a_block_indices == [2]
             @test li[2].a_block_sub_selection_indices == [1]
             @test li[2].bottom_vector_indices == [5]
             @test li[2].local_bottom_vector_indices == [1]
@@ -125,11 +134,11 @@ function test_split_indices_1d_2proc()
             @test li[1].bottom_vector_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_indices == [3, 5, 7]
             @test li[2].top_vector_indices == [3, 7]
-            @test li[2].local_top_vector_indices == [3, 7]
-            @test li[2].local_top_vector_a_block_indices == [3]
+            @test li[2].local_top_vector_indices == [1, 3]
+            @test li[2].local_top_vector_a_block_indices == [1]
             @test li[2].a_block_sub_selection_indices == [1]
             @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [5]
+            @test li[2].local_bottom_vector_indices == [2]
         end
 
         irank = 1
@@ -144,11 +153,109 @@ function test_split_indices_1d_2proc()
             @test li[1].bottom_vector_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_indices == [3, 5, 7]
             @test li[2].top_vector_indices == [3, 7]
-            @test li[2].local_top_vector_indices == [3, 7]
-            @test li[2].local_top_vector_a_block_indices == [7]
+            @test li[2].local_top_vector_indices == [1, 3]
+            @test li[2].local_top_vector_a_block_indices == [3]
             @test li[2].a_block_sub_selection_indices == [2]
             @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [5]
+            @test li[2].local_bottom_vector_indices == [2]
+        end
+    end
+
+    return nothing
+end
+
+function test_split_indices_1d_2proc_periodic()
+    nelement_list = [4]
+    periodic_list = [true]
+    remove_boundaries_list = [false]
+
+    # The interiors and boundaries are:
+    # -----+++-----===-----+++-----
+    # 1:2 | 3 | 4 ∥ 5 ∥ 6 | 7 | 8:1
+    # -----+++-----===-----+++-----
+    nrank = 2
+    n_shared = 1
+    block_sizes_list = [[1], [2]]
+    @testset "nelement_list=$nelement_list, block_sizes_list=$block_sizes_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                remove_boundaries_list, [nrank÷n_shared],
+                                [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == [2, 4]
+            @test li[1].local_top_vector_indices == [2, 4]
+            @test li[1].local_top_vector_a_block_indices == [2, 4]
+            @test li[1].a_block_sub_selection_indices == 1:2
+            @test li[1].bottom_vector_indices == [1, 3, 5]
+            @test li[1].local_bottom_vector_indices == [1, 3, 5]
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [2]
+            @test li[2].local_top_vector_a_block_indices == [2]
+            @test li[2].a_block_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [1, 5]
+            @test li[2].local_bottom_vector_indices == [1, 3]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                remove_boundaries_list, [nrank÷n_shared],
+                                [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == [6, 8]
+            @test li[1].local_top_vector_indices == [2, 4]
+            @test li[1].local_top_vector_a_block_indices == [2, 4]
+            @test li[1].a_block_sub_selection_indices == 1:2
+            @test li[1].bottom_vector_indices == [5, 7, 9]
+            @test li[1].local_bottom_vector_indices == [1, 3, 5]
+            @test li[2].top_vector_indices == [7]
+            @test li[2].local_top_vector_indices == [2]
+            @test li[2].local_top_vector_a_block_indices == [2]
+            @test li[2].a_block_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [5, 1]
+            @test li[2].local_bottom_vector_indices == [1, 3]
+        end
+    end
+
+    nrank = 2
+    n_shared = 2
+    block_sizes_list = [[1], [2]]
+    @testset "nelement_list=$nelement_list, block_sizes_list=$block_sizes_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                remove_boundaries_list, [nrank÷n_shared],
+                                [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == [2, 4, 6, 8]
+            @test li[1].local_top_vector_indices == [2, 4, 6, 8]
+            @test li[1].local_top_vector_a_block_indices == [2, 4]
+            @test li[1].a_block_sub_selection_indices == 1:2
+            @test li[1].bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[1].local_bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[2].top_vector_indices == [3, 7]
+            @test li[2].local_top_vector_indices == [2, 4]
+            @test li[2].local_top_vector_a_block_indices == [2]
+            @test li[2].a_block_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [1, 5, 1]
+            @test li[2].local_bottom_vector_indices == [1, 3, 5]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                remove_boundaries_list, [nrank÷n_shared],
+                                [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == [2, 4, 6, 8]
+            @test li[1].local_top_vector_indices == [2, 4, 6, 8]
+            @test li[1].local_top_vector_a_block_indices == [6, 8]
+            @test li[1].a_block_sub_selection_indices == 3:4
+            @test li[1].bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[1].local_bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[2].top_vector_indices == [3, 7]
+            @test li[2].local_top_vector_indices == [2, 4]
+            @test li[2].local_top_vector_a_block_indices == [4]
+            @test li[2].a_block_sub_selection_indices == [2]
+            @test li[2].bottom_vector_indices == [1, 5, 1]
+            @test li[2].local_bottom_vector_indices == [1, 3, 5]
         end
     end
 
@@ -8234,6 +8341,7 @@ end
 function test_indices()
     @testset "Test index splitting" begin
         @testset "test_split_indices_1d_2proc" test_split_indices_1d_2proc()
+        @testset "test_split_indices_1d_2proc_periodic" test_split_indices_1d_2proc_periodic()
         #@testset "test_split_indices_1d_4group" test_split_indices_1d_4group()
         #@testset "test_split_indices_1d_3group" test_split_indices_1d_3group()
         #@testset "test_split_indices_1d_2group_periodic" test_split_indices_1d_2group_periodic()
