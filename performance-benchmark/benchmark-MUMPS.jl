@@ -34,8 +34,8 @@ function set_global_rhs!(mumps, rhs_global)
 end
 
 function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                   dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
-                   allocate_shared_int, nmat, nrhs, timer)
+                   dimensions, level_multiplier, comm, distributed_comm, shared_comm,
+                   allocate_shared_float, allocate_shared_int, nmat, nrhs, timer)
 
     total_size = prod(d.n for d ∈ dimensions)
     is_root = (MPI.Comm_rank(comm) == 0)
