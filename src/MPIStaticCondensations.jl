@@ -970,11 +970,23 @@ end
 
 function generate_possible_multipliers(multiplier_list, v::Val{N}, ind_type::Type) where N
     sizes = ntuple(i->length(multiplier_list), v)
-    possible_multipliers = Vector{ind_type}[]
+    possible_multipliers = Vector{Union{ind_type,Nothing}}[]
     for inds ∈ CartesianIndices(sizes)
         push!(possible_multipliers, [multiplier_list[i] for i ∈ Tuple(inds)])
     end
     return possible_multipliers
+end
+
+function multiply_block_sizes(multiplier, previous_block_sizes, nelement_local_list)
+    block_sizes = similar(previous_block_sizes)
+    for (i, (m, p, nel)) ∈ enumerate(zip(multiplier, previous_block_sizes, nelement_local_list))
+        if m === nothing
+            block_sizes[i] = nel
+        else
+            block_sizes[i] = m * p
+        end
+    end
+    return block_sizes
 end
 
 """
@@ -1080,11 +1092,15 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         if any(this_block_sizes .≥ nelement_list) || total_local_nblock ≥ shared_comm_size
             # Make final block sizes such that no process owns more than one block.
             possible_multipliers = Vector{ind_type}[]
-            multiplier_list = (1, 2, 3, 5)
+            # A multiplier of `nothing` means that the block size is set to nelement_local
+            # for that dimension. We may end up with duplicates in `possible_block_sizes`
+            # by doing this, but that is only a minor inefficiency that does not affect
+            # the outcome.
+            multiplier_list = (1, 2, 3, 5, nothing)
             possible_multipliers =
                 generate_possible_multipliers(multiplier_list, Val(length(dimensions)),
                                               ind_type)
-            possible_block_sizes = [m .* previous_block_sizes
+            possible_block_sizes = [multiply_block_sizes(m, previous_block_sizes, nelement_local_list)
                                     for m ∈ possible_multipliers]
 
             # Remove 'possibilities' with more local blocks than `shared_comm_size`.
