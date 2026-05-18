@@ -134,15 +134,19 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Factorization{Tf},Trange}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange}
     n::Ti
     local_block_solver::Tsolver
     block_indices::Trange
     function BlockDiagonalSolver{Tf}(n::Ti, block_indices) where {Tf, Ti <: Integer}
         block_size = length(block_indices)
-        identity = spzeros(Tf, block_size, block_size)
-        copyto!(identity, I)
-        local_block_solver = lu(identity)
+        if block_size > 0
+            identity = spzeros(Tf, block_size, block_size)
+            copyto!(identity, I)
+            local_block_solver = lu(identity)
+        else
+            local_block_solver = nothing
+        end
         return new{Tf,Ti,typeof(local_block_solver),typeof(block_indices)}(n, local_block_solver, block_indices)
     end
 end
@@ -474,7 +478,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
             end
 
             # Add the interior boundary points
-            nblocks = nelement_local ÷ bs
+            nblocks = (nelement_local + bs - 1) ÷ bs
             for b ∈ 1:nblocks-1
                 # Note we do not `+1` to boundary here because it is more convenient to
                 # construct `flat_i` as a 0-based index, and only convert to 1-based just
@@ -1231,39 +1235,49 @@ end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
-    lu!(solver, sparse(A); reuse_symbolic=false)
+    if solver !== nothing
+        lu!(solver, sparse(A); reuse_symbolic=false)
+    end
     return nothing
 end
 
 function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    block_indices = block_diagonal_solver.block_indices
-    buff = u[block_indices]
-    buff2 = similar(buff)
-    @views ldiv!(buff2, solver, buff)
-    x[block_indices] .= buff2
+    if solver !== nothing
+        block_indices = block_diagonal_solver.block_indices
+        buff = u[block_indices]
+        buff2 = similar(buff)
+        @views ldiv!(buff2, solver, buff)
+        x[block_indices] .= buff2
+    end
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractVector{T}) where T
     solver = block_diagonal_solver.local_block_solver
-    block_indices = block_diagonal_solver.block_indices
-    buff = u[block_indices]
-    buff2 = similar(buff)
-    @views ldiv!(buff2, solver, buff)
-    u[block_indices] .= buff2
+    if solver !== nothing
+        block_indices = block_diagonal_solver.block_indices
+        buff = u[block_indices]
+        buff2 = similar(buff)
+        @views ldiv!(buff2, solver, buff)
+        u[block_indices] .= buff2
+    end
     return nothing
 end
 function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractMatrix{T}) where T
-    for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
-        ldiv!(this_x, block_diagnoal_solver, this_u)
+    if block_diagonal_solver.local_block_solver !== nothing
+        for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
+            ldiv!(this_x, block_diagonal_solver, this_u)
+        end
     end
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
-    for this_u ∈ eachcol(u)
-        ldiv!(block_diagonal_solver, this_u)
+    if block_diagonal_solver.local_block_solver !== nothing
+        for this_u ∈ eachcol(u)
+            ldiv!(block_diagonal_solver, this_u)
+        end
     end
     return nothing
 end

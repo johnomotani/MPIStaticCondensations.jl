@@ -161,6 +161,57 @@ function test_split_indices_1d_2proc()
         end
     end
 
+    nelement_list = [3]
+    periodic_list = [false]
+    remove_boundaries_list = [false]
+
+    # The interiors and boundaries are:
+    # -----+++-----===-----
+    # 1:2 | 3 | 4 ∥ 5 ∥ 6:7
+    # -----+++-----===-----
+    nrank = 2
+    n_shared = 2
+    block_sizes_list = [[1], [2]]
+    @testset "nelement_list=$nelement_list, block_sizes_list=$block_sizes_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                remove_boundaries_list, [nrank÷n_shared],
+                                [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:2, 4, 6:7)
+            @test li[1].local_top_vector_indices == vcat(1:2, 4, 6:7)
+            @test li[1].local_top_vector_a_block_indices == vcat(1:2, 4)
+            @test li[1].a_block_sub_selection_indices == 1:3
+            @test li[1].bottom_vector_indices == [3, 5]
+            @test li[1].local_bottom_vector_indices == [3, 5]
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == [1]
+            @test li[2].a_block_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [5]
+            @test li[2].local_bottom_vector_indices == [2]
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                remove_boundaries_list, [nrank÷n_shared],
+                                [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:2, 4, 6:7)
+            @test li[1].local_top_vector_indices == vcat(1:2, 4, 6:7)
+            @test li[1].local_top_vector_a_block_indices == vcat(6:7)
+            @test li[1].a_block_sub_selection_indices == 4:5
+            @test li[1].bottom_vector_indices == [3, 5]
+            @test li[1].local_bottom_vector_indices == [3, 5]
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == []
+            @test li[2].a_block_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == [5]
+            @test li[2].local_bottom_vector_indices == [2]
+        end
+    end
+
     return nothing
 end
 
