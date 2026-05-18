@@ -71,10 +71,7 @@ function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
     Alu = mpi_static_condensation(dimensions; comm, distributed_comm, shared_comm,
                                   allocate_shared_float, allocate_shared_int,
                                   schur_tile_size=nothing, use_sparse=true,
-                                  separate_Ainv_B=false,
-#separate_Ainv_B=true,
-                                  optimize_schur_complement_size=true, timer,
-                                  check_lu=false)
+                                  separate_Ainv_B=false, timer, check_lu=false)
     t2 = time_ns()
     t_setup = (t2 - t1) * 1e-6 # in ms
 

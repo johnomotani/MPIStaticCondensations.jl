@@ -10,7 +10,6 @@ using Test
 
 const ngrid = 3
 
-using Debugger
 #function get_level_info(ngrid_list, nelement_list, periodic_list, remove_boundaries_list,
 #                        nrank_list, irank_list, n_shared, n_groups, irank;
 #                        optimize_schur_complement_size=true)

@@ -600,7 +600,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, local_indices::Vector{Ti}
     global_top_vector_indices = get_global_indices(dimensions, interior_indices)
     global_bottom_vector_indices = get_global_indices(dimensions, boundary_indices)
 
-    # The local indices need to be actually the indices of those entries within
+    # The level local indices need to be actually the indices of those entries within
     # local_indices.
     local_top_vector_indices = Ti[]
     t_count = 1
@@ -1094,7 +1094,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_block_sizes = previous_block_sizes .* 2
         local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
         total_local_nblock = prod(local_nblock_list)
-        if any(this_block_sizes .≥ nelement_list) || total_local_nblock ≥ shared_comm_size
+        if any(this_block_sizes .≥ nelement_list) || total_local_nblock ≤ shared_comm_size
             # Make final block sizes such that no process owns more than one block.
             possible_multipliers = Vector{ind_type}[]
             # A multiplier of `nothing` means that the block size is set to nelement_local
@@ -1147,7 +1147,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     n_levels = length(block_sizes_list)
     level_info_list = Vector{LevelInfo}(undef, n_levels)
-    level_local_indices = collect(1:prod(d.n_local for d ∈ dimensions))
+    level_local_indices = local_indices = collect(1:prod(d.n_local for d ∈ dimensions))
     level_global_size = prod(d.n for d ∈ dimensions)
     for (level, block_sizes) ∈ enumerate(block_sizes_list)
         if level == n_levels
@@ -1156,7 +1156,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         else
             dims = dimensions_without_periodic
         end
-        this_level_info = split_matrix(dims, level_local_indices, block_sizes,
+        # Keep selecting the subset of `1:prod(d.n_local for d ∈ dimensions)` that is
+        # involved in each successive level.
+        local_indices = local_indices[level_local_indices]
+        this_level_info = split_matrix(dims, local_indices, block_sizes,
                                        level_global_size, distributed_comm, shared_comm)
         level_info_list[level] = this_level_info
         level_local_indices = this_level_info.local_bottom_vector_indices
