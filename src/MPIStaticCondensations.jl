@@ -116,14 +116,15 @@ end
 Base.size(Alu::MPIStaticCondensationSerialDense) = size(Alu.local_block_solver)
 Base.size(Alu::MPIStaticCondensationSerialDense, d::Integer) = size(Alu)[d]
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangetab,Trangeb,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangetab,Trangeabs,Trangeb,Trangebs,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
-    this_shared_local_top_vector_indices::Tranget
     local_top_vector_a_block_indices::Trangetab
+    a_block_sub_selection_indices::Trangeabs
     local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_indices::Trangeb
+    this_shared_local_bottom_sub_selection_indices::Trangebs
     u_buffer::Vector{Tf}
     v_buffer::Vector{Tf}
     timer::Ttimer
@@ -1158,15 +1159,15 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_global_size = this_level_info.global_bottom_vector_size
     end
 
-    # Create lowest level solver
+    # Create lowest level MPISchurComplement solver
+    # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
+    # long as the last Schur complement matrix is not too small.
     last_level_info = level_info_list[end]
     last_A_block_solver =
         BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
                                        last_level_info.a_block_sub_selection_indices)
-    # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
-    # long as the last Schur complement matrix is not too small.
     last_parallel_schur = last_level_info.global_bottom_vector_size ≥ 1024
-    last_level_sc =
+    this_level_sc =
         mpi_schur_complement(last_A_block_solver, data_type, data_type, data_type,
                              last_level_info.top_vector_indices,
                              last_level_info.bottom_vector_indices; comm=comm,
@@ -1178,66 +1179,47 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                              parallel_schur=last_parallel_schur, skip_factorization=true,
                              schur_tile_size=schur_tile_size, check_lu=check_lu,
                              timer=timer)
-    last_u_buffer = fill(data_type(NaN), length(last_level_info.local_top_vector_indices))
-    last_v_buffer = fill(data_type(NaN), length(last_level_info.local_bottom_vector_indices))
-    # Need to create a version of local_top_vector_indices and
-    # local_bottom_vector_indices that is split into ranges to be handled in parallel
-    # by all the processes in the shared-memory block.
-    ntop = length(last_level_info.local_top_vector_indices)
-    top_points_per_proc = (ntop + shared_comm_size - 1) ÷ shared_comm_size
-    top_subset = shared_comm_rank*top_points_per_proc+1:min((shared_comm_rank+1)*top_points_per_proc,ntop)
-    last_shared_local_top_vector_indices = last_level_info.local_top_vector_indices[top_subset]
-    nbottom = length(last_level_info.local_bottom_vector_indices)
-    bottom_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
-    bottom_subset = shared_comm_rank*bottom_points_per_proc+1:min((shared_comm_rank+1)*bottom_points_per_proc,nbottom)
-    last_shared_local_bottom_vector_indices = last_level_info.local_bottom_vector_indices[bottom_subset]
-    this_level_schur_solver =
-        MPIStaticCondensationParallel(last_level_info.global_size, last_level_sc,
-                                      last_level_info.local_top_vector_indices,
-                                      last_shared_local_top_vector_indices,
-                                      last_level_info.local_top_vector_a_block_indices,
-                                      last_level_info.local_bottom_vector_indices,
-                                      last_shared_local_bottom_vector_indices,
-                                      last_u_buffer, last_v_buffer, timer)
 
-    for this_level_info ∈ level_info_list[end-1:-1:1]
-        this_A_block_solver =
-            BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
-                                           this_level_info.a_block_sub_selection_indices)
-        # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
-        # long as the last Schur complement matrix is not too small.
-        this_level_sc =
-            mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
-                                 this_level_info.top_vector_indices,
-                                 this_level_info.bottom_vector_indices; comm=comm,
-                                 shared_comm=shared_comm, distributed_comm=distributed_comm,
-                                 allocate_shared_float=allocate_shared_float,
-                                 allocate_shared_int=allocate_shared_int,
-                                 synchronize_shared=synchronize_shared, use_sparse=use_sparse,
-                                 sparse_Ainv_B=true,
-                                 parallel_schur=this_level_schur_solver, skip_factorization=true,
-                                 schur_tile_size=schur_tile_size, check_lu=check_lu,
-                                 timer=timer)
-        this_u_buffer = fill(data_type(NaN), length(this_level_info.local_top_vector_indices))
-        this_v_buffer = fill(data_type(NaN), length(this_level_info.local_bottom_vector_indices))
+    this_level_schur_solver = nothing
+    for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
+        if level < n_levels
+            this_A_block_solver =
+                BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
+                                               this_level_info.a_block_sub_selection_indices)
+            this_level_sc =
+                mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
+                                     this_level_info.top_vector_indices,
+                                     this_level_info.bottom_vector_indices; comm=comm,
+                                     shared_comm=shared_comm, distributed_comm=distributed_comm,
+                                     allocate_shared_float=allocate_shared_float,
+                                     allocate_shared_int=allocate_shared_int,
+                                     synchronize_shared=synchronize_shared, use_sparse=use_sparse,
+                                     sparse_Ainv_B=true,
+                                     parallel_schur=this_level_schur_solver, skip_factorization=true,
+                                     schur_tile_size=schur_tile_size, check_lu=check_lu,
+                                     timer=timer)
+        end
+        this_u_buffer = allocate_shared_float(length(this_level_info.local_top_vector_indices))
+        this_v_buffer = allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
         # Need to create a version of local_top_vector_indices and
         # local_bottom_vector_indices that is split into ranges to be handled in parallel
         # by all the processes in the shared-memory block.
         ntop = length(this_level_info.local_top_vector_indices)
         top_points_per_proc = (ntop + shared_comm_size - 1) ÷ shared_comm_size
         top_subset = shared_comm_rank*top_points_per_proc+1:min((shared_comm_rank+1)*top_points_per_proc,ntop)
-        this_shared_local_top_vector_indices = this_level_info.local_top_vector_indices[top_subset]
         nbottom = length(this_level_info.local_bottom_vector_indices)
         bottom_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
         bottom_subset = shared_comm_rank*bottom_points_per_proc+1:min((shared_comm_rank+1)*bottom_points_per_proc,nbottom)
         this_shared_local_bottom_vector_indices = this_level_info.local_bottom_vector_indices[bottom_subset]
+        this_shared_local_bottom_sub_selection_indices = (1:length(this_level_info.local_bottom_vector_indices))[bottom_subset]
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
-                                          this_shared_local_top_vector_indices,
                                           this_level_info.local_top_vector_a_block_indices,
+                                          this_level_info.a_block_sub_selection_indices,
                                           this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
+                                          this_shared_local_bottom_sub_selection_indices,
                                           this_u_buffer, this_v_buffer, timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
@@ -1519,21 +1501,26 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         # It is slightly faster to copy the data to/from local buffers than to use @view
         # with Vector{Int64} indices.
-        this_shared_local_top_vector_indices = solver.this_shared_local_top_vector_indices
+        local_top_vector_a_block_indices = solver.local_top_vector_a_block_indices
+        a_block_sub_selection_indices = solver.a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
+        this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
         u = solver.u_buffer
         v = solver.v_buffer
-        for (i1, i2) ∈ enumerate(this_shared_local_top_vector_indices)
+        # Use the a_block_indices here so that no shared-memory synchronization is needed
+        # before the ldiv!() call for the A subblock with the BlockDiagonalSolver inside
+        # the MPISchurComplement ldiv!().
+        for (i1, i2) ∈ zip(a_block_sub_selection_indices, local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
-        for (i1, i2) ∈ enumerate(this_shared_local_bottom_vector_indices)
+        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_indices, this_shared_local_bottom_vector_indices)
             v[i1] = U[i2]
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i2, i1) ∈ enumerate(this_shared_local_top_vector_indices)
+        for (i1, i2) ∈ zip(local_top_vector_a_block_indices, a_block_sub_selection_indices)
             X[i1] = u[i2]
         end
-        for (i2, i1) ∈ enumerate(this_shared_local_bottom_vector_indices)
+        for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
             X[i1] = v[i2]
         end
     end
@@ -1544,21 +1531,26 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         # It is slightly faster to copy the data to/from local buffers than to use @view
         # with Vector{Int64} indices.
-        this_shared_local_top_vector_indices = solver.this_shared_local_top_vector_indices
+        local_top_vector_a_block_indices = solver.local_top_vector_a_block_indices
+        a_block_sub_selection_indices = solver.a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
+        this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
         u = solver.u_buffer
         v = solver.v_buffer
-        for (i1, i2) ∈ enumerate(this_shared_local_top_vector_indices)
+        # Use the a_block_indices here so that no shared-memory synchronization is needed
+        # before the ldiv!() call for the A subblock with the BlockDiagonalSolver inside
+        # the MPISchurComplement ldiv!().
+        for (i1, i2) ∈ zip(a_block_sub_selection_indices, local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
-        for (i1, i2) ∈ enumerate(this_shared_local_bottom_vector_indices)
+        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_indices, this_shared_local_bottom_vector_indices)
             v[i1] = U[i2]
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i2, i1) ∈ enumerate(this_shared_local_top_vector_indices)
+        for (i1, i2) ∈ zip(local_top_vector_a_block_indices, a_block_sub_selection_indices)
             U[i1] = u[i2]
         end
-        for (i2, i1) ∈ enumerate(this_shared_local_bottom_vector_indices)
+        for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
             U[i1] = v[i2]
         end
     end
