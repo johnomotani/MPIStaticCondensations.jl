@@ -1051,6 +1051,7 @@ factors of 2).
 matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
+                                 level_multiplier::Integer=2,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1091,7 +1092,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
     while true
         previous_block_sizes = block_sizes_list[end]
-        this_block_sizes = previous_block_sizes .* 2
+        this_block_sizes = previous_block_sizes .* level_multiplier
         local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
         total_local_nblock = prod(local_nblock_list)
         if any(this_block_sizes .≥ nelement_list) || total_local_nblock ≤ shared_comm_size
@@ -1101,7 +1102,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             # for that dimension. We may end up with duplicates in `possible_block_sizes`
             # by doing this, but that is only a minor inefficiency that does not affect
             # the outcome.
-            multiplier_list = (1, 2, 3, 5, nothing)
+            multiplier_list = ((1:16)..., nothing)
             possible_multipliers =
                 generate_possible_multipliers(multiplier_list, Val(length(dimensions)),
                                               ind_type)

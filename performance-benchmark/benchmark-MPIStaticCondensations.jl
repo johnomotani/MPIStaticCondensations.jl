@@ -49,8 +49,8 @@ function get_block_sizes(outer_nelement, outer_ngrid, inner_dims_length)
 end
 
 function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                 dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
-                 allocate_shared_int, nmat, nrhs, timer)
+                 dimensions, level_multiplier, comm, distributed_comm, shared_comm,
+                 allocate_shared_float, allocate_shared_int, nmat, nrhs, timer)
 
     outer_dim_steps = prod(d.n for d ∈ dimensions[1:end-1]; init=1)
     nelement_local = dimensions[end].nelement ÷ dimensions[end].nrank
@@ -68,8 +68,8 @@ function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
     end
 
     t1 = time_ns()
-    Alu = mpi_static_condensation(dimensions; comm, distributed_comm, shared_comm,
-                                  allocate_shared_float, allocate_shared_int,
+    Alu = mpi_static_condensation(dimensions; level_multiplier, comm, distributed_comm,
+                                  shared_comm, allocate_shared_float, allocate_shared_int,
                                   schur_tile_size=nothing, use_sparse=true,
                                   separate_Ainv_B=false, timer, check_lu=false)
     t2 = time_ns()

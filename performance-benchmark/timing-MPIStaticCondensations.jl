@@ -5,6 +5,8 @@ include("benchmark-MPIStaticCondensations.jl")
 
 timing_params = BenchmarkParams([32, 32], [5, 5], true)
 
+level_multiplier = 2
+
 function timing_run()
     if !MPI.Initialized()
         MPI.Init()
@@ -12,9 +14,11 @@ function timing_run()
 
     BLAS.set_num_threads(1)
 
+    comm_size = MPI.Comm_size(MPI.COMM_WORLD)
+    n_shared = parse(Int64, ARGS[1])
     timer = TimerOutput()
 
-    run_benchmark(run_MSC, timing_params, 42, nothing, parse(Int64, ARGS[1]), true, timer)
+    run_benchmark(run_MSC, timing_params, 42, nothing, n_shared, true, level_multiplier, timer)
 
     if MPI.Comm_rank(MPI.COMM_WORLD) == 0
         display(timer)
