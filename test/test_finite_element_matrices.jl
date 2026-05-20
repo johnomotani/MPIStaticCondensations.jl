@@ -35,6 +35,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
 
     @testset "solve" begin
         ldiv!(Alu, rhs_local)
+        MPI.Barrier(shared_comm)
         x_global = gather_vector(rhs_local, dimensions, comm, distributed_comm,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
