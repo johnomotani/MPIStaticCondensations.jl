@@ -178,8 +178,11 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             else
                 ns = Threads.nthreads()
             end
+            function vec2string(v)
+                return "[" * join(v, ",") * "]"
+            end
             open(joinpath(run_dir, "benchmarks_$label.txt"), "a") do io
-                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(params.nelement_list) $(params.ngrid_list) $(params.periodic_list) $(params.remove_boundaries_list)")
+                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list))")
             end
         end
     end
