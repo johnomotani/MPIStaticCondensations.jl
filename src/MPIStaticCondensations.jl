@@ -1100,17 +1100,15 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     block_sizes_list = [ones(ind_type, length(dimensions))]
     nelement_list = [d.nelement for d ∈ dimensions]
     nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
-    total_local_nblock_list = [prod(nelement_local_list)]
-    while true
+    total_local_nblock = prod(nelement_local_list)
+    total_local_nblock_list = [total_local_nblock]
+    while total_local_nblock > 1
         previous_block_sizes = block_sizes_list[end]
         this_block_sizes = @. min(previous_block_sizes .* level_multiplier, nelement_local_list)
         local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
         total_local_nblock = prod(local_nblock_list)
         push!(total_local_nblock_list, total_local_nblock)
         push!(block_sizes_list, this_block_sizes)
-        if total_local_nblock == 1
-            break
-        end
     end
 
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
