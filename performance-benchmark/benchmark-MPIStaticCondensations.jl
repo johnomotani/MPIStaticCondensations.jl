@@ -56,16 +56,7 @@ function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
     nelement_local = dimensions[end].nelement ÷ dimensions[end].nrank
     block_sizes, off_diagonals = get_block_sizes(nelement_local, dimensions[end].ngrid,
                                                  outer_dim_steps)
-    n_total = sum(block_sizes)
-    # May not need BlockSkylineMatrix for this test, but it is what we use in
-    # moment_kinetics, so is the most relevant choice.
-    A = BlockSkylineMatrix{Float64}(BlockBandedMatrices.Zeros(n_total, n_total),
-                                    block_sizes, block_sizes,
-                                    (off_diagonals, off_diagonals))
-
-    for (entry, i, j) ∈ zip(data, local_i, local_j)
-        A[i,j] = entry
-    end
+    A = sparse(local_i, local_j, data)
 
     t1 = time_ns()
     Alu = mpi_static_condensation(dimensions; level_multiplier, comm, distributed_comm,
