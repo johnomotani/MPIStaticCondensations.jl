@@ -46,7 +46,7 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
     #                                   comm, distributed_comm, shared_comm))
     this_global_size = prod(d.n for d ∈ dimensions)
     local_size = prod(d.n_local for d ∈ dimensions)
-    level_indices = get_global_indices(dimensions, collect(1:local_size))
+    level_indices = get_global_indices(dimensions_without_periodic, collect(1:local_size))
     n_levels = length(block_sizes_list)
     level_info = Any[]
     for (level, bs) ∈ enumerate(block_sizes_list)

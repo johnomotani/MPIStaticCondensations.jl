@@ -414,6 +414,34 @@ function get_global_indices(dimensions::Vector{<:Dimension},
     return global_inds
 end
 
+function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
+                                      inds::Vector{<:Integer})
+    n_tuple = Tuple(d.n for d ∈ dimensions)
+    return apply_periodicity_to_indices(dimensions, inds, n_tuple)
+end
+function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
+                                      inds::Vector{<:Integer}, n_tuple)
+    if !any(d.periodic for d ∈ dimensions)
+        # No periodic dimensions to account for.
+        return copy(inds)
+    end
+    periodic_inds = similar(inds)
+    cartinds = CartesianIndices(n_tuple)
+    for (i, ind) ∈ enumerate(inds)
+        cart_i = cartinds[ind]
+        global_i = 0
+        for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
+            if di == n && d.periodic
+                di = 1
+            end
+            global_i = global_i * n + di - 1
+        end
+        global_i += 1
+        periodic_inds[i] = global_i
+    end
+    return periodic_inds
+end
+
 function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                                              block_sizes::Vector{<:Integer},
                                              row_indices::Vector{<:Integer},
@@ -736,8 +764,9 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     MPI.Bcast!(top_vector_size, shared_comm; root=0)
     global_bottom_vector_size = global_size - top_vector_size[]
 
-    global_top_vector_indices = interior_indices
-    global_bottom_vector_indices = oundary_indices
+    global_top_vector_indices = apply_periodicity_to_indices(dimensions, interior_indices)
+    global_bottom_vector_indices = apply_periodicity_to_indices(dimensions,
+                                                                boundary_indices)
 
     # The level local indices need to be actually the indices of those entries within
     # level_indices.
