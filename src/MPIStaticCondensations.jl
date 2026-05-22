@@ -554,7 +554,6 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
 
     # Use the 'experimental' FixedSparseCSC instead of SparseMatrixCSC to ensure that the
     # Vectors are not resized, reallocated, etc.
-    println("get_shared_sparse_matrix_csc_buffer: m=$m, n=$n, colptr=$colptr, rowval=$rowval, nzval=$nzval")
     return FixedSparseCSC(m, n, colptr, rowval, nzval)
 end
 
@@ -1433,9 +1432,21 @@ function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{
         block_indices = block_diagonal_solver.block_indices
         x_buffer = block_diagonal_solver.x_buffer
         u_buffer = block_diagonal_solver.u_buffer
-        u_buffer .= @view u[block_indices]
+        for (i1, i2) ∈ enumerate(block_indices)
+            u_buffer[i1] = u[i2]
+        end
         @views ldiv!(x_buffer, solver, u_buffer)
-        x[block_indices] .= x_buffer
+        if issparse(x)
+            for (i2, i1) ∈ enumerate(block_indices)
+                if x_buffer[i2] != 0
+                    x[i1] = x_buffer[i2]
+                end
+            end
+        else
+            for (i2, i1) ∈ enumerate(block_indices)
+                x[i1] = x_buffer[i2]
+            end
+        end
     end
     return nothing
 end
