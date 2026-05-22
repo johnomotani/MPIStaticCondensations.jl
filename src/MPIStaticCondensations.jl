@@ -442,6 +442,65 @@ function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
     return periodic_inds
 end
 
+function get_dim_indices!(dimensions, block_sizes, flat_i)
+    block_inds = zeros(Int64, length(dimensions))
+    inner_inds = zeros(Int64, length(dimensions))
+    for (i, d) ∈ enumerate(dimensions)
+        flat_i, dim_i = divrem(flat_i, d.n_local)
+        this_block_npoints = block_sizes[i] * (d.ngrid - 1)
+        block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+    end
+    return block_inds, inner_inds
+end
+function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indices,
+                       block_inds, inner_inds, rowind, count, row_count)
+    if idim == 0
+        # rowind is constructed as a 0-based index for convenience. Convert to
+        # 1-based before adding to `rv`.
+        rowind += 1
+        # Only add row indices that are contained in row_indices. For each column,
+        # we iterate through the rows in order so we use row_count to avoid
+        # searching row_indices here.
+        while row_count[] ≤ length(row_indices) && rowind > row_indices[row_count[]]
+            row_count[] += 1
+        end
+        if row_count[] ≤ length(row_indices) && rowind == row_indices[row_count[]]
+            push!(rv, row_count[])
+            count[] += 1
+            row_count[] += 1
+        end
+        return nothing
+    end
+    d = dimensions[idim]
+    block_npoints = block_sizes[idim] * (d.ngrid - 1)
+    iblock = block_inds[idim]
+    iinner = inner_inds[idim]
+    rowind *= d.n_local
+    if iinner == 1 && iblock > 1
+        # Is a block boundary, so include points from previous block.
+        row_offset = (iblock - 2) * block_npoints
+        for row_inner ∈ 1:block_npoints
+            add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
+                          block_inds, inner_inds, rowind + row_offset + row_inner - 1,
+                          count, row_count)
+        end
+    end
+    row_offset = (iblock - 1) * block_npoints
+    if iblock > nblock_list[idim]
+        # Creating entries for the last grid point, this is 'really'
+        # iel=nelement_local-1, col_igr=ngrid, so only need to add the row_igr=1
+        # point.
+        add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
+                      block_inds, inner_inds, rowind + row_offset, count, row_count)
+    else
+        for row_inner ∈ 1:block_npoints+1
+            add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
+                          block_inds, inner_inds, rowind + row_offset + row_inner - 1,
+                          count, row_count)
+        end
+    end
+    return nothing
+end
 function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                                              block_sizes::Vector{<:Integer},
                                              row_indices::Vector{<:Integer},
@@ -465,70 +524,17 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
     if shared_comm_rank == 0
         cp = Int64[]
         rv = Int64[]
-        count = 1
-        row_count = 1
+        count = Ref(1)
+        row_count = Ref(1)
 
-        function get_dim_indices(flat_i)
-            block_inds = zeros(Int64, length(dimensions))
-            inner_inds = zeros(Int64, length(dimensions))
-            for (i, d) ∈ enumerate(dimensions)
-                flat_i, dim_i = divrem(flat_i, d.n_local)
-                this_block_npoints = block_sizes[i] * (d.ngrid - 1)
-                block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
-            end
-            return block_inds, inner_inds
-        end
-        function add_row_inds!(idim, block_inds, inner_inds, rowind)
-            if idim == 0
-                # rowind is constructed as a 0-based index for convenience. Convert to
-                # 1-based before adding to `rv`.
-                rowind += 1
-                # Only add row indices that are contained in row_indices. For each column,
-                # we iterate through the rows in order so we use row_count to avoid
-                # searching row_indices here.
-                while row_count ≤ length(row_indices) && rowind > row_indices[row_count]
-                    row_count += 1
-                end
-                if row_count ≤ length(row_indices) && rowind == row_indices[row_count]
-                    push!(rv, row_count)
-                    count += 1
-                    row_count += 1
-                end
-                return nothing
-            end
-            d = dimensions[idim]
-            block_npoints = block_sizes[idim] * (d.ngrid - 1)
-            iblock = block_inds[idim]
-            iinner = inner_inds[idim]
-            rowind *= d.n_local
-            if iinner == 1 && iblock > 1
-                # Is a block boundary, so include points from previous block.
-                row_offset = (iblock - 2) * block_npoints
-                for row_inner ∈ 1:block_npoints
-                    add_row_inds!(idim - 1, block_inds, inner_inds,
-                                  rowind + row_offset + row_inner - 1)
-                end
-            end
-            row_offset = (iblock - 1) * block_npoints
-            if iblock > nblock_list[idim]
-                # Creating entries for the last grid point, this is 'really'
-                # iel=nelement_local-1, col_igr=ngrid, so only need to add the row_igr=1
-                # point.
-                add_row_inds!(idim - 1, block_inds, inner_inds, rowind + row_offset)
-            else
-                for row_inner ∈ 1:block_npoints+1
-                    add_row_inds!(idim - 1, block_inds, inner_inds,
-                                  rowind + row_offset + row_inner - 1)
-                end
-            end
-        end
         for col ∈ column_indices
-            push!(cp, count)
-            block_inds, inner_inds = get_dim_indices(col - 1)
-            row_count = 1
-            add_row_inds!(length(dimensions), block_inds, inner_inds, 0)
+            push!(cp, count[])
+            block_inds, inner_inds = get_dim_indices!(dimensions, block_sizes, col - 1)
+            row_count[] = 1
+            add_row_inds!(rv, length(dimensions), dimensions, block_sizes, nblock_list,
+                          row_indices, block_inds, inner_inds, 0, count, row_count)
         end
-        push!(cp, count)
+        push!(cp, count[])
 
         n_colptr[] = length(cp)
         n_rowval[] = length(rv)
@@ -569,7 +575,7 @@ MPI.Bcast!(buff, comm::FakeComm; root=nothing) = buff # This is not a sensible r
 MPI.Barrier(comm::FakeComm) = nothing
 
 #@kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
-@kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm}}
+@kwdef struct LevelInfo{Ti,Tcomm<:Union{MPI.Comm,FakeComm}}
     #level_dimensions::Vector{Dimension{Ti}}
     block_sizes::Vector{Ti}
     global_size::Ti
@@ -577,7 +583,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     local_top_vector_a_block_indices::Vector{Ti}
-    a_block_sub_selection_indices::Tasub
+    a_block_sub_selection_indices::Vector{Ti}
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     #level_comm::Tcomm
@@ -1275,7 +1281,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                    for d ∈ dimensions]
 
     n_levels = length(block_sizes_list)
-    level_info_list = Vector{LevelInfo}(undef, n_levels)
+    level_info_list = Vector{LevelInfo{ind_type,typeof(shared_comm)}}(undef, n_levels)
     level_indices = get_global_indices(dimensions,
                                        collect(1:prod(d.n_local for d ∈ dimensions)))
     level_global_size = prod(d.n for d ∈ dimensions)
@@ -1320,15 +1326,15 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         last_A_block_solver =
             BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
                                            last_level_info.a_block_sub_selection_indices)
-        level_shared_comm = last_level_info.level_shared_comm
-        level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=level_shared_comm)
-        level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=level_shared_comm)
+        last_level_shared_comm = last_level_info.level_shared_comm
+        level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
+        level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
         last_parallel_schur = last_level_info.global_bottom_vector_size ≥ 1024
         this_level_sc =
             mpi_schur_complement(last_A_block_solver, data_type, data_type, data_type,
                                  last_level_info.top_vector_indices,
                                  last_level_info.bottom_vector_indices; comm=comm,
-                                 shared_comm=level_shared_comm,
+                                 shared_comm=last_level_shared_comm,
                                  distributed_comm=distributed_comm,
                                  allocate_shared_float=level_allocate_shared_float,
                                  allocate_shared_int=level_allocate_shared_int,
@@ -1346,9 +1352,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_schur_solver = MPIStaticCondensationNull{data_type}()
             continue
         end
-        level_shared_comm = this_level_info.level_shared_comm
-        level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=level_shared_comm)
-        level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=level_shared_comm)
+        this_level_shared_comm = this_level_info.level_shared_comm
+        level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_shared_comm)
+        level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_shared_comm)
         if level < n_levels
             this_A_block_solver =
                 BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
@@ -1358,7 +1364,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     this_level_info.block_sizes,
                                                     this_level_info.top_vector_indices,
                                                     this_level_info.bottom_vector_indices,
-                                                    this_level_info.level_shared_comm,
+                                                    this_level_shared_comm,
                                                     level_allocate_shared_float,
                                                     level_allocate_shared_int)
             schur_complement_buffer =
@@ -1366,14 +1372,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     this_level_info.block_sizes,
                                                     this_level_info.bottom_vector_indices,
                                                     this_level_info.bottom_vector_indices,
-                                                    this_level_info.level_shared_comm,
+                                                    this_level_shared_comm,
                                                     level_allocate_shared_float,
                                                     level_allocate_shared_int)
             this_level_sc =
                 mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
                                      this_level_info.top_vector_indices,
                                      this_level_info.bottom_vector_indices; comm=comm,
-                                     shared_comm=level_shared_comm,
+                                     shared_comm=this_level_shared_comm,
                                      distributed_comm=distributed_comm,
                                      allocate_shared_float=level_allocate_shared_float,
                                      allocate_shared_int=level_allocate_shared_int,
@@ -1385,8 +1391,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                      schur_tile_size=schur_tile_size, check_lu=check_lu,
                                      timer=timer)
         end
-        level_shared_comm_rank = MPI.Comm_rank(level_shared_comm)
-        level_shared_comm_size = MPI.Comm_size(level_shared_comm)
+        level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
+        level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_u_buffer = level_allocate_shared_float(length(this_level_info.local_top_vector_indices))
         this_v_buffer = level_allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
         # Need to create a version of local_top_vector_indices and
