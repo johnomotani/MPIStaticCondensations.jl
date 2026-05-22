@@ -1065,13 +1065,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
-                                 allocate_shared_float::Union{Function,Nothing}=nothing,
-                                 allocate_shared_int::Union{Function,Nothing}=nothing,
-                                 synchronize_shared::Union{Function,Nothing}=nothing,
+                                 allocate_shared_float::F1=nothing,
+                                 allocate_shared_int::F2=nothing,
+                                 synchronize_shared::F3=nothing,
                                  schur_tile_size::Union{Nothing,Integer}=nothing,
                                  use_sparse::Bool=true, separate_Ainv_B::Bool=false,
                                  timer::Union{Nothing,TimerOutput}=nothing,
-                                 check_lu::Bool=false)
+                                 check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
     data_type = Float64
     ind_type = Int64
