@@ -8431,6 +8431,118 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
         end
     end
 
+    periodic_list = [false, false]
+    remove_boundaries_list = [true, true]
+
+    # The interiors and boundaries are:
+    # ===================================
+    # ∥ 1 ∥ 6  ∥ 11 ∥ 16 ∥ 21 ∥ 26 ∥ 31 ∥
+    # ===================================
+    # ∥ 2 ∥ 7  ∥ 12 ∥ 17 ∥ 22 ∥ 27 ∥ 32 ∥
+    # -===------====------====------====-
+    # ∥ 3 ∥ 8  ∥ 13 ∥ 18 ∥ 23 ∥ 28 ∥ 33 ∥
+    # -===------====------====------====-
+    # ∥ 4 ∥ 9  ∥ 14 ∥ 19 ∥ 24 ∥ 29 ∥ 34 ∥
+    # ===================================
+    # ∥ 5 ∥ 10 ∥ 15 ∥ 20 ∥ 25 ∥ 30 ∥ 35 ∥
+    # ===================================
+    nelement_list = [1, 3]
+    ngrid_list = [5, 3]
+    block_sizes_list = [[1, 1], [1, 2], [1, 3]]
+    @testset "nelement_list=$nelement_list, block_sizes_list=$block_sizes_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list" begin
+        li, dimensions = get_level_info(ngrid_list, nelement_list, block_sizes_list,
+                                        periodic_list, remove_boundaries_list, [1, 1],
+                                        [0, 0], 1, 0)
+        level = 1
+        @testset "level=$level" begin
+            block_sizes = block_sizes_list[level]
+            level_info = li[level]
+            buffer =
+                get_shared_sparse_matrix_csc_buffer(dimensions, block_sizes,
+                                                    level_info.top_vector_indices,
+                                                    level_info.bottom_vector_indices,
+                                                    shared_comm, allocate_shared_float,
+                                                    allocate_shared_int)
+            @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3,
+                                        1:6, 1:6, 1:6, 1:6, 1:6,
+                                        4:6, 4:6,
+                                        4:9, 4:9, 4:9, 4:9, 4:9,
+                                        7:9, 7:9, 7:9, 7:9, 7:9, 7:9, 7:9)
+            @test buffer.colptr == [1, 4, 7, 10, 13, 16, 19, 22,
+                                    28, 34, 40, 46, 52,
+                                    55, 58,
+                                    64, 70, 76, 82, 88,
+                                    91, 94, 97, 100, 103, 106, 109]
+
+            buffer =
+                get_shared_sparse_matrix_csc_buffer(dimensions, block_sizes,
+                                                    level_info.bottom_vector_indices,
+                                                    level_info.bottom_vector_indices,
+                                                    shared_comm, allocate_shared_float,
+                                                    allocate_shared_int)
+            @test buffer.rowval == vcat(1:12, 1:12, 1:12, 1:12, 1:12, 1:12, 1:12,
+                                        1:19, 1:19, 1:19, 1:19, 1:19,
+                                        8:19, 8:19,
+                                        8:26, 8:26, 8:26, 8:26, 8:26,
+                                        15:26, 15:26, 15:26, 15:26, 15:26, 15:26, 15:26)
+            @test buffer.colptr == [1, 13, 25, 37, 49, 61, 73, 85,
+                                    104, 123, 142, 161, 180,
+                                    192, 204,
+                                    223, 242, 261, 280, 299,
+                                    311, 323, 335, 347, 359, 371, 383]
+        end
+
+        level = 2
+        @testset "level=$level" begin
+            block_sizes = block_sizes_list[level]
+            level_info = li[level]
+            buffer =
+                get_shared_sparse_matrix_csc_buffer(dimensions, block_sizes,
+                                                    level_info.top_vector_indices,
+                                                    level_info.bottom_vector_indices,
+                                                    shared_comm, allocate_shared_float,
+                                                    allocate_shared_int)
+            @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3)
+            @test buffer.colptr == [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 49, 49, 49, 49, 49, 49, 49]
+
+            buffer =
+                get_shared_sparse_matrix_csc_buffer(dimensions, block_sizes,
+                                                    level_info.bottom_vector_indices,
+                                                    level_info.bottom_vector_indices,
+                                                    shared_comm, allocate_shared_float,
+                                                    allocate_shared_int)
+            @test buffer.rowval == vcat(1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16,
+                                        1:23, 1:23, 1:23, 1:23, 1:23,
+                                        12:23, 12:23, 12:23, 12:23, 12:23, 12:23, 12:23)
+            @test buffer.colptr == [1, 17, 33, 49, 65, 81, 97, 113, 129, 145, 161, 177,
+                                    200, 223, 246, 269, 292,
+                                    304, 316, 328, 340, 352, 364, 376]
+        end
+
+        level = 3
+        @testset "level=$level" begin
+            block_sizes = block_sizes_list[level]
+            level_info = li[level]
+            buffer =
+                get_shared_sparse_matrix_csc_buffer(dimensions, block_sizes,
+                                                    level_info.top_vector_indices,
+                                                    level_info.bottom_vector_indices,
+                                                    shared_comm, allocate_shared_float,
+                                                    allocate_shared_int)
+            @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3)
+            @test buffer.colptr == [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61]
+
+            buffer =
+                get_shared_sparse_matrix_csc_buffer(dimensions, block_sizes,
+                                                    level_info.bottom_vector_indices,
+                                                    level_info.bottom_vector_indices,
+                                                    shared_comm, allocate_shared_float,
+                                                    allocate_shared_int)
+            @test buffer.rowval == vcat(1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20)
+            @test buffer.colptr == [1, 21, 41, 61, 81, 101, 121, 141, 161, 181, 201, 221, 241, 261, 281, 301, 321, 341, 361, 381, 401]
+        end
+    end
+
     return nothing
 end
 
