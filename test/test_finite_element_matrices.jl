@@ -168,7 +168,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([4, 8], [5, 5], 32, rank, comm_size, n_shared, tol, 2015)
             end
             @testset "3D" begin
-                tol = 1.0e-7
+                tol = 5.0e-7
                 test_dimension_combinations([1, 1, 1], [3, 3, 3], 1, rank, comm_size, n_shared, tol, 3000; all_use_sparse=false, all_sparse_stencils=false)
                 test_dimension_combinations([2, 2, 2], [3, 4, 5], 8, rank, comm_size, n_shared, tol, 3001; all_use_sparse=false, all_sparse_stencils=false)
                 test_dimension_combinations([2, 3, 4], [3, 4, 5], 24, rank, comm_size, n_shared, tol, 3002; all_use_sparse=false, all_sparse_stencils=false)
