@@ -117,10 +117,11 @@ end
 Base.size(Alu::MPIStaticCondensationSerialDense) = size(Alu.local_block_solver)
 Base.size(Alu::MPIStaticCondensationSerialDense, d::Integer) = size(Alu)[d]
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangetab,Trangeabs,Trangeb,Trangebs,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeatab,Trangetab,Trangeabs,Trangeb,Trangebs,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
+    all_local_top_vector_a_block_indices::Trangeatab
     local_top_vector_a_block_indices::Trangetab
     a_block_sub_selection_indices::Trangeabs
     local_bottom_vector_indices::Trangeb
@@ -137,22 +138,30 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 # block-diagonal solve, so only need to hold the solver and indices for that block.
 struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange}
     n::Ti
-    local_block_solver::Tsolver
+    local_block_solver::Vector{Tsolver}
     block_indices::Trange
+    block_offsets::Vector{Ti}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     function BlockDiagonalSolver{Tf}(n::Ti, block_indices) where {Tf, Ti <: Integer}
-        block_size = length(block_indices)
-        if block_size > 0
+        block_sizes = [length(bi) for bi ∈ block_indices]
+        block_size = maximum(block_sizes; init=0)
+        block_offsets = vcat(0, cumsum(block_sizes))
+        function get_identity(bs)
             identity = spzeros(Tf, block_size, block_size)
             copyto!(identity, I)
-            local_block_solver = lu(identity)
+            return identity
+        end
+        if block_size > 0
+            local_block_solver = [lu(get_identity(length(bi))) for bi ∈ block_indices]
         else
-            local_block_solver = nothing
+            local_block_solver = [nothing]
         end
         x_buffer = fill(NaN, block_size)
         u_buffer = fill(NaN, block_size)
-        return new{Tf,Ti,typeof(local_block_solver),typeof(block_indices)}(n, local_block_solver, block_indices, x_buffer, u_buffer)
+        return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices)}(
+                   n, local_block_solver, block_indices, block_offsets, x_buffer,
+                   u_buffer)
     end
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
@@ -582,8 +591,9 @@ MPI.Barrier(comm::FakeComm) = nothing
     global_bottom_vector_size::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
-    local_top_vector_a_block_indices::Vector{Ti}
-    a_block_sub_selection_indices::Vector{Ti}
+    all_local_top_vector_a_block_indices::Vector{Ti}
+    local_top_vector_a_block_indices::Vector{Vector{Ti}}
+    a_block_sub_selection_indices::Vector{Vector{Ti}}
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     #level_comm::Tcomm
@@ -603,9 +613,11 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         # values.
         return LevelInfo(; block_sizes, global_size=0, global_bottom_vector_size=0,
                          top_vector_indices=Ti[], local_top_vector_indices=Ti[],
-                         local_top_vector_a_block_indices=Ti[],
-                         a_block_sub_selection_indices=Ti[], bottom_vector_indices=Ti[],
-                         local_bottom_vector_indices=Ti[], level_shared_comm=shared_comm)
+                         all_local_top_vector_a_block_indices=Ti[],
+                         local_top_vector_a_block_indices=Vector{Ti}[],
+                         a_block_sub_selection_indices=Vector{Ti}[],
+                         bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
+                         level_shared_comm=shared_comm)
     end
 
     # Divide the grid into blocks where the number of elements in a block in each
@@ -685,7 +697,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     shared_comm_size = MPI.Comm_size(shared_comm)
     blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
     this_proc_blocks = shared_comm_rank*blocks_per_proc+1:min((shared_comm_rank+1)*blocks_per_proc,total_nblocks)
-    block_interior_indices = Ti[]
+    block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
     function get_block_interior_points!(b)
         iblock = zeros(Ti, length(dimensions))
         temp = b - 1
@@ -693,9 +705,11 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             temp, iblock[idim] = divrem(temp, nb)
         end
         iblock .+= 1
+        this_bii = Ti[]
+        block_interior_indices[b] = this_bii
         function get_interior_from_dim!(this_dim, flat_i)
             if this_dim ≤ 0
-                push!(block_interior_indices, flat_i + 1)
+                push!(this_bii, flat_i + 1)
                 return nothing
             end
             next_dim = this_dim - 1
@@ -733,30 +747,38 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     for b ∈ this_proc_blocks
         get_block_interior_points!(b)
     end
-    sort!(block_interior_indices)
-    unique!(block_interior_indices)
+    for bii ∈ block_interior_indices
+        sort!(bii)
+        unique!(bii)
+    end
     # Find the points from interior_indices that are part of block_interior_indices.
     # Generally this will not be all the points in block_interior_indices.
     i_count = 1
-    bi_count = 1
-    local_top_vector_a_block_indices = Ti[]
-    a_block_sub_selection_indices = Ti[]
+    all_local_top_vector_a_block_indices = Ti[]
+    local_top_vector_a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
+    a_block_sub_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
     # The following search relies on both `interior_indices` and `block_interior_indices`
     # being sorted.
-    while i_count ≤ length(interior_indices) && bi_count ≤ length(block_interior_indices)
-        i = interior_indices[i_count]
-        bi = block_interior_indices[bi_count]
-        if i == bi
-            push!(local_top_vector_a_block_indices, i)
-            push!(a_block_sub_selection_indices, i_count)
-            i_count += 1
-            bi_count += 1
-        elseif i < bi
-            i_count += 1
-        else
-            bi_count += 1
+    for (this_block_interior_indices, this_local_top_vector_a_block_indices, this_a_block_sub_selection_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices, a_block_sub_selection_indices)
+        bi_count = 1
+        while (i_count ≤ length(interior_indices)
+               && bi_count ≤ length(this_block_interior_indices))
+            i = interior_indices[i_count]
+            bi = this_block_interior_indices[bi_count]
+            if i == bi
+                push!(all_local_top_vector_a_block_indices, i)
+                push!(this_local_top_vector_a_block_indices, i)
+                push!(this_a_block_sub_selection_indices, i_count)
+                i_count += 1
+                bi_count += 1
+            elseif i < bi
+                i_count += 1
+            else
+                bi_count += 1
+            end
         end
     end
+    sort!(all_local_top_vector_a_block_indices)
 
     # Simplest way to get the global_bottom_vector_size is to first calculate the size of
     # the 'top vector' then subtract it from `global_size`. This is simplest because the
@@ -778,9 +800,9 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     local_top_vector_indices = Ti[]
     t_count = 1
     nt = length(interior_indices)
-    a_block_indices = Ti[]
+    all_a_block_indices = Ti[]
     a_count = 1
-    na = length(local_top_vector_a_block_indices)
+    na = length(all_local_top_vector_a_block_indices)
     local_bottom_vector_indices = Ti[]
     b_count = 1
     nb = length(boundary_indices)
@@ -796,8 +818,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             push!(local_top_vector_indices, count)
             t_count += 1
         end
-        if a_count ≤ na && local_top_vector_a_block_indices[a_count] == level_indices[count]
-            push!(a_block_indices, count)
+        if a_count ≤ na && all_local_top_vector_a_block_indices[a_count] == level_indices[count]
+            push!(all_a_block_indices, count)
             a_count += 1
         end
         if b_count ≤ nb && boundary_indices[b_count] == level_indices[count]
@@ -811,10 +833,27 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
               * "a_count=$a_count while na+1=$(na+1), "
               * "b_count=$b_count while nb+1=$(nb+1).")
     end
+    a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
+    for (abi, lti) ∈ zip(a_block_indices, local_top_vector_a_block_indices)
+        count = 1
+        a_count = 1
+        na = length(lti)
+        while a_count ≤ na && count ≤ n
+            if a_count ≤ na && lti[a_count] == level_indices[count]
+                push!(abi, count)
+                a_count += 1
+            end
+            count += 1
+        end
+        if a_count != na + 1
+            error("Did not find all indices in search. a_count=$a_count while na+1=$(na+1).")
+        end
+    end
 
     return LevelInfo(; block_sizes, global_size, global_bottom_vector_size,
                      top_vector_indices=global_top_vector_indices,
                      local_top_vector_indices=local_top_vector_indices,
+                     all_local_top_vector_a_block_indices=all_a_block_indices,
                      local_top_vector_a_block_indices=a_block_indices,
                      a_block_sub_selection_indices=a_block_sub_selection_indices,
                      bottom_vector_indices=global_bottom_vector_indices,
@@ -1409,6 +1448,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
+                                          this_level_info.all_local_top_vector_a_block_indices,
                                           this_level_info.local_top_vector_a_block_indices,
                                           this_level_info.a_block_sub_selection_indices,
                                           this_level_info.local_bottom_vector_indices,
@@ -1425,32 +1465,38 @@ end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
-    if solver !== nothing
-        lu!(solver, sparse(A); reuse_symbolic=false)
+    if solver !== [nothing]
+        for (s, bi) ∈ zip(solver, block_diagonal_solver.block_indices)
+            lu!(s, sparse(@view A[bi,bi]); reuse_symbolic=false)
+        end
     end
     return nothing
 end
 
 function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractVector{T}) where T
-    solver = block_diagonal_solver.local_block_solver
-    if solver !== nothing
-        block_indices = block_diagonal_solver.block_indices
+    solvers = block_diagonal_solver.local_block_solver
+    if solvers != [nothing]
         x_buffer = block_diagonal_solver.x_buffer
         u_buffer = block_diagonal_solver.u_buffer
-        for (i1, i2) ∈ enumerate(block_indices)
-            u_buffer[i1] = u[i2]
-        end
-        @views ldiv!(x_buffer, solver, u_buffer)
-        if issparse(x)
-            for (i2, i1) ∈ enumerate(block_indices)
-                if x_buffer[i2] != 0
-                    x[i1] = x_buffer[i2]
-                end
+        for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
+            n = length(bi)
+            this_u_buffer = @view u_buffer[1:n]
+            this_x_buffer = @view x_buffer[1:n]
+            for (i1, i2) ∈ enumerate(bi)
+                this_u_buffer[i1] = u[i2]
             end
-        else
-            for (i2, i1) ∈ enumerate(block_indices)
-                x[i1] = x_buffer[i2]
+            ldiv!(this_x_buffer, s, this_u_buffer)
+            if issparse(x)
+                for (i2, i1) ∈ enumerate(bi)
+                    if x_buffer[i2] != 0
+                        x[i1] = this_x_buffer[i2]
+                    end
+                end
+            else
+                for (i2, i1) ∈ enumerate(bi)
+                    x[i1] = this_x_buffer[i2]
+                end
             end
         end
     end
@@ -1693,9 +1739,9 @@ end
 function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
     @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
         local_top_vector_indices = solver.local_top_vector_indices
-        local_top_vector_a_block_indices = solver.local_top_vector_a_block_indices
+        all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
         local_bottom_vector_indices = solver.local_bottom_vector_indices
-        a = @view A[local_top_vector_a_block_indices,local_top_vector_a_block_indices]
+        a = @view A[all_local_top_vector_a_block_indices,all_local_top_vector_a_block_indices]
         b = @view A[local_top_vector_indices,local_bottom_vector_indices]
         c = @view A[local_bottom_vector_indices,local_top_vector_indices]
         d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
@@ -1749,15 +1795,19 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         # Use the a_block_indices here so that no shared-memory synchronization is needed
         # before the ldiv!() call for the A subblock with the BlockDiagonalSolver inside
         # the MPISchurComplement ldiv!().
-        for (i1, i2) ∈ zip(a_block_sub_selection_indices, local_top_vector_a_block_indices)
-            u[i1] = U[i2]
+        for (abi, lti) ∈ zip(a_block_sub_selection_indices, local_top_vector_a_block_indices)
+            for (i1, i2) ∈ zip(abi, lti)
+                u[i1] = U[i2]
+            end
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_indices, this_shared_local_bottom_vector_indices)
             v[i1] = U[i2]
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i1, i2) ∈ zip(local_top_vector_a_block_indices, a_block_sub_selection_indices)
-            U[i1] = u[i2]
+        for (lti, abi) ∈ zip(local_top_vector_a_block_indices, a_block_sub_selection_indices)
+            for (i1, i2) ∈ zip(lti, abi)
+                U[i1] = u[i2]
+            end
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
             U[i1] = v[i2]
