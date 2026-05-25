@@ -143,6 +143,9 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     function BlockDiagonalSolver{Tf}(n::Ti, block_indices) where {Tf, Ti <: Integer}
+        # Don't need a solver for any empty entries in block_indices, as these blocks have
+        # no interior points.
+        block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
         block_sizes = [length(bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         block_offsets = vcat(0, cumsum(block_sizes))
@@ -754,7 +757,6 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     end
     # Find the points from interior_indices that are part of block_interior_indices.
     # Generally this will not be all the points in block_interior_indices.
-    i_count = 1
     all_local_top_vector_a_block_indices = Ti[]
     local_top_vector_a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
     all_a_block_sub_selection_indices = Ti[]
@@ -762,6 +764,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     # The following search relies on both `interior_indices` and `block_interior_indices`
     # being sorted.
     for (this_block_interior_indices, this_local_top_vector_a_block_indices, this_a_block_sub_selection_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices, a_block_sub_selection_indices)
+        i_count = 1
         bi_count = 1
         while (i_count ≤ length(interior_indices)
                && bi_count ≤ length(this_block_interior_indices))
@@ -1760,8 +1763,8 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         # It is slightly faster to copy the data to/from local buffers than to use @view
         # with Vector{Int64} indices.
-        local_top_vector_a_block_indices = solver.local_top_vector_a_block_indices
-        a_block_sub_selection_indices = solver.a_block_sub_selection_indices
+        all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
+        all_a_block_sub_selection_indices = solver.all_a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
         this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
         u = solver.u_buffer
@@ -1769,14 +1772,14 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         # Use the a_block_indices here so that no shared-memory synchronization is needed
         # before the ldiv!() call for the A subblock with the BlockDiagonalSolver inside
         # the MPISchurComplement ldiv!().
-        for (i1, i2) ∈ zip(a_block_sub_selection_indices, local_top_vector_a_block_indices)
+        for (i1, i2) ∈ zip(all_a_block_sub_selection_indices, all_local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_indices, this_shared_local_bottom_vector_indices)
             v[i1] = U[i2]
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i1, i2) ∈ zip(local_top_vector_a_block_indices, a_block_sub_selection_indices)
+        for (i1, i2) ∈ zip(all_local_top_vector_a_block_indices, all_a_block_sub_selection_indices)
             X[i1] = u[i2]
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
