@@ -73,7 +73,7 @@ using MPI
 using MPISchurComplements
 using Primes
 using SparseArrays
-using SparseArrays: FixedSparseCSC
+using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
 using TimerOutputs
 
 import LinearAlgebra: lu!, ldiv!
@@ -1521,16 +1521,8 @@ function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{
                 this_u_buffer[i1] = u[i2]
             end
             ldiv!(this_x_buffer, s, this_u_buffer)
-            if issparse(x)
-                for (i2, i1) ∈ enumerate(bi)
-                    if x_buffer[i2] != 0
-                        x[i1] = this_x_buffer[i2]
-                    end
-                end
-            else
-                for (i2, i1) ∈ enumerate(bi)
-                    x[i1] = this_x_buffer[i2]
-                end
+            for (i2, i1) ∈ enumerate(bi)
+                x[i1] = this_x_buffer[i2]
             end
         end
     end
@@ -1549,9 +1541,78 @@ function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{
     return nothing
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
-    if block_diagonal_solver.local_block_solver !== nothing
-        for this_u ∈ eachcol(u)
-            ldiv!(block_diagonal_solver, this_u)
+    return ldiv!(u, block_diagonal_solver, u)
+end
+function sparse_column_has_overlap(rowval, bi)
+    r_count = 1
+    b_count = 1
+    while r_count ≤ length(rowval) && b_count ≤ length(bi)
+        if rowval[r_count] == bi[b_count]
+            return true
+        elseif rowval[r_count] < bi[b_count]
+            r_count += 1
+        else
+            b_count += 1
+        end
+    end
+    return false
+end
+function ldiv!(x::AbstractSparseMatrixCSC{T},
+               block_diagonal_solver::BlockDiagonalSolver{T},
+               u::AbstractSparseMatrixCSC{T}) where T
+    solvers = block_diagonal_solver.local_block_solver
+    if solvers !== nothing
+        m = size(u, 2)
+        u_colptr = u.colptr
+        u_rowval = u.rowval
+        x_colptr = x.colptr
+        x_rowval = x.rowval
+        x_nzval = x.nzval
+        u_buffer = block_diagonal_solver.u_buffer
+        x_buffer = block_diagonal_solver.x_buffer
+        for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
+            block_start = first(bi)
+            block_end = last(bi)
+            block_size = length(bi)
+            this_u_buffer = @view u_buffer[1:block_size]
+            this_x_buffer = @view x_buffer[1:block_size]
+            for col ∈ 1:m
+                u_flat_start = u_colptr[col]
+                u_flat_end = u_colptr[col+1] - 1
+                if u_flat_end < u_flat_start
+                    # Column is empty.
+                    continue
+                end
+                if sparse_column_has_overlap(@view(u_rowval[u_flat_start:u_flat_end]), bi)
+                    # Column has non-zero row entries for this block.
+                    u_column = @view u[:,col]
+                    for (i1, i2) ∈ enumerate(bi)
+                        this_u_buffer[i1] = u_column[i2]
+                    end
+                    ldiv!(this_x_buffer, s, this_u_buffer)
+                    x_flat_start = x_colptr[col]
+                    x_flat_end = x_colptr[col+1] - 1
+                    x_col_rowval = @view x_rowval[x_flat_start:x_flat_end]
+                    nxr = x_flat_end - x_flat_start + 1
+                    count = max(searchsortedlast(x_col_rowval, first(bi)) - 1, 1)
+                    for (i2, i1) ∈ enumerate(bi)
+                        # Assume that the structural non-zero entries of `x` are enough to
+                        # contain all the non-zero entries of the solve. Note that the
+                        # entries in this_x_buffer that should be structurally zero might
+                        # only be zero up to floating-point precision.
+                        while count ≤ nxr && x_col_rowval[count] < i1
+                            count += 1
+                        end
+                        if count > nxr
+                            break
+                        end
+                        if i1 == x_col_rowval[count]
+                            x_nzval[x_flat_start+count-1] = this_x_buffer[i2]
+                            count += 1
+                        end
+                    end
+                end
+            end
         end
     end
     return nothing
