@@ -26,7 +26,11 @@ function construct_sparse_finite_element_matrix(dimensions::Tuple, rng,
         nd = length(dimensions)
         for ielement ∈ CartesianIndices(nelement_tuple)
             istart = counter
-            for igrid ∈ element_indices, d ∈ nd, this_jgrid ∈ 1:ngrid_tuple[d]
+            for igrid ∈ element_indices, d ∈ 1:nd, this_jgrid ∈ 1:ngrid_tuple[d]
+                if d > 1 && this_jgrid == igrid[d]
+                    # This repeats the diagonal entry that was already included.
+                    continue
+                end
                 jgrid = [this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd]
                 if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
                         && any(jg == 1 && je > 1 for (jg, je) ∈ zip(jgrid, Tuple(ielement))))
