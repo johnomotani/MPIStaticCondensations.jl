@@ -1543,6 +1543,20 @@ end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
     return ldiv!(u, block_diagonal_solver, u)
 end
+function sparse_column_has_overlap(rowval, bi)
+    r_count = 1
+    b_count = 1
+    while r_count ≤ length(rowval) && b_count ≤ length(bi)
+        if rowval[r_count] == bi[b_count]
+            return true
+        elseif rowval[r_count] < bi[b_count]
+            r_count += 1
+        else
+            b_count += 1
+        end
+    end
+    return false
+end
 function ldiv!(x::AbstractSparseMatrixCSC{T},
                block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractSparseMatrixCSC{T}) where T
@@ -1569,9 +1583,7 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
                     # Column is empty.
                     continue
                 end
-                u_row_start = u_rowval[u_flat_start]
-                u_row_end = u_rowval[u_flat_end]
-                if u_row_start ≤ block_end && u_row_end ≥ block_start
+                if sparse_column_has_overlap(@view(u_rowval[u_flat_start:u_flat_end]), bi)
                     # Column has non-zero row entries for this block.
                     u_column = @view u[:,col]
                     for (i1, i2) ∈ enumerate(bi)
