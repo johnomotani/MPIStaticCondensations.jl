@@ -1581,14 +1581,17 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
                     x_flat_start = x_colptr[col]
                     x_flat_end = x_colptr[col+1] - 1
                     count = x_flat_start
-                    while x_rowval[count] < first(bi) && count ≤ x_flat_end
-                        count += 1
-                    end
                     for (i2, i1) ∈ enumerate(bi)
                         # Assume that the structural non-zero entries of `x` are enough to
                         # contain all the non-zero entries of the solve. Note that the
                         # entries in this_x_buffer that should be structurally zero might
                         # only be zero up to floating-point precision.
+                        while count ≤ x_flat_end && x_rowval[count] < i1
+                            count += 1
+                        end
+                        if count > x_flat_end
+                            break
+                        end
                         if i1 == x_rowval[count]
                             x_nzval[count] = this_x_buffer[i2]
                             count += 1
