@@ -149,7 +149,7 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
         block_sizes = [length(bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
-            identity = spzeros(Tf, block_size, block_size)
+            identity = spzeros(Tf, bs, bs)
             copyto!(identity, I)
             return identity
         end
