@@ -77,6 +77,10 @@ end
 function run_MSC_inner(Alu, A, x, rhs)
     t_lu = Inf
     t_solve = Inf
+    # Run once before the loop to try to ensure that sparse buffer arrays have been filled
+    # with the right number of entries, so that we are not timing initial array
+    # allocation.
+    lu!(Alu, A)
     for _ ∈ 1:matrix_repeats
         t1 = time_ns()
         lu!(Alu, A)
