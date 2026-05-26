@@ -471,6 +471,49 @@ function test_split_indices_2d_1proc()
         end
     end
 
+    nelement_list = [1, 2]
+    ngrid_list = [3, 3]
+    periodic_list = [false, false]
+    remove_boundaries_list = [false, false]
+
+    # The interiors and boundaries are:
+    # -----------------
+    # 1, 4 ∥ 7 ∥ 10, 13
+    # -----------------
+    # 2, 5 ∥ 8 ∥ 11, 14
+    # -----------------
+    # 3, 6 ∥ 9 ∥ 12, 15
+    # -----------------
+    nrank = 1
+    n_shared = 1
+    block_sizes_list = [[1, 1], [1, 2]]
+    @testset "nelement_list=$nelement_list, block_sizes_list=$block_sizes_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li, _ = get_level_info(ngrid_list, nelement_list, block_sizes_list,
+                                   periodic_list, remove_boundaries_list,
+                                   [1, 1], [0, 0], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:6, 10:15)
+            @test li[1].local_top_vector_indices == vcat(1:6, 10:15)
+            @test li[1].all_local_top_vector_a_block_indices == vcat(1:6, 10:15)
+            @test li[1].local_top_vector_a_block_indices == [1:6, 10:15]
+            @test li[1].all_a_block_sub_selection_indices == 1:12
+            @test li[1].a_block_sub_selection_indices == [1:6, 7:12]
+            @test li[1].a_block_lu_selection_indices == [1:6, 7:12]
+            @test li[1].bottom_vector_indices == 7:9
+            @test li[1].local_bottom_vector_indices == 7:9
+            @test li[2].top_vector_indices == 7:9
+            @test li[2].local_top_vector_indices == 1:3
+            @test li[2].all_local_top_vector_a_block_indices == 1:3
+            @test li[2].local_top_vector_a_block_indices == [[1, 2, 3]]
+            @test li[2].all_a_block_sub_selection_indices == 1:3
+            @test li[2].a_block_sub_selection_indices == [[1, 2, 3]]
+            @test li[2].a_block_lu_selection_indices == [[1, 2, 3]]
+            @test li[2].bottom_vector_indices == []
+            @test li[2].local_bottom_vector_indices == []
+        end
+    end
+
     return nothing
 end
 
