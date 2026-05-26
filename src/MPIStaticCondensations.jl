@@ -69,11 +69,13 @@ module MPIStaticCondensations
 export mpi_static_condensation, create_dimension
 
 using LinearAlgebra
+using LinearAlgebra.LAPACK: getrf!
 using MPI
 using MPISchurComplements
 using Primes
 using SparseArrays
 using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
+using SparseArrays.UMFPACK: UmfpackLU
 using TimerOutputs
 
 import LinearAlgebra: lu!, ldiv!
@@ -142,14 +144,20 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
     lu_selection_indices::Trange
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
-    function BlockDiagonalSolver{Tf}(n::Ti, block_indices, lu_selection_indices) where {Tf, Ti <: Integer}
+    check_lu::Bool
+    function BlockDiagonalSolver{Tf}(n::Ti, block_indices, lu_selection_indices,
+                                     use_sparse, check_lu) where {Tf, Ti <: Integer}
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
         block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
         block_sizes = [length(bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
-            identity = spzeros(Tf, bs, bs)
+            if use_sparse
+                identity = spzeros(Tf, bs, bs)
+            else
+                identity = zeros(Tf, bs, bs)
+            end
             copyto!(identity, I)
             return identity
         end
@@ -162,7 +170,7 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
         u_buffer = fill(NaN, block_size)
         return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices)}(
                    n, local_block_solver, block_indices, lu_selection_indices, x_buffer,
-                   u_buffer)
+                   u_buffer, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
@@ -1398,7 +1406,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         last_A_block_solver =
             BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
                                            last_level_info.a_block_sub_selection_indices,
-                                           last_level_info.a_block_lu_selection_indices)
+                                           last_level_info.a_block_lu_selection_indices,
+                                           use_sparse && length(level_info_list) == 1,
+                                           check_lu)
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
@@ -1429,10 +1439,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_shared_comm)
         if level < n_levels
+            # The A blocks may be sparse at the top level, but will generally be dense on
+            # lower levels, so only use a sparse LU solver on level=1.
             this_A_block_solver =
                 BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
                                                this_level_info.a_block_sub_selection_indices,
-                                               this_level_info.a_block_lu_selection_indices)
+                                               this_level_info.a_block_lu_selection_indices,
+                                               use_sparse && level == 1, check_lu)
             Ainv_dot_B_buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions,
                                                     this_level_info.block_sizes,
@@ -1499,9 +1512,16 @@ end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
+    check_lu = block_diagonal_solver.check_lu
     if solver != [nothing]
         for (s, inds) ∈ zip(solver, block_diagonal_solver.lu_selection_indices)
-            lu!(s, sparse(@view A[inds,inds]); reuse_symbolic=false)
+            if isa(s, UmfpackLU)
+                lu!(s, sparse(@view A[inds,inds]); reuse_symbolic=false, check=check_lu)
+            else
+                factors = s.factors
+                factors .= @view A[inds,inds]
+                getrf!(factors, s.ipiv; check=check_lu)
+            end
         end
     end
     return nothing
@@ -1758,7 +1778,7 @@ function lu!(solver::MPIStaticCondensationSerialDense, A::AbstractMatrix)
         for (j1, j2) ∈ eachcol(periodic_index_pairs), (i1, i2) ∈ eachcol(periodic_index_pairs)
             mat_storage[i1,j1] += A[i2,j2]
         end
-        LAPACK.getrf!(mat_storage, ipiv; check=check)
+        getrf!(mat_storage, ipiv; check=check)
     end
     return nothing
 end
