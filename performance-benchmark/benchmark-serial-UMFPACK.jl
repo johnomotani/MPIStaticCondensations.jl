@@ -8,7 +8,8 @@ include("common.jl")
 
 function run_UMFPACK(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
                      dimensions, level_multiplier, comm, distributed_comm, shared_comm,
-                     allocate_shared_float, allocate_shared_int, nmat, nrhs, timer)
+                     allocate_shared_float, allocate_shared_int, nmat, nrhs,
+                     matrix_repeats, rhs_repeats, timer)
     if MPI.Comm_size(comm) > 1
         error("UMFPACK can only run in serial")
     end
