@@ -5,6 +5,7 @@ using MPIStaticCondensations
 using SparseArrays
 using StableRNGs
 using StatsBase
+using TimerOutputs
 
 include("common.jl")
 
@@ -80,7 +81,13 @@ function run_MSC_inner(Alu, A, x, rhs)
     # Run once before the loop to try to ensure that sparse buffer arrays have been filled
     # with the right number of entries, so that we are not timing initial array
     # allocation.
+    if Alu.timer !== nothing
+        disable_timer!(Alu.timer)
+    end
     lu!(Alu, A)
+    if Alu.timer !== nothing
+        enable_timer!(Alu.timer)
+    end
     for _ ∈ 1:matrix_repeats
         t1 = time_ns()
         lu!(Alu, A)
