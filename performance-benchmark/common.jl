@@ -119,7 +119,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     x_temp = allocate_shared_float(length(rhs))
     run_solver(x_temp, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
                dimensions, level_multiplier, comm, distributed_comm, shared_comm,
-               allocate_shared_float, allocate_shared_int, 1, 1, timer)
+               allocate_shared_float, allocate_shared_int, 1, 1, 1, 1, timer)
 
     if timer !== nothing
         reset_timer!(timer)
@@ -139,7 +139,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                 run_solver(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
                            dimensions, level_multiplier, comm, distributed_comm,
                            shared_comm, allocate_shared_float, allocate_shared_int, nmat,
-                           nrhs, timer)
+                           nrhs, matrix_repeats, rhs_repeats, timer)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)

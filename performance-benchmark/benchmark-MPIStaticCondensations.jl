@@ -51,7 +51,8 @@ end
 
 function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
                  dimensions, level_multiplier, comm, distributed_comm, shared_comm,
-                 allocate_shared_float, allocate_shared_int, nmat, nrhs, timer)
+                 allocate_shared_float, allocate_shared_int, nmat, nrhs, matrix_repeats,
+                 rhs_repeats, timer)
 
     outer_dim_steps = prod(d.n for d ∈ dimensions[1:end-1]; init=1)
     nelement_local = dimensions[end].nelement ÷ dimensions[end].nrank
@@ -72,10 +73,10 @@ function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
     # performance test must be in a separate inner function, that can be compiled knowing
     # the concrete type of Alu.
 
-    return t_setup, run_MSC_inner(Alu, A, x, rhs)...
+    return t_setup, run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats)...
 end
 
-function run_MSC_inner(Alu, A, x, rhs)
+function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats)
     t_lu = Inf
     t_solve = Inf
     # Run once before the loop to try to ensure that sparse buffer arrays have been filled
