@@ -12,7 +12,7 @@ include("utils.jl")
 
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, use_sparse::Bool, sparse_stencils::Bool,
-                     tol::AbstractFloat)
+                     reduce_proc_count_with_blocks::Bool, tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -27,9 +27,9 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
 
-    Alu = mpi_static_condensation(dimensions; comm, distributed_comm, shared_comm,
-                                  allocate_shared_float, allocate_shared_int, use_sparse,
-                                  check_lu=true)
+    Alu = mpi_static_condensation(dimensions; reduce_proc_count_with_blocks, comm,
+                                  distributed_comm, shared_comm, allocate_shared_float,
+                                  allocate_shared_int, use_sparse, check_lu=true)
 
     lu!(Alu, local_matrix)
 
@@ -71,7 +71,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                                      comm_size, n_shared, tol, this_seed;
                                      all_use_sparse=true,
                                      all_sparse_stencils=true, all_periodic=true,
-                                     all_remove_boundaries=true)
+                                     all_remove_boundaries=true, both_remove_procs=true)
     if length(nelement_list) != length(ngrid_list)
         error("nelement_list and ngrid_list must have the same length")
     end
@@ -96,11 +96,17 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
     else
         sparse_stencils_list = (true,)
     end
-    @testset "nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, sparse_stencils=$sparse_stencils" for
+    if both_remove_procs
+        reduce_proc_count_with_blocks_list = (false, true)
+    else
+        reduce_proc_count_with_blocks_list = (false,)
+    end
+    @testset "nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks" for
             use_sparse ∈ use_sparse_list,
-            sparse_stencils ∈ sparse_stencils_list
+            sparse_stencils ∈ sparse_stencils_list,
+            reduce_proc_count_with_blocks ∈ reduce_proc_count_with_blocks_list
         if rank == 0
-            println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, sparse_stencils=$sparse_stencils")
+            println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks")
         end
 
         @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list" for
@@ -118,7 +124,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                           for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
                           ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, remove_boundaries_list)]
 
-            test_matrix(dimensions, n_shared, this_seed, use_sparse, sparse_stencils, tol)
+            test_matrix(dimensions, n_shared, this_seed, use_sparse, sparse_stencils, reduce_proc_count_with_blocks, tol)
             this_seed += 1
         end
     end
@@ -169,14 +175,14 @@ function test_finite_element_matrices()
             end
             @testset "3D" begin
                 tol = 5.0e-7
-                test_dimension_combinations([1, 1, 1], [3, 3, 3], 1, rank, comm_size, n_shared, tol, 3000; all_use_sparse=false, all_sparse_stencils=false)
-                test_dimension_combinations([2, 2, 2], [3, 4, 5], 8, rank, comm_size, n_shared, tol, 3001; all_use_sparse=false, all_sparse_stencils=false)
-                test_dimension_combinations([2, 3, 4], [3, 4, 5], 24, rank, comm_size, n_shared, tol, 3002; all_use_sparse=false, all_sparse_stencils=false)
+                test_dimension_combinations([1, 1, 1], [3, 3, 3], 1, rank, comm_size, n_shared, tol, 3000; all_use_sparse=false, all_sparse_stencils=false, both_remove_procs=false)
+                test_dimension_combinations([2, 2, 2], [3, 4, 5], 8, rank, comm_size, n_shared, tol, 3001; all_use_sparse=false, all_sparse_stencils=false, both_remove_procs=false)
+                test_dimension_combinations([2, 3, 4], [3, 4, 5], 24, rank, comm_size, n_shared, tol, 3002; all_use_sparse=false, all_sparse_stencils=false, both_remove_procs=false)
                 if comm_size ≥ 8
-                    test_dimension_combinations([8, 8, 8], [3, 4, 5], 512, rank, comm_size, n_shared, tol, 3003; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false)
+                    test_dimension_combinations([8, 8, 8], [3, 4, 5], 512, rank, comm_size, n_shared, tol, 3003; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false, both_remove_procs=false)
                 end
                 if comm_size ≥ 16
-                    test_dimension_combinations([9, 9, 32], [3, 3, 3], 2592, rank, comm_size, n_shared, tol, 3004; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false)
+                    test_dimension_combinations([9, 9, 32], [3, 3, 3], 2592, rank, comm_size, n_shared, tol, 3004; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false, both_remove_procs=false)
                 end
             end
         end
