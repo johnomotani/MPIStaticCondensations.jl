@@ -1421,7 +1421,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  distributed_comm=distributed_comm,
                                  allocate_shared_float=level_allocate_shared_float,
                                  allocate_shared_int=level_allocate_shared_int,
-                                 use_sparse=use_sparse, sparse_Ainv_B=use_sparse,
+                                 use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
