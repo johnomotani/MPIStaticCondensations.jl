@@ -1250,6 +1250,8 @@ end
 
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
+                            level_multiplier::Integer=2,
+                            reduce_proc_count_with_blocks::Bool=false,
                             comm::MPI.Comm=MPI.COMM_WORLD,
                             distributed_comm::Union{MPI.Comm,Nothing}=missing,
                             shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1269,6 +1271,15 @@ continuous-finite-element grid.  The right-hand-side and solution vectors are fl
 the finite element grid. The order of `dimensions` corresponds to the order of the indices
 in the multi-dimensional array. For a description of the discretization, see the
 `create_dimensions()` docstring.
+
+`level_multiplier` gives the factor by which the block size is increased in each dimension
+at each level.
+
+`reduce_proc_count_with_blocks` sets whether the number of processes involved in the solve
+at each level is reduced when the number of blocks at that level is less than the total
+number of processes. Usually reducing the number of processes is probably not helpful
+(hence the default is `false`), but if MPI communication cost is the dominant bottleneck
+it might be faster.
 
 `comm` is divided into equally sized shared-memory blocks. `shared_comm` represents the
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
@@ -1306,6 +1317,7 @@ matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  level_multiplier::Integer=2,
+                                 reduce_proc_count_with_blocks::Bool=false,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1375,7 +1387,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         else
             dims = dimensions_without_periodic
         end
-        if level_shared_comm_size > total_local_nblock
+        if reduce_proc_count_with_blocks && level_shared_comm_size > total_local_nblock
             # Not enough blocks to divide among processes in existing level_shared_comm,
             # which probably indicates that the parallel efficiency of continuing the
             # solve on that many proceses. We therefore decrease the number of processes
@@ -1403,12 +1415,16 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     # long as the last Schur complement matrix is not too small.
     last_level_info = level_info_list[end]
     if last_level_info.level_shared_comm != MPI.COMM_NULL
-        last_A_block_solver =
-            BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
-                                           last_level_info.a_block_sub_selection_indices,
-                                           last_level_info.a_block_lu_selection_indices,
-                                           use_sparse && length(level_info_list) == 1,
-                                           check_lu)
+        if isempty(last_level_info.a_block_sub_selection_indices)
+            last_A_block_solver = MPIStaticCondensationNull{data_type}()
+        else
+            last_A_block_solver =
+                BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
+                                               last_level_info.a_block_sub_selection_indices,
+                                               last_level_info.a_block_lu_selection_indices,
+                                               use_sparse && length(level_info_list) == 1,
+                                               check_lu)
+        end
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
@@ -1441,11 +1457,15 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         if level < n_levels
             # The A blocks may be sparse at the top level, but will generally be dense on
             # lower levels, so only use a sparse LU solver on level=1.
-            this_A_block_solver =
-                BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
-                                               this_level_info.a_block_sub_selection_indices,
-                                               this_level_info.a_block_lu_selection_indices,
-                                               use_sparse && level == 1, check_lu)
+            if isempty(this_level_info.a_block_sub_selection_indices)
+                this_A_block_solver = MPIStaticCondensationNull{data_type}()
+            else
+                this_A_block_solver =
+                    BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
+                                                   this_level_info.a_block_sub_selection_indices,
+                                                   this_level_info.a_block_lu_selection_indices,
+                                                   use_sparse && level == 1, check_lu)
+            end
             Ainv_dot_B_buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions,
                                                     this_level_info.block_sizes,
