@@ -4,10 +4,10 @@ using MPIStaticCondensations
 using Primes
 using TimerOutputs
 
-const nmat = 4
-const nrhs = 10
+const nmat = 1
+const nrhs = 1
 const matrix_repeats = 4
-const rhs_repeats = 10
+const rhs_repeats = 100
 
 struct BenchmarkParams
     nelement_list::Vector{Int64}
@@ -51,10 +51,9 @@ const params_2d = (
 const seed_2d = 222
 
 const params_3d = (
-    BenchmarkParams([8, 8, 8], [5, 5, 5], true),
-    BenchmarkParams([16, 8, 16], [9, 9, 9], true),
-    BenchmarkParams([32, 16, 32], [5, 5, 5], true),
-    BenchmarkParams([32, 16, 32], [9, 9, 9], true),
+    BenchmarkParams([8, 4, 8], [5, 5, 5], true),
+    BenchmarkParams([16, 8, 16], [5, 5, 5], true),
+    #BenchmarkParams([32, 16, 32], [5, 5, 5], true),
 )
 const seed_3d = 333
 
@@ -199,7 +198,7 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
 
     if use_shared
         n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
-        level_multiplier_values = collect(2:16)
+        level_multiplier_values = collect(2:4)
     else
         n_shared_values = 1
         level_multiplier_values = [1]

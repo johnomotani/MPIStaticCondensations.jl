@@ -119,7 +119,7 @@ function run_benchmarks()
 
     benchmark(run_MSC, params_1d, seed_1d, "MPIStaticCondensations_1d")
     benchmark(run_MSC, params_2d, seed_2d, "MPIStaticCondensations_2d")
-    #benchmark(run_MSC, params_3d, seed_3d, "MPIStaticCondensations_3d")
+    benchmark(run_MSC, params_3d, seed_3d, "MPIStaticCondensations_3d")
 
     return nothing
 end
