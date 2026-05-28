@@ -137,11 +137,12 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Trange
     lu_selection_indices::Trange
+    sparse_buffers::Vector{Tsparse}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     check_lu::Bool
@@ -163,14 +164,20 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
         end
         if block_size > 0
             local_block_solver = [lu(get_identity(length(bi))) for bi ∈ block_indices]
+            if use_sparse
+                sparse_buffers = [spzeros(Tf, bs, bs) for bs ∈ block_sizes]
+            else
+                sparse_buffers = [nothing for _ ∈ block_indices]
+            end
         else
             local_block_solver = [nothing]
+            sparse_buffers = [nothing]
         end
         x_buffer = fill(NaN, block_size)
         u_buffer = fill(NaN, block_size)
-        return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices)}(
-                   n, local_block_solver, block_indices, lu_selection_indices, x_buffer,
-                   u_buffer, check_lu)
+        return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices),eltype(sparse_buffers)}(
+                   n, local_block_solver, block_indices, lu_selection_indices,
+                   sparse_buffers, x_buffer, u_buffer, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
@@ -1530,16 +1537,114 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     return solver
 end
 
+"""
+    update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti},
+                          new_A::AbstractSparseMatrixCSC{Tf,Ti}, rowinds,
+                          colinds) where {Tf,Ti}
+    update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{Tf},
+                          rowinds, colinds) where {Tf,Ti}
+    update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
+                          rowinds, colinds) where {Tf,Ti}
+
+Update the values of `A` in-place to the values of `new_A`. May not be ideally efficient
+because it requires resizing Vectors. For this FixedMatrixCSC version, also filter out
+zeros because FixedMatrixCSC was probably defined with a maximal stencil, which might
+contain extra zeros.
+
+`rowinds` gives the subset of rows in `new_A` that should be copied into `A`.
+
+`colinds` gives the subset of columns in `new_A` that should be copied into `A`.
+"""
+update_sparse_matrix!
+
+function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti},
+                               new_A::AbstractSparseMatrixCSC{Tf,Ti}, rowinds,
+                               colinds) where {Tf,Ti}
+    colptr = A.colptr
+    rowval = A.rowval
+    nzval = A.nzval
+    new_colptr = new_A.colptr
+    new_rowval = new_A.rowval
+    new_nzval = new_A.nzval
+    resize!(colptr, 1)
+    resize!(rowval, 0)
+    resize!(nzval, 0)
+    count = 1
+    n_rowinds = length(rowinds)
+    for col ∈ colinds
+        colstart = new_colptr[col]
+        colend = new_colptr[col+1] - 1
+        if colend < colstart
+            continue
+        end
+        row_count = max(searchsortedlast(rowinds, new_rowval[colstart]) - 1, 1)
+        for new_i ∈ colstart:colend
+            rv = new_rowval[new_i]
+            while row_count ≤ n_rowinds && rowinds[row_count] < rv
+                row_count += 1
+            end
+            if row_count > n_rowinds
+                break
+            end
+            if rowinds[row_count] == rv
+                newval = new_nzval[new_i]
+                if !iszero(newval)
+                    push!(rowval, row_count)
+                    push!(nzval, newval)
+                    count += 1
+                    row_count += 1
+                end
+            end
+        end
+        push!(colptr, count)
+    end
+
+    return nothing
+end
+function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{Tf},
+                               rowinds, colinds) where {Tf,Ti}
+    colptr = A.colptr
+    rowval = A.rowval
+    nzval = A.nzval
+    resize!(colptr, 1)
+    resize!(rowval, 0)
+    resize!(nzval, 0)
+    count = 1
+
+    for (j1, j2) ∈ enumerate(colinds)
+        for (i1, i2) ∈ enumerate(rowinds)
+            val = new_A[i2,j2]
+            if val != zero(Tf)
+                push!(rowval, i1)
+                push!(nzval, val)
+            end
+        end
+        push!(colptr, count)
+    end
+
+    return nothing
+end
+function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
+                               rowinds, colinds) where {Tf,Ti}
+    full_rowinds, full_colinds = new_A.indices
+    return @views update_sparse_matrix!(A, parent(new_A), full_rowinds[rowinds],
+                                        full_colinds[colinds])
+end
+
 function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
     check_lu = block_diagonal_solver.check_lu
     if solver != [nothing]
-        for (s, inds) ∈ zip(solver, block_diagonal_solver.lu_selection_indices)
+        for (s, inds, buffer) ∈ zip(solver, block_diagonal_solver.lu_selection_indices,
+                                    block_diagonal_solver.sparse_buffers)
             if isa(s, UmfpackLU)
-                lu!(s, sparse(@view A[inds,inds]); reuse_symbolic=false, check=check_lu)
+                update_sparse_matrix!(buffer, A, inds, inds)
+                lu!(s, buffer; reuse_symbolic=false, check=check_lu)
             else
                 factors = s.factors
-                factors .= @view A[inds,inds]
+                for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
+                    factors[i1,j1] = A[i2,j2]
+                end
                 getrf!(factors, s.ipiv; check=check_lu)
             end
         end
