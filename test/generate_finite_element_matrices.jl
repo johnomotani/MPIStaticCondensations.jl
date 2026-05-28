@@ -1,6 +1,8 @@
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension
 using MPI
+using SparseArrays
+using SparseArrays: FixedSparseCSC
 
 function get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid)
     combined_inds = [(iel - 1) * (ng - 1) + igr for (ng, iel, igr) ∈ zip(ngrid_tuple, ielement, igrid)]
@@ -311,11 +313,14 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                 local_i = local_i_list[irank+1]
                 local_j = local_j_list[irank+1]
 
-                local_matrix .= 0
-                for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
-                    local_matrix[i,j] = data_to_distribute[isparse]
-                end
-                MPI.Send(local_matrix, distributed_comm; dest=irank)
+                this_local_matrix = sparse(local_i, local_j,
+                                           data_to_distribute[local_sparse_inds], local_n,
+                                           local_n)
+                this_local_matrix_nnz = Ref(nnz(this_local_matrix))
+                MPI.Send(this_local_matrix_nnz, distributed_comm; dest=irank)
+                MPI.Send(this_local_matrix.colptr, distributed_comm; dest=irank)
+                MPI.Send(this_local_matrix.rowval, distributed_comm; dest=irank)
+                MPI.Send(this_local_matrix.nzval, distributed_comm; dest=irank)
             end
         end
 
@@ -341,20 +346,26 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         else
             local_i = local_i_list[1]
             local_j = local_j_list[1]
-            local_matrix .= 0
-            for (isparse, i, j) ∈ zip(local_sparse_inds, local_i, local_j)
-                local_matrix[i,j] = data_to_distribute[isparse]
-            end
+            this_local_matrix = sparse(local_i, local_j,
+                                       data_to_distribute[local_sparse_inds], local_n,
+                                       local_n)
+            local_matrix_nnz = Ref(nnz(this_local_matrix))
+            MPI.Bcast!(local_matrix_nnz, shared_comm; root=0)
+            local_matrix_colptr = allocate_shared_int(local_n + 1)
+            local_matrix_rowval = allocate_shared_int(local_matrix_nnz[])
+            local_matrix_nzval = allocate_shared_float(local_matrix_nnz[])
+
+            local_matrix_colptr .= this_local_matrix.colptr
+            local_matrix_rowval .= this_local_matrix.rowval
+            local_matrix_nzval .= this_local_matrix.nzval
+
+            MPI.Barrier(shared_comm)
+            local_matrix = FixedSparseCSC(local_n, local_n, local_matrix_colptr,
+                                          local_matrix_rowval, local_matrix_nzval)
 
             # Assemble global matrix
             n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
-            global_matrix = zeros(n, n)
-            # Cannot broadcast data into global_matrix using global_i and global_j because
-            # once periodicity is accounted for there will be duplicate indices, whose
-            # corresponding entries must be summed.
-            for (entry, i, j) ∈ zip(data, global_i, global_j)
-                global_matrix[i,j] += entry
-            end
+            global_matrix = sparse(global_i, global_j, data, n, n)
         end
     elseif return_sparse && distributed_comm_rank == 0
         MPI.Barrier(shared_comm)
@@ -363,6 +374,16 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         this_block_global_j = allocate_shared_int(n_local[])
         local_i = allocate_shared_int(n_local[])
         local_j = allocate_shared_int(n_local[])
+    elseif distributed_comm_rank == 0
+        local_matrix_nnz = Ref(0)
+        MPI.Bcast!(local_matrix_nnz, shared_comm; root=0)
+        local_matrix_colptr = allocate_shared_int(local_n + 1)
+        local_matrix_rowval = allocate_shared_int(local_matrix_nnz[])
+        local_matrix_nzval = allocate_shared_float(local_matrix_nnz[])
+
+        MPI.Barrier(shared_comm)
+        local_matrix = FixedSparseCSC(local_n, local_n, local_matrix_colptr,
+                                      local_matrix_rowval, local_matrix_nzval)
     else
         if return_sparse
             n_local = allocate_shared_int(1)
@@ -383,9 +404,23 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                 MPI.Recv!(local_j, distributed_comm; source=0)
             end
         else
+            local_matrix_nnz = Ref(0)
             if shared_comm_rank == 0
-                MPI.Recv!(local_matrix, distributed_comm; source=0)
+                MPI.Recv!(local_matrix_nnz, distributed_comm; source=0)
+                MPI.Bcast!(local_matrix_nnz, shared_comm; root=0)
             end
+            local_matrix_colptr = allocate_shared_int(local_n + 1)
+            local_matrix_rowval = allocate_shared_int(local_matrix_nnz[])
+            local_matrix_nzval = allocate_shared_float(local_matrix_nnz[])
+            if shared_comm_rank == 0
+                MPI.Recv!(local_matrix_colptr, distributed_comm; source=0)
+                MPI.Recv!(local_matrix_rowval, distributed_comm; source=0)
+                MPI.Recv!(local_matrix_nzval, distributed_comm; source=0)
+            end
+
+            MPI.Barrier(shared_comm)
+            local_matrix = FixedSparseCSC(local_n, local_n, local_matrix_colptr,
+                                          local_matrix_rowval, local_matrix_nzval)
         end
     end
 
