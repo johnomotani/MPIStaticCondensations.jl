@@ -1329,6 +1329,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
+@sc_timeit timer "Init" begin
+@sc_timeit timer "comm setup" begin
     data_type = Float64
     ind_type = Int64
 
@@ -1345,6 +1347,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         error("Size of shared_comm ($shared_comm_size) does not divide the size of comm "
               * "($comm_size).")
     end
+end
+@sc_timeit timer "block sizes" begin
     n_blocks = comm_size ÷ shared_comm_size
 
     n_blocks_factors = factor(Vector, n_blocks)
@@ -1366,12 +1370,19 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         push!(total_local_nblock_list, total_local_nblock)
         push!(block_sizes_list, this_block_sizes)
     end
+if MPI.Comm_rank(comm) == 0
+    println("block_sizes_list=$block_sizes_list")
+end
+end
 
+@sc_timeit timer "dimensions without periodic" begin
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
                                              nrank=d.nrank, irank=d.irank, periodic=false,
                                              remove_boundaries=(d.periodic || d.remove_boundaries))
                                    for d ∈ dimensions]
+end
 
+@sc_timeit timer "level info" begin
     n_levels = length(block_sizes_list)
     level_info_list = Vector{LevelInfo{ind_type,typeof(shared_comm)}}(undef, n_levels)
     level_indices = get_global_indices(dimensions,
@@ -1409,12 +1420,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_indices = this_level_info.bottom_vector_indices
         level_global_size = this_level_info.global_bottom_vector_size
     end
+end
 
     # Create lowest level MPISchurComplement solver
     # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
     # long as the last Schur complement matrix is not too small.
     last_level_info = level_info_list[end]
     if last_level_info.level_shared_comm != MPI.COMM_NULL
+@sc_timeit timer "last level BlockDiagonalSolver" begin
         if isempty(last_level_info.a_block_sub_selection_indices)
             last_A_block_solver = MPIStaticCondensationNull{data_type}()
         else
@@ -1425,6 +1438,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                use_sparse && length(level_info_list) == 1,
                                                check_lu)
         end
+end
+@sc_timeit timer "last level MPISchurComplement" begin
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
@@ -1441,6 +1456,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  parallel_schur=last_parallel_schur,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
+end
     else
         this_level_sc = MPIStaticCondensationNull{data_type}()
     end
@@ -1457,6 +1473,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         if level < n_levels
             # The A blocks may be sparse at the top level, but will generally be dense on
             # lower levels, so only use a sparse LU solver on level=1.
+@sc_timeit timer "level $level BlockDiagonalSolver" begin
             if isempty(this_level_info.a_block_sub_selection_indices)
                 this_A_block_solver = MPIStaticCondensationNull{data_type}()
             else
@@ -1466,6 +1483,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                    this_level_info.a_block_lu_selection_indices,
                                                    use_sparse && level == 1, check_lu)
             end
+end
+@sc_timeit timer "level $level Ainv_dot_B_buffer" begin
+#t1 = time_ns()
             Ainv_dot_B_buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions,
                                                     this_level_info.block_sizes,
@@ -1474,6 +1494,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     this_level_shared_comm,
                                                     level_allocate_shared_float,
                                                     level_allocate_shared_int)
+end
+@sc_timeit timer "level $level schur_complement_buffer" begin
+#t2 = time_ns()
+#println("level=$level, Ainv_dot_B_buffer allocation took ", (t2 - t1) * 1.0e-9, " s")
+#t1 = time_ns()
             schur_complement_buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions,
                                                     this_level_info.block_sizes,
@@ -1482,6 +1507,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     this_level_shared_comm,
                                                     level_allocate_shared_float,
                                                     level_allocate_shared_int)
+end
+#t2 = time_ns()
+#println("level=$level, schur_complement_buffer allocation took ", (t2 - t1) * 1.0e-9, " s")
+@sc_timeit timer "level $level extra barrier" begin
+    MPI.Barrier(this_level_shared_comm)
+end
+@sc_timeit timer "level $level MPISchurComplement" begin
             this_level_sc =
                 mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
                                      this_level_info.top_vector_indices,
@@ -1497,7 +1529,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                      skip_factorization=true,
                                      schur_tile_size=schur_tile_size, check_lu=check_lu,
                                      timer=timer)
+end
         end
+@sc_timeit timer "level $level MPIStaticCondensationParallel" begin
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_u_buffer = level_allocate_shared_float(length(this_level_info.local_top_vector_indices))
@@ -1522,10 +1556,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_vector_indices,
                                           this_shared_local_bottom_sub_selection_indices,
                                           this_u_buffer, this_v_buffer, timer)
+end
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.
     solver = this_level_schur_solver
+end
 
     return solver
 end
