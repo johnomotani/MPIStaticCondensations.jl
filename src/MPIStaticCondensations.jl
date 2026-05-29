@@ -1685,8 +1685,33 @@ function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{
     end
     return nothing
 end
+function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+               u::Matrix{T}) where T
+    solvers = block_diagonal_solver.solvers
+    if length(solvers) == 1
+        # There is only one block, so do not need to select range out of x/u.
+        ldiv!(x, solvers[1], u)
+    else
+        if block_diagonal_solver.local_block_solver !== nothing
+            for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
+                ldiv!(this_x, block_diagonal_solver, this_u)
+            end
+        end
+    end
+    return nothing
+end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
     return ldiv!(u, block_diagonal_solver, u)
+end
+function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::Matrix{T}) where T
+    solvers = block_diagonal_solver.solvers
+    if length(solvers) == 1
+        # There is only one block, so do not need to select range out of u.
+        ldiv!(solvers[1], u)
+        return nothing
+    else
+        return ldiv!(u, block_diagonal_solver, u)
+    end
 end
 function sparse_column_has_overlap(rowval, bi)
     r_count = 1
