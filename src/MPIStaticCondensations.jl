@@ -1687,8 +1687,8 @@ function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{
 end
 function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
                u::Matrix{T}) where T
-    solvers = block_diagonal_solver.solvers
-    if length(solvers) == 1
+    solvers = block_diagonal_solver.local_block_solver
+    if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
         # There is only one block, so do not need to select range out of x/u.
         ldiv!(x, solvers[1], u)
     else
@@ -1704,8 +1704,8 @@ function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{
     return ldiv!(u, block_diagonal_solver, u)
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::Matrix{T}) where T
-    solvers = block_diagonal_solver.solvers
-    if length(solvers) == 1
+    solvers = block_diagonal_solver.local_block_solver
+    if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
         # There is only one block, so do not need to select range out of u.
         ldiv!(solvers[1], u)
         return nothing
@@ -1731,7 +1731,7 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
                block_diagonal_solver::BlockDiagonalSolver{T},
                u::AbstractSparseMatrixCSC{T}) where T
     solvers = block_diagonal_solver.local_block_solver
-    if solvers !== nothing
+    if solvers != [nothing]
         m = size(u, 2)
         u_colptr = u.colptr
         u_rowval = u.rowval
@@ -1745,7 +1745,11 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
             block_end = last(bi)
             block_size = length(bi)
             this_u_buffer = @view u_buffer[1:block_size]
-            this_x_buffer = @view x_buffer[1:block_size]
+            if eltype(solvers) <: LU
+                this_x_buffer = this_u_buffer
+            else
+                this_x_buffer = @view x_buffer[1:block_size]
+            end
             for col ∈ 1:m
                 u_flat_start = u_colptr[col]
                 u_flat_end = u_colptr[col+1] - 1
@@ -1759,7 +1763,12 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
                     for (i1, i2) ∈ enumerate(bi)
                         this_u_buffer[i1] = u_column[i2]
                     end
-                    ldiv!(this_x_buffer, s, this_u_buffer)
+                    if eltype(solvers) <: LU
+                        # Dense-matrix LU solver, most efficient to solve in-place
+                        ldiv!(s, this_u_buffer)
+                    else
+                        ldiv!(this_x_buffer, s, this_u_buffer)
+                    end
                     x_flat_start = x_colptr[col]
                     x_flat_end = x_colptr[col+1] - 1
                     x_col_rowval = @view x_rowval[x_flat_start:x_flat_end]
