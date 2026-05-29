@@ -72,6 +72,8 @@ using LinearAlgebra
 using LinearAlgebra.LAPACK: getrf!
 using MPI
 using MPISchurComplements
+using MPISchurComplements: MPISchurComplementAFactorization
+import MPISchurComplements: ldiv_Bmatrix!
 using Primes
 using SparseArrays
 using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
@@ -137,7 +139,7 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse}
+struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Trange
@@ -145,12 +147,18 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
     sparse_buffers::Vector{Tsparse}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
+    B_column_indices::Trange
+    B_buffers_out::Vector{Matrix{Tf}}
+    B_buffers_in::Vector{Matrix{Tf}}
     check_lu::Bool
     function BlockDiagonalSolver{Tf}(n::Ti, block_indices, lu_selection_indices,
-                                     use_sparse, check_lu) where {Tf, Ti <: Integer}
+                                     B_column_indices, use_sparse,
+                                     check_lu) where {Tf, Ti <: Integer}
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
         block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
+        B_column_indices = [Bc for (Bc, bi) ∈ zip(B_column_indices, block_indices)
+                            if !isempty(bi)]
         block_sizes = [length(bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
@@ -175,9 +183,17 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
         end
         x_buffer = fill(NaN, block_size)
         u_buffer = fill(NaN, block_size)
+        B_buffers_out = [zeros(length(bi), length(Bc))
+                         for (bi, Bc) ∈ zip(block_indices, B_column_indices)]
+        if use_sparse
+            B_buffers_in = deepcopy(B_buffers_out)
+        else
+            B_buffers_in = Matrix{Tf}[]
+        end
         return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices),eltype(sparse_buffers)}(
                    n, local_block_solver, block_indices, lu_selection_indices,
-                   sparse_buffers, x_buffer, u_buffer, check_lu)
+                   sparse_buffers, x_buffer, u_buffer, B_column_indices, B_buffers_out,
+                   B_buffers_in, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
@@ -612,6 +628,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     all_a_block_sub_selection_indices::Vector{Ti}
     a_block_sub_selection_indices::Vector{Vector{Ti}}
     a_block_lu_selection_indices::Vector{Vector{Ti}}
+    a_block_B_column_indices::Vector{Vector{Ti}}
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     #level_comm::Tcomm
@@ -636,6 +653,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          all_a_block_sub_selection_indices=Ti[],
                          a_block_sub_selection_indices=Vector{Ti}[],
                          a_block_lu_selection_indices=Vector{Ti}[],
+                         a_block_B_column_indices=Vector{Ti}[],
                          bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
                          level_shared_comm=shared_comm)
     end
@@ -718,7 +736,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
     this_proc_blocks = shared_comm_rank*blocks_per_proc+1:min((shared_comm_rank+1)*blocks_per_proc,total_nblocks)
     block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
-    function get_block_interior_points!(bi, b)
+    block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
+    function get_block_points!(bi, b)
         iblock = zeros(Ti, length(dimensions))
         temp = b - 1
         for (idim, nb) ∈ enumerate(nblocks_list)
@@ -727,7 +746,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         iblock .+= 1
         this_bii = Ti[]
         block_interior_indices[bi] = this_bii
-        function get_interior_from_dim!(this_dim, flat_i)
+        function get_block_interior_indices_from_dim!(this_dim, flat_i)
             if this_dim ≤ 0
                 push!(this_bii, flat_i + 1)
                 return nothing
@@ -757,19 +776,81 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                 last_interior_point = last_element * (ngrid - 1)
             end
             for i ∈ first_interior_point:last_interior_point
-                get_interior_from_dim!(next_dim, flat_i + i - 1)
+                get_block_interior_indices_from_dim!(next_dim, flat_i + i - 1)
             end
             return nothing
         end
-        get_interior_from_dim!(length(dimensions), 0)
+        get_block_interior_indices_from_dim!(length(dimensions), 0)
+
+        this_bbi = Ti[]
+        block_boundary_indices[bi] = this_bbi
+        function get_block_boundary_indices_from_dim!(this_dim, flat_i, boundary_dim)
+            if this_dim ≤ 0
+                push!(this_bbi, flat_i + 1)
+                return nothing
+            end
+            next_dim = this_dim - 1
+            d = dimensions[this_dim]
+            n = d.n
+            ngrid = d.ngrid
+            nelement_local = d.nelement ÷ d.nrank
+            flat_i *= n
+
+            # Add offset for distributed blocks.
+            flat_i += d.irank * (d.n_local - 1)
+
+            this_block = iblock[this_dim]
+            bs = block_sizes[this_dim]
+            first_element = (this_block - 1) * bs + 1
+            last_element = min(this_block * bs, nelement_local)
+            if this_dim == boundary_dim
+                if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
+                    # No first boundary point.
+                else
+                    first_boundary_point = (first_element - 1) * (ngrid - 1) + 1
+                    get_block_boundary_indices_from_dim!(next_dim, flat_i + first_boundary_point - 1,
+                                                boundary_dim)
+                end
+                if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
+                    # No last boundary point.
+                else
+                    last_boundary_point = last_element * (ngrid - 1) + 1
+                    get_block_boundary_indices_from_dim!(next_dim, flat_i + last_boundary_point - 1,
+                                                boundary_dim)
+                end
+            else
+                if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
+                    first_point = 1
+                else
+                    first_point = (first_element - 1) * (ngrid - 1) + 1
+                end
+                if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
+                    last_point = n
+                else
+                    last_point = last_element * (ngrid - 1) + 1
+                end
+                for i ∈ first_point:last_point
+                    get_block_boundary_indices_from_dim!(next_dim, flat_i + i - 1,
+                                                         boundary_dim)
+                end
+            end
+            return nothing
+        end
+        for boundary_dim ∈ 1:length(dimensions)
+            get_block_boundary_indices_from_dim!(length(dimensions), 0, boundary_dim)
+        end
         return nothing
     end
     for (bi, b) ∈ enumerate(this_proc_blocks)
-        get_block_interior_points!(bi, b)
+        get_block_points!(bi, b)
     end
     for bii ∈ block_interior_indices
         sort!(bii)
         unique!(bii)
+    end
+    for bbi ∈ block_boundary_indices
+        sort!(bbi)
+        unique!(bbi)
     end
     all_block_interior_indices = sort!(vcat(block_interior_indices))
     # Find the points from interior_indices that are part of block_interior_indices.
@@ -807,7 +888,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     a_block_lu_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
     # The following search relies on both `all_a_block_sub_selection_indices` and
     # `a_block_sub_selection_indices` being sorted.
-    for (this_a_block_sub_selection_indices, this_a_block_ldiv_selection_indices) ∈ zip(a_block_sub_selection_indices, a_block_lu_selection_indices)
+    for (this_a_block_sub_selection_indices, this_a_block_lu_selection_indices) ∈ zip(a_block_sub_selection_indices, a_block_lu_selection_indices)
         i_count = 1
         bi_count = 1
         while (i_count ≤ length(all_a_block_sub_selection_indices)
@@ -815,13 +896,35 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             i = all_a_block_sub_selection_indices[i_count]
             bi = this_a_block_sub_selection_indices[bi_count]
             if i == bi
-                push!(this_a_block_ldiv_selection_indices, i_count)
+                push!(this_a_block_lu_selection_indices, i_count)
                 i_count += 1
                 bi_count += 1
             elseif i < bi
                 i_count += 1
             else
                 bi_count += 1
+            end
+        end
+    end
+
+    # Get the index within boundary_indices of the entries in block_boundary_indices.
+    # The following search relies on both `a_block_B_column_indices` and
+    # `block_boundary_indices` being sorted.
+    a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+    for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
+        b_count = 1
+        bb_count = 1
+        while b_count ≤ length(boundary_indices) && bb_count ≤ length(this_block_boundary_indices)
+            i = boundary_indices[b_count]
+            bi = this_block_boundary_indices[bb_count]
+            if i == bi
+                push!(this_a_block_B_column_indices, b_count)
+                b_count += 1
+                bb_count += 1
+            elseif i < bi
+                b_count += 1
+            else
+                bb_count += 1
             end
         end
     end
@@ -904,6 +1007,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                      all_a_block_sub_selection_indices=all_a_block_sub_selection_indices,
                      a_block_sub_selection_indices=a_block_sub_selection_indices,
                      a_block_lu_selection_indices=a_block_lu_selection_indices,
+                     a_block_B_column_indices=a_block_B_column_indices,
                      bottom_vector_indices=global_bottom_vector_indices,
                      local_bottom_vector_indices=local_bottom_vector_indices,
                      level_shared_comm=shared_comm)
@@ -1429,6 +1533,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
                                                last_level_info.a_block_sub_selection_indices,
                                                last_level_info.a_block_lu_selection_indices,
+                                               last_level_info.a_block_B_column_indices,
                                                use_sparse && length(level_info_list) == 1,
                                                check_lu)
         end
@@ -1471,6 +1576,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                     BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
                                                    this_level_info.a_block_sub_selection_indices,
                                                    this_level_info.a_block_lu_selection_indices,
+                                                   this_level_info.a_block_B_column_indices,
                                                    use_sparse && level == 1, check_lu)
             end
             Ainv_dot_B_buffer =
@@ -1788,6 +1894,140 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
                         if i1 == x_col_rowval[count]
                             x_nzval[x_flat_start+count-1] = this_x_buffer[i2]
                             count += 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nothing
+end
+
+# Specialized implementations to be used for A^{-1}.B
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
+                       B::AbstractMatrix{T}) where T
+    solvers = block_diagonal_solver.local_block_solver
+    if solvers != [nothing]
+        if eltype(solvers) <: LU
+            for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
+                                            block_diagonal_solver.B_buffers_out,
+                                            block_diagonal_solver.B_column_indices)
+                for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
+                    Bbuff[i1,j1] = B[i2,j2]
+                end
+                ldiv!(s, Bbuff)
+                for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
+                    B[i1,j1] = Bbuff[i2,j2]
+                end
+            end
+        else
+            for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
+                    zip(block_diagonal_solver.block_indices, solvers,
+                        block_diagonal_solver.B_buffers_out,
+                        block_diagonal_solver.B_buffers_in,
+                        block_diagonal_solver.B_column_indices)
+                for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
+                    Bbuff_in[i1,j1] = B[i2,j2]
+                end
+                ldiv!(Bbuff_out, s, Bbuff_in)
+                for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
+                    B[i1,j1] = Bbuff_out[i2,j2]
+                end
+            end
+        end
+    end
+    return nothing
+end
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
+                       B::AbstractSparseMatrixCSC{T}) where T
+    solvers = block_diagonal_solver.local_block_solver
+    if solvers != [nothing]
+        if eltype(solvers) <: LU
+            for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
+                                            block_diagonal_solver.B_buffers_out,
+                                            block_diagonal_solver.B_column_indices)
+                B_colptr = B.colptr
+                B_rowval = B.rowval
+                B_nzval = B.nzval
+                firstrow = first(bi)
+                for (j1, j2) ∈ enumerate(Bcols)
+                    first_i = B_colptr[j2]
+                    last_i = B_colptr[j2+1] - 1
+                    col_rv = @view B_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                    for (i1, i2) ∈ enumerate(bi)
+                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                            flat_i += 1
+                        end
+                        if flat_i > last_i
+                            break
+                        end
+                        if B_rowval[flat_i] == i2
+                            Bbuff[i1,j1] = B_nzval[flat_i]
+                        end
+                    end
+                end
+                ldiv!(s, Bbuff)
+                for (j1, j2) ∈ enumerate(Bcols)
+                    first_i = B_colptr[j2]
+                    last_i = B_colptr[j2+1] - 1
+                    col_rv = @view B_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                    for (i1, i2) ∈ enumerate(bi)
+                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                            flat_i += 1
+                        end
+                        if flat_i > last_i
+                            break
+                        end
+                        if B_rowval[flat_i] == i2
+                            B_nzval[flat_i] = Bbuff[i1,j1]
+                        end
+                    end
+                end
+            end
+        else
+            for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
+                    zip(block_diagonal_solver.block_indices, solvers,
+                        block_diagonal_solver.B_buffers_out,
+                        block_diagonal_solver.B_buffers_in,
+                        block_diagonal_solver.B_column_indices)
+                B_colptr = B.colptr
+                B_rowval = B.rowval
+                B_nzval = B.nzval
+                firstrow = first(bi)
+                for (j1, j2) ∈ enumerate(Bcols)
+                    first_i = B_colptr[j2]
+                    last_i = B_colptr[j2+1] - 1
+                    col_rv = @view B_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                    for (i1, i2) ∈ enumerate(bi)
+                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                            flat_i += 1
+                        end
+                        if flat_i > last_i
+                            break
+                        end
+                        if B_rowval[flat_i] == i2
+                            Bbuff_in[i1,j1] = B_nzval[flat_i]
+                        end
+                    end
+                end
+                ldiv!(Bbuff_out, s, Bbuff_in)
+                for (j1, j2) ∈ enumerate(Bcols)
+                    first_i = B_colptr[j2]
+                    last_i = B_colptr[j2+1] - 1
+                    col_rv = @view B_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                    for (i1, i2) ∈ enumerate(bi)
+                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                            flat_i += 1
+                        end
+                        if flat_i > last_i
+                            break
+                        end
+                        if B_rowval[flat_i] == i2
+                            B_nzval[flat_i] = Bbuff_out[i1,j1]
                         end
                     end
                 end
