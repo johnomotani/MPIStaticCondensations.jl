@@ -27,6 +27,16 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
 
+    if !use_sparse
+        # Convert to dense matrix.
+        dense_local_matrix = allocate_shared_float(size(local_matrix)...)
+        if shared_rank == 0
+            dense_local_matrix .= local_matrix
+        end
+        MPI.Barrier(shared_comm)
+        local_matrix = dense_local_matrix
+    end
+
     Alu = mpi_static_condensation(dimensions; reduce_proc_count_with_blocks, comm,
                                   distributed_comm, shared_comm, allocate_shared_float,
                                   allocate_shared_int, use_sparse, check_lu=true)

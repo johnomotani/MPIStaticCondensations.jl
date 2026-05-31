@@ -121,7 +121,7 @@ end
 Base.size(Alu::MPIStaticCondensationSerialDense) = size(Alu.local_block_solver)
 Base.size(Alu::MPIStaticCondensationSerialDense, d::Integer) = size(Alu)[d]
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeatab,Trangeabs,Trangeb,Trangebs,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeatab,Trangeabs,Trangeb,Trangebs,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
@@ -129,9 +129,15 @@ struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIS
     all_a_block_sub_selection_indices::Trangeabs
     local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_indices::Trangeb
+    this_shared_local_bottom_vector_no_overlap_indices::Trangeb
     this_shared_local_bottom_sub_selection_indices::Trangebs
+    this_shared_local_bottom_sub_selection_no_overlap_indices::Trangeb
+    this_shared_local_bottom_vector_repeat_indices::Trangeb
+    this_shared_local_bottom_periodic_pairs::Matrix{Ti}
     u_buffer::Vector{Tf}
     v_buffer::Vector{Tf}
+    has_periodic::Bool
+    synchronize_shared::Tsync
     timer::Ttimer
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
@@ -461,26 +467,72 @@ function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
     return apply_periodicity_to_indices(dimensions, inds, n_tuple)
 end
 function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
-                                      inds::Vector{<:Integer}, n_tuple)
+                                      inds::Vector{Ti}, n_tuple) where Ti <: Integer
     if !any(d.periodic for d ∈ dimensions)
         # No periodic dimensions to account for.
         return copy(inds)
     end
     periodic_inds = similar(inds)
+    periodic_pairs_first = Ti[]
+    periodic_pairs_second = Ti[]
     cartinds = CartesianIndices(n_tuple)
     for (i, ind) ∈ enumerate(inds)
         cart_i = cartinds[ind]
         global_i = 0
+        global_i_ignore_periodic = 0
         for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
+            global_i_ignore_periodic = global_i_ignore_periodic * n + di - 1
             if di == n && d.periodic
                 di = 1
             end
             global_i = global_i * n + di - 1
         end
         global_i += 1
+        global_i_ignore_periodic += 1
         periodic_inds[i] = global_i
+        if global_i != global_i_ignore_periodic
+            push!(periodic_pairs_second, global_i_ignore_periodic)
+            push!(periodic_pairs_first, global_i)
+        end
     end
-    return periodic_inds
+    periodic_pairs = transpose(hcat(periodic_pairs_first, periodic_pairs_second))
+    return periodic_inds, periodic_pairs
+end
+
+function get_non_repeated_indices_and_repeats(dimensions::Vector{<:Dimension},
+                                              inds::Vector{<:Integer})
+    n_tuple = Tuple(d.n for d ∈ dimensions)
+    return get_non_repeated_indices_and_repeats(dimensions, inds, n_tuple)
+end
+function get_non_repeated_indices_and_repeats(dimensions::Vector{<:Dimension},
+                                              inds::Vector{Ti}, n_tuple) where Ti <: Integer
+    if !any(d.periodic for d ∈ dimensions)
+        # No periodic dimensions to account for.
+        return copy(inds)
+    end
+    unique_inds = Ti[]
+    repeat_inds = Ti[]
+    cartinds = CartesianIndices(n_tuple)
+    for (i, ind) ∈ enumerate(inds)
+        cart_i = cartinds[ind]
+        global_i = 0
+        global_i_ignore_periodic = 0
+        for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
+            global_i_ignore_periodic = global_i_ignore_periodic * n + di - 1
+            if di == n && d.periodic
+                di = 1
+            end
+            global_i = global_i * n + di - 1
+        end
+        global_i += 1
+        global_i_ignore_periodic += 1
+        if global_i == global_i_ignore_periodic
+            push!(unique_inds, global_i)
+        else
+            push!(repeat_inds, global_i_ignore_periodic)
+        end
+    end
+    return unique_inds, repeat_inds
 end
 
 function get_dim_indices!(dimensions, block_sizes, flat_i)
@@ -618,6 +670,7 @@ MPI.Barrier(comm::FakeComm) = nothing
 #@kwdef struct LevelInfo{Ti,Tasub,Tcomm<:Union{MPI.Comm,FakeComm},Tdcomm<:Union{MPI.Comm,Nothing,FakeComm}}
 @kwdef struct LevelInfo{Ti,Tcomm<:Union{MPI.Comm,FakeComm}}
     #level_dimensions::Vector{Dimension{Ti}}
+    has_periodic::Bool
     block_sizes::Vector{Ti}
     global_size::Ti
     global_bottom_vector_size::Ti
@@ -631,23 +684,32 @@ MPI.Barrier(comm::FakeComm) = nothing
     a_block_B_column_indices::Vector{Vector{Ti}}
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
+    local_bottom_vector_no_overlap_indices::Vector{Ti}
+    local_bottom_vector_no_overlap_sub_selection_indices::Vector{Ti}
+    local_bottom_vector_repeat_indices::Vector{Ti}
+    local_bottom_vector_periodic_pairs::Matrix{Ti}
     #level_comm::Tcomm
     #level_distributed_comm::Tdcomm
     level_shared_comm::Tcomm
 end
 
 function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti},
-                      block_sizes::Vector{Ti}, global_size::Ti,
+                      block_sizes::Vector{Ti}, global_size::Ti, is_top_level::Bool,
+                      is_bottom_level::Bool,
                       distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
                       shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     if length(dimensions) != length(block_sizes)
         error("dimensions and block_sizes should be the same length")
     end
+
+    has_periodic = any(d.periodic for d ∈ dimensions)
+
     if shared_comm == MPI.COMM_NULL
         # This processor does no work on this level, so just fill level_info with dummy
         # values.
-        return LevelInfo(; block_sizes, global_size=0, global_bottom_vector_size=0,
-                         top_vector_indices=Ti[], local_top_vector_indices=Ti[],
+        return LevelInfo(; has_periodic, block_sizes, global_size=0,
+                         global_bottom_vector_size=0, top_vector_indices=Ti[],
+                         local_top_vector_indices=Ti[],
                          all_local_top_vector_a_block_indices=Ti[],
                          local_top_vector_a_block_indices=Vector{Ti}[],
                          all_a_block_sub_selection_indices=Ti[],
@@ -655,6 +717,10 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          a_block_lu_selection_indices=Vector{Ti}[],
                          a_block_B_column_indices=Vector{Ti}[],
                          bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
+                         local_bottom_vector_no_overlap_indices=Ti[],
+                         local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
+                         local_bottom_vector_repeat_indices=Ti[],
+                         local_bottom_vector_periodic_pairs=zeros(Ti,2,0),
                          level_shared_comm=shared_comm)
     end
 
@@ -907,26 +973,9 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         end
     end
 
-    # Get the index within boundary_indices of the entries in block_boundary_indices.
-    # The following search relies on both `a_block_B_column_indices` and
-    # `block_boundary_indices` being sorted.
-    a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
-    for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
-        b_count = 1
-        bb_count = 1
-        while b_count ≤ length(boundary_indices) && bb_count ≤ length(this_block_boundary_indices)
-            i = boundary_indices[b_count]
-            bi = this_block_boundary_indices[bb_count]
-            if i == bi
-                push!(this_a_block_B_column_indices, b_count)
-                b_count += 1
-                bb_count += 1
-            elseif i < bi
-                b_count += 1
-            else
-                bb_count += 1
-            end
-        end
+    if is_bottom_level && has_periodic
+        block_boundary_indices = [get_non_repeated_indices_and_repeats(dimensions, bbi)[1]
+                                  for bbi ∈ block_boundary_indices]
     end
 
     # Simplest way to get the global_bottom_vector_size is to first calculate the size of
@@ -940,9 +989,68 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     MPI.Bcast!(top_vector_size, shared_comm; root=0)
     global_bottom_vector_size = global_size - top_vector_size[]
 
-    global_top_vector_indices = apply_periodicity_to_indices(dimensions, interior_indices)
-    global_bottom_vector_indices = apply_periodicity_to_indices(dimensions,
-                                                                boundary_indices)
+    #global_top_vector_indices, _, _ = apply_periodicity_to_indices(dimensions, interior_indices)
+    # Top vector indices can never be on periodic boundaries, so no need to apply
+    # periodicity.
+    global_top_vector_indices = interior_indices
+    if is_top_level && is_bottom_level && has_periodic
+        # need to handle periodicity
+        global_bottom_vector_indices, _ =
+            apply_periodicity_to_indices(dimensions, boundary_indices)
+        global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
+            get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+        global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
+    elseif is_bottom_level && has_periodic
+        # need to handle periodicity
+        global_bottom_vector_indices, global_bottom_vector_periodic_pairs =
+            apply_periodicity_to_indices(dimensions, boundary_indices)
+        global_bottom_vector_no_overlap_indices, _ =
+            get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+        global_bottom_vector_repeat_inds = Ti[]
+    elseif is_top_level && has_periodic
+        # need to handle periodicity
+        global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
+            get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+        global_bottom_vector_indices = boundary_indices
+        global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
+    else
+        global_bottom_vector_indices = boundary_indices
+        global_bottom_vector_no_overlap_indices = boundary_indices
+        global_bottom_vector_repeat_inds = Ti[]
+        global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
+    end
+
+    # Get the index within boundary_indices of the entries in block_boundary_indices.
+    # The following search relies on both `a_block_B_column_indices` and
+    # `block_boundary_indices` being sorted.
+    a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+    if is_bottom_level && has_periodic
+        B_column_boundary_indices = get_non_repeated_indices_and_repeats(dimensions, boundary_indices)[1]
+    else
+        B_column_boundary_indices = boundary_indices
+    end
+    for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
+        b_count = 1
+        bb_count = 1
+        while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ length(this_block_boundary_indices)
+            i = B_column_boundary_indices[b_count]
+            bi = this_block_boundary_indices[bb_count]
+            if i == bi
+                push!(this_a_block_B_column_indices, b_count)
+                b_count += 1
+                bb_count += 1
+            elseif i < bi
+                b_count += 1
+            else
+                bb_count += 1
+            end
+        end
+    end
+
+    # Sort the periodic pairs by the 'destination' indices. This turns out to be
+    # convenient in a couple of places.
+    local_bottom_vector_periodic_pairs = sortslices(global_bottom_vector_periodic_pairs;
+                                                    dims=2, lt=(x,y)->(x[1]<y[1]))
 
     # The level local indices need to be actually the indices of those entries within
     # level_indices.
@@ -955,9 +1063,18 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     local_bottom_vector_indices = Ti[]
     b_count = 1
     nb = length(boundary_indices)
+    local_bottom_vector_no_overlap_indices = Ti[]
+    local_bottom_vector_no_overlap_sub_selection_indices = Ti[]
+    bno_count = 1
+    nbno = length(global_bottom_vector_no_overlap_indices)
+    local_bottom_vector_repeat_indices = Ti[]
+    r_count = 1
+    nr = length(global_bottom_vector_repeat_inds)
+    p_count = 1
+    np = size(local_bottom_vector_periodic_pairs, 2)
     count = 1
     n = length(level_indices)
-    while (t_count ≤ nt || a_count ≤ na || b_count ≤ nb) && count ≤ n
+    while (t_count ≤ nt || a_count ≤ na || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
         if t_count ≤ nt && b_count ≤ nb && interior_indices[t_count] == boundary_indices[b_count]
             error("interior_indices and boundary_indices should not overlap, got "
                   * "interior_indices[$t_count]=$(interior_indices[t_count]) and "
@@ -971,17 +1088,50 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             push!(all_a_block_indices, count)
             a_count += 1
         end
+        if r_count ≤ nr && global_bottom_vector_repeat_inds[r_count] == boundary_indices[b_count]
+            push!(local_bottom_vector_repeat_indices, b_count)
+            r_count += 1
+        end
+        # Need to loop for p_count as there may be repeated entries in local_bottom_vector_periodic_pairs[1,:].
+        while p_count ≤ np && local_bottom_vector_periodic_pairs[1,p_count] ≤ level_indices[count]
+            if local_bottom_vector_periodic_pairs[1,p_count] == level_indices[count]
+                local_bottom_vector_periodic_pairs[1,p_count] = b_count
+            end
+            p_count += 1
+        end
+        if bno_count ≤ nbno && global_bottom_vector_no_overlap_indices[bno_count] == level_indices[count]
+            push!(local_bottom_vector_no_overlap_indices, count)
+            push!(local_bottom_vector_no_overlap_sub_selection_indices, b_count)
+            bno_count += 1
+        end
         if b_count ≤ nb && boundary_indices[b_count] == level_indices[count]
             push!(local_bottom_vector_indices, count)
             b_count += 1
         end
         count += 1
     end
-    if t_count != nt + 1 || a_count != na + 1 || b_count != nb + 1
+    if t_count != nt + 1 || a_count != na + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
         error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1). "
+              * "t_count=$a_count while nt+1=$(nt+1), "
               * "a_count=$a_count while na+1=$(na+1), "
-              * "b_count=$b_count while nb+1=$(nb+1).")
+              * "b_count=$b_count while nb+1=$(nb+1), "
+              * "r_count=$a_count while nr+1=$(nr+1), "
+              * "p_count=$p_count while np+1=$(np+1).")
     end
+
+    # The second row of entries (the 'source' points of the repeated pairs) are not
+    # sorted, so cannot be found in the loop above. Need to search the whole of
+    # `level_indices` for each second-row entry.
+    for i ∈ 1:size(local_bottom_vector_periodic_pairs, 2)
+        local_bottom_vector_periodic_pairs[2,i] = searchsortedfirst(level_indices, local_bottom_vector_periodic_pairs[2,i])
+    end
+
+    if is_bottom_level && any(d.periodic && d.nrank > 1 for d ∈ dimensions)
+        println("Error: periodicity not properly supported for MPI-distributed "
+                * "dimensions yet.")
+        local_bottom_vector_periodic_pairs = fill(Ti(-1), 2, 1)
+    end
+
     a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
     for (abi, lti) ∈ zip(a_block_indices, local_top_vector_a_block_indices)
         count = 1
@@ -999,7 +1149,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         end
     end
 
-    return LevelInfo(; block_sizes, global_size, global_bottom_vector_size,
+    return LevelInfo(; has_periodic, block_sizes, global_size, global_bottom_vector_size,
                      top_vector_indices=global_top_vector_indices,
                      local_top_vector_indices=local_top_vector_indices,
                      all_local_top_vector_a_block_indices=all_a_block_indices,
@@ -1010,6 +1160,10 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                      a_block_B_column_indices=a_block_B_column_indices,
                      bottom_vector_indices=global_bottom_vector_indices,
                      local_bottom_vector_indices=local_bottom_vector_indices,
+                     local_bottom_vector_no_overlap_indices=local_bottom_vector_no_overlap_indices,
+                     local_bottom_vector_no_overlap_sub_selection_indices=local_bottom_vector_no_overlap_sub_selection_indices,
+                     local_bottom_vector_repeat_indices=local_bottom_vector_repeat_indices,
+                     local_bottom_vector_periodic_pairs=local_bottom_vector_periodic_pairs,
                      level_shared_comm=shared_comm)
 end
 
@@ -1485,14 +1639,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     n_levels = length(block_sizes_list)
     level_info_list = Vector{LevelInfo{ind_type,typeof(shared_comm)}}(undef, n_levels)
-    level_indices = get_global_indices(dimensions,
+    level_indices = get_global_indices(dimensions_without_periodic,
                                        collect(1:prod(d.n_local for d ∈ dimensions)))
     level_global_size = prod(d.n for d ∈ dimensions)
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
     for (level, (block_sizes, total_local_nblock)) ∈ enumerate(zip(block_sizes_list,
                                                                    total_local_nblock_list))
-        if level == n_levels
+        if level == 1 || level == n_levels
             # Only handle periodicity on the final level
             dims = dimensions
         else
@@ -1514,8 +1668,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         # Keep selecting the subset of `1:prod(d.n_local for d ∈ dimensions)` that is
         # involved in each successive level.
         this_level_info = split_matrix(dims, level_indices, block_sizes,
-                                       level_global_size, distributed_comm,
-                                       level_shared_comm)
+                                       level_global_size, level==1, level==n_levels,
+                                       distributed_comm, level_shared_comm)
         level_info_list[level] = this_level_info
         level_indices = this_level_info.bottom_vector_indices
         level_global_size = this_level_info.global_bottom_vector_size
@@ -1541,6 +1695,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
         last_parallel_schur = last_level_info.global_bottom_vector_size ≥ 1024
+        if reduce_proc_count_with_blocks || synchronize_shared === nothing
+            level_synchronize_shared = () -> MPI.Barrier(last_level_shared_comm)
+        else
+            level_synchronize_shared = synchronize_shared
+        end
         this_level_sc =
             mpi_schur_complement(last_A_block_solver, data_type, data_type, data_type,
                                  last_level_info.top_vector_indices,
@@ -1549,8 +1708,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  distributed_comm=distributed_comm,
                                  allocate_shared_float=level_allocate_shared_float,
                                  allocate_shared_int=level_allocate_shared_int,
+                                 synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
+                                 copy_input_to_dense_buffers=(use_sparse && last_level_info.has_periodic),
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
@@ -1595,6 +1756,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     this_level_shared_comm,
                                                     level_allocate_shared_float,
                                                     level_allocate_shared_int)
+            if reduce_proc_count_with_blocks || synchronize_shared === nothing
+                level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
+            else
+                level_synchronize_shared = synchronize_shared
+            end
             this_level_sc =
                 mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
                                      this_level_info.top_vector_indices,
@@ -1603,6 +1769,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                      distributed_comm=distributed_comm,
                                      allocate_shared_float=level_allocate_shared_float,
                                      allocate_shared_int=level_allocate_shared_int,
+                                     synchronize_shared=level_synchronize_shared,
                                      Ainv_dot_B_buffer=Ainv_dot_B_buffer,
                                      schur_complement_buffer=schur_complement_buffer,
                                      use_sparse=use_sparse, sparse_Ainv_B=use_sparse,
@@ -1615,17 +1782,55 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_u_buffer = level_allocate_shared_float(length(this_level_info.local_top_vector_indices))
         this_v_buffer = level_allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
+
         # Need to create a version of local_top_vector_indices and
         # local_bottom_vector_indices that is split into ranges to be handled in parallel
         # by all the processes in the shared-memory block.
         ntop = length(this_level_info.local_top_vector_indices)
         top_points_per_proc = (ntop + level_shared_comm_size - 1) ÷ level_shared_comm_size
         top_subset = level_shared_comm_rank*top_points_per_proc+1:min((level_shared_comm_rank+1)*top_points_per_proc,ntop)
+
         nbottom = length(this_level_info.local_bottom_vector_indices)
         bottom_points_per_proc = (nbottom + level_shared_comm_size - 1) ÷ level_shared_comm_size
         bottom_subset = level_shared_comm_rank*bottom_points_per_proc+1:min((level_shared_comm_rank+1)*bottom_points_per_proc,nbottom)
         this_shared_local_bottom_vector_indices = this_level_info.local_bottom_vector_indices[bottom_subset]
         this_shared_local_bottom_sub_selection_indices = (1:length(this_level_info.local_bottom_vector_indices))[bottom_subset]
+
+        nbottom_no_overlap = length(this_level_info.local_bottom_vector_no_overlap_indices)
+        bottom_points_per_proc_no_overlap = (nbottom_no_overlap + level_shared_comm_size - 1) ÷ level_shared_comm_size
+        bottom_subset_no_overlap = level_shared_comm_rank*bottom_points_per_proc_no_overlap+1:min((level_shared_comm_rank+1)*bottom_points_per_proc_no_overlap,nbottom_no_overlap)
+        this_shared_local_bottom_vector_no_overlap_indices = this_level_info.local_bottom_vector_no_overlap_indices[bottom_subset_no_overlap]
+        this_shared_local_bottom_sub_selection_no_overlap_indices = this_level_info.local_bottom_vector_no_overlap_sub_selection_indices[bottom_subset_no_overlap]
+
+        nbottom_repeats = length(this_level_info.local_bottom_vector_repeat_indices)
+        bottom_points_per_proc_repeats = (nbottom_repeats + level_shared_comm_size - 1) ÷ level_shared_comm_size
+        bottom_subset_repeats = level_shared_comm_rank*bottom_points_per_proc_repeats+1:min((level_shared_comm_rank+1)*bottom_points_per_proc_repeats,nbottom_repeats)
+        this_shared_local_bottom_vector_repeat_indices = this_level_info.local_bottom_vector_repeat_indices[bottom_subset_repeats]
+
+        nbottom_periodic_pairs = size(this_level_info.local_bottom_vector_periodic_pairs, 2)
+        bottom_points_per_proc_periodic_pairs = (nbottom_periodic_pairs + level_shared_comm_size - 1) ÷ level_shared_comm_size
+        bottom_subset_periodic_pairs = level_shared_comm_rank*bottom_points_per_proc_periodic_pairs+1:min((level_shared_comm_rank+1)*bottom_points_per_proc_periodic_pairs,nbottom_periodic_pairs)
+
+        # On this processor, handle the overlap pairs where the destination of the overlap
+        # is in this_shared_local_bottom_sub_selection_no_overlap_indices.
+        local_bottom_vector_periodic_pairs = this_level_info.local_bottom_vector_periodic_pairs
+        this_proc_pairs_inds = ind_type[]
+        pair_count = 1
+        bottom_count = 1
+        while pair_count ≤ size(local_bottom_vector_periodic_pairs, 2) && bottom_count ≤ length(this_shared_local_bottom_sub_selection_no_overlap_indices)
+            if local_bottom_vector_periodic_pairs[1,pair_count] == this_shared_local_bottom_sub_selection_no_overlap_indices[bottom_count]
+                push!(this_proc_pairs_inds, pair_count)
+                pair_count += 1
+                # Note that local_bottom_vector_periodic_pairs may have repeated first-row entries, so do not
+                # increment bottom_count here.
+            elseif local_bottom_vector_periodic_pairs[1,pair_count] < this_shared_local_bottom_sub_selection_no_overlap_indices[bottom_count]
+                pair_count += 1
+            else
+                bottom_count += 1
+            end
+        end
+        this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
+
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
@@ -1633,8 +1838,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_level_info.all_a_block_sub_selection_indices,
                                           this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
+                                          this_shared_local_bottom_vector_no_overlap_indices,
                                           this_shared_local_bottom_sub_selection_indices,
-                                          this_u_buffer, this_v_buffer, timer)
+                                          this_shared_local_bottom_sub_selection_no_overlap_indices,
+                                          this_shared_local_bottom_vector_repeat_indices,
+                                          this_shared_local_bottom_periodic_pairs,
+                                          this_u_buffer, this_v_buffer,
+                                          this_level_info.has_periodic,
+                                          level_synchronize_shared, timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.
@@ -2274,6 +2485,10 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         all_a_block_sub_selection_indices = solver.all_a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
         this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
+        this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
+        this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
+        this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
+        this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
         u = solver.u_buffer
         v = solver.v_buffer
         # Use the a_block_indices here so that no shared-memory synchronization is needed
@@ -2282,8 +2497,25 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         for (i1, i2) ∈ zip(all_a_block_sub_selection_indices, all_local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
-        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_indices, this_shared_local_bottom_vector_indices)
+        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+            # This loop uses 'no overlap' indices
+            # (`this_shared_local_bottom_vector_no_overlap_indices`) because when there
+            # are periodic dimensions, at the top level (and only the top level, not any
+            # intermediate levels) the right-hand-side entries need to be taken only from
+            # the non-repeated points, with the repeated points being zero-ed out.
             v[i1] = U[i2]
+        end
+        for i ∈ this_shared_local_bottom_vector_repeat_indices
+            # Zero out repeated points at the top level
+            v[i] = 0.0
+        end
+        if solver.has_periodic
+            for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                # At the bottom level, need to add any contributions that the top and
+                # intermediate levels have added to repeated points into the non-repeated
+                # points.
+                v[i1] += U[i2]
+            end
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
         for (i1, i2) ∈ zip(all_local_top_vector_a_block_indices, all_a_block_sub_selection_indices)
@@ -2304,6 +2536,10 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         all_a_block_sub_selection_indices = solver.all_a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
         this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
+        this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
+        this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
+        this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
+        this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
         u = solver.u_buffer
         v = solver.v_buffer
         # Use the a_block_indices here so that no shared-memory synchronization is needed
@@ -2312,8 +2548,25 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         for (i1, i2) ∈ zip(all_a_block_sub_selection_indices, all_local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
-        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_indices, this_shared_local_bottom_vector_indices)
+        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+            # This loop uses 'no overlap' indices
+            # (`this_shared_local_bottom_vector_no_overlap_indices`) because when there
+            # are periodic dimensions, at the top level (and only the top level, not any
+            # intermediate levels) the right-hand-side entries need to be taken only from
+            # the non-repeated points, with the repeated points being zero-ed out.
             v[i1] = U[i2]
+        end
+        for i ∈ this_shared_local_bottom_vector_repeat_indices
+            # Zero out repeated points at the top level
+            v[i] = 0.0
+        end
+        if solver.has_periodic
+            for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                # At the bottom level, need to add any contributions that the top and
+                # intermediate levels have added to repeated points into the non-repeated
+                # points.
+                v[i1] += U[i2]
+            end
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
         for (i1, i2) ∈ zip(all_local_top_vector_a_block_indices, all_a_block_sub_selection_indices)
