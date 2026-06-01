@@ -1740,22 +1740,27 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                    this_level_info.a_block_B_column_indices,
                                                    use_sparse && level == 1, check_lu)
             end
-            Ainv_dot_B_buffer =
-                get_shared_sparse_matrix_csc_buffer(dimensions,
-                                                    this_level_info.block_sizes,
-                                                    this_level_info.top_vector_indices,
-                                                    this_level_info.bottom_vector_indices,
-                                                    this_level_shared_comm,
-                                                    level_allocate_shared_float,
-                                                    level_allocate_shared_int)
-            schur_complement_buffer =
-                get_shared_sparse_matrix_csc_buffer(dimensions,
-                                                    this_level_info.block_sizes,
-                                                    this_level_info.bottom_vector_indices,
-                                                    this_level_info.bottom_vector_indices,
-                                                    this_level_shared_comm,
-                                                    level_allocate_shared_float,
-                                                    level_allocate_shared_int)
+            if use_sparse
+                Ainv_dot_B_buffer =
+                    get_shared_sparse_matrix_csc_buffer(dimensions,
+                                                        this_level_info.block_sizes,
+                                                        this_level_info.top_vector_indices,
+                                                        this_level_info.bottom_vector_indices,
+                                                        this_level_shared_comm,
+                                                        level_allocate_shared_float,
+                                                        level_allocate_shared_int)
+                schur_complement_buffer =
+                    get_shared_sparse_matrix_csc_buffer(dimensions,
+                                                        this_level_info.block_sizes,
+                                                        this_level_info.bottom_vector_indices,
+                                                        this_level_info.bottom_vector_indices,
+                                                        this_level_shared_comm,
+                                                        level_allocate_shared_float,
+                                                        level_allocate_shared_int)
+            else
+                Ainv_dot_B_buffer = nothing
+                schur_complement_buffer = nothing
+            end
             if reduce_proc_count_with_blocks || synchronize_shared === nothing
                 level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
             else
