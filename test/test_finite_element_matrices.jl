@@ -86,12 +86,6 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
         error("nelement_list and ngrid_list must have the same length")
     end
 
-    if comm_size > max_nproc
-        # It may not be possible to split the grids defined by these parameters into
-        # `comm_size` pieces, so skip.
-        return nothing
-    end
-
     distributed_comm_size = comm_size ÷ n_shared
     distributed_comm_rank = rank ÷ n_shared
 
