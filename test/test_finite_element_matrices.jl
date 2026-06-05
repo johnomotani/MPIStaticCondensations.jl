@@ -142,7 +142,8 @@ function test_finite_element_matrices()
     @testset "finite element matrices" begin
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
         comm_size = MPI.Comm_size(MPI.COMM_WORLD)
-        @testset "n_shared=$n_shared" for n_shared ∈ [prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
+        # Temporarily disable distributed-memory MPI, until we re-enable support.
+        @testset "n_shared=$n_shared" for n_shared ∈ comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
             @testset "1D" begin
                 tol = 1.0e-12
                 test_dimension_combinations([1], [3], 1, rank, comm_size, n_shared, tol, 1000)
