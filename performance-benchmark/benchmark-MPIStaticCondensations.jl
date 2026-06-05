@@ -1,4 +1,3 @@
-using BlockBandedMatrices
 using LinearAlgebra
 using MPI
 using MPIStaticCondensations

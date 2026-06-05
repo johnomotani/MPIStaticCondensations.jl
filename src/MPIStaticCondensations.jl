@@ -72,8 +72,10 @@ using LinearAlgebra
 using LinearAlgebra.LAPACK: getrf!
 using MPI
 using MPISchurComplements
-using MPISchurComplements: MPISchurComplementAFactorization
-import MPISchurComplements: ldiv_Bmatrix!
+using MPISchurComplements: MPISchurComplementAFactorization,
+                           MPISchurComplementBlockAinvDotB, MPISchurComplementBlockC
+import MPISchurComplements: ldiv_Bmatrix!, copy_B_submatrix!, Ainv_dot_B_dot_y!,
+                            copy_C_submatrix!, mul_C_Ainv_dot_B!, mul_C_dot_Ainv_dot_u!
 using Primes
 using SparseArrays
 using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
@@ -140,6 +142,7 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
         block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
+        lu_selection_indices = [li for li ∈ lu_selection_indices if !isempty(li)]
         B_column_indices = [Bc for (Bc, bi) ∈ zip(B_column_indices, block_indices)
                             if !isempty(bi)]
         block_sizes = [length(bi) for bi ∈ block_indices]
@@ -181,6 +184,143 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
 end
 Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
 Base.size(Alu::BlockDiagonalSolver, d::Integer) = size(Alu)[d]
+
+struct BlockAinvDotB{Tf,Ti} <: MPISchurComplementBlockAinvDotB
+    blocks::Vector{Matrix{Tf}}
+    block_rowinds::Vector{Vector{Ti}}
+    block_colinds::Vector{Vector{Ti}}
+    vector_buffer_blocks_in::Vector{Vector{Tf}}
+    vector_buffer_blocks_out::Vector{Vector{Tf}}
+
+    function BlockAinvDotB{Tf}(block_rowinds::Vector{Vector{Ti}},
+                               block_colinds::Vector{Vector{Ti}}) where {Tf,Ti}
+        non_empty_blocks = [!isempty(ri) && !isempty(ci)
+                            for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
+        block_rowinds = block_rowinds[non_empty_blocks]
+        block_colinds = block_colinds[non_empty_blocks]
+        blocks = Matrix{Tf}[]
+        vector_buffer_blocks_in = Vector{Tf}[]
+        vector_buffer_blocks_out = Vector{Tf}[]
+        for (ri, ci) ∈ zip(block_rowinds, block_colinds)
+            nrow = length(ri)
+            ncol = length(ci)
+            push!(blocks, zeros(Tf, nrow, ncol))
+            push!(vector_buffer_blocks_in, zeros(Tf, ncol))
+            push!(vector_buffer_blocks_out, zeros(Tf, nrow))
+        end
+        return new{Tf,Ti}(blocks, block_rowinds, block_colinds, vector_buffer_blocks_in,
+                          vector_buffer_blocks_out)
+    end
+end
+
+struct BlockC{Tf,Ti,Tbuff,F<:Function} <: MPISchurComplementBlockC
+    blocks::Vector{Matrix{Tf}}
+    block_rowinds::Vector{Vector{Ti}}
+    block_colinds::Vector{Vector{Ti}}
+    right_multiplication_buffer_blocks::Vector{Matrix{Tf}}
+    vector_buffer_blocks_in::Vector{Vector{Tf}}
+    vector_buffer_blocks_out::Vector{Vector{Tf}}
+    vector_intermediate_buffer_local::Tbuff
+    vector_intermediate_buffer::Matrix{Tf}
+    vector_range::UnitRange{Ti}
+    vector_init_range::Vector{Ti}
+    matrix_init_range::Vector{Ti}
+    comm_rank::Ti
+    synchronize_shared::F
+
+    function BlockC{Tf}(block_rowinds::Vector{Vector{Ti}},
+                        block_colinds::Vector{Vector{Ti}},
+                        vector_intermediate_buffer::Matrix{Tf},
+                        vector_range::UnitRange{Ti}, vector_init_range::Vector{Ti},
+                        matrix_init_range::Vector{Ti}, comm_rank::Ti,
+                        synchronize_shared::F) where {Tf,Ti,F<:Function}
+        non_empty_blocks = [!isempty(ri) && !isempty(ci)
+                            for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
+        block_rowinds = block_rowinds[non_empty_blocks]
+        block_colinds = block_colinds[non_empty_blocks]
+        blocks = Matrix{Tf}[]
+        right_multiplication_buffer_blocks = Matrix{Tf}[]
+        vector_buffer_blocks_in = Vector{Tf}[]
+        vector_buffer_blocks_out = Vector{Tf}[]
+        for (ri, ci) ∈ zip(block_rowinds, block_colinds)
+            nrow = length(ri)
+            ncol = length(ci)
+            push!(blocks, zeros(Tf, nrow, ncol))
+            push!(right_multiplication_buffer_blocks, zeros(Tf, nrow, nrow))
+            push!(vector_buffer_blocks_in, zeros(Tf, ncol))
+            push!(vector_buffer_blocks_out, zeros(Tf, nrow))
+        end
+        vector_intermediate_buffer_local = @view vector_intermediate_buffer[:,comm_rank+1]
+        vector_intermediate_buffer_local .= 0.0
+        return new{Tf,Ti,typeof(vector_intermediate_buffer_local),F}(
+                   blocks, block_rowinds, block_colinds,
+                   right_multiplication_buffer_blocks, vector_buffer_blocks_in,
+                   vector_buffer_blocks_out, vector_intermediate_buffer_local,
+                   vector_intermediate_buffer, vector_range, vector_init_range,
+                   matrix_init_range, comm_rank, synchronize_shared)
+    end
+end
+
+function get_C_buffer_matrix_init_range(C_vector_init_range, schur_complement_buffer,
+                                        ind_type)
+    if isempty(C_vector_init_range)
+        return ind_type[], 0
+    end
+    schur_colptr = schur_complement_buffer.colptr
+    schur_rowval = schur_complement_buffer.rowval
+    first_row = first(C_vector_init_range)
+    nrow = length(C_vector_init_range)
+    C_matrix_init_range = Vector{ind_type}(undef, nrow^2)
+    count = 1
+    for col ∈ C_vector_init_range
+        first_i = schur_colptr[col]
+        last_i = schur_colptr[col+1] - 1
+        col_rv = @view schur_rowval[first_i:last_i]
+        flat_i = max(searchsortedlast(col_rv, first_row)-1, 1)
+        i = 1
+        while flat_i ≤ last_i && i ≤ nrow
+            schur_row = schur_rowval[flat_i]
+            C_row = C_vector_init_range[i]
+            if schur_row == C_row
+                C_matrix_init_range[count] = flat_i
+                count += 1
+                flat_i += 1
+                i += 1
+            elseif schur_row < C_row
+                flat_i += 1
+            else
+                i += 1
+            end
+        end
+    end
+
+    return C_matrix_init_range, count
+end
+
+function get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind_type, timer)
+    init_n = sum(length(ri) for ri ∈ C_block_row_inds; init=0)
+    C_vector_init_range = Vector{ind_type}(undef, init_n)
+    count = 1
+    for ri ∈ C_block_row_inds, i ∈ ri
+        C_vector_init_range[count] = i
+        count += 1
+    end
+    sort!(C_vector_init_range)
+    unique!(C_vector_init_range)
+
+    # When initialising the matrix output buffer (used for the output of
+    # C*Ainv_dot_B), the entries modified by this process are those where both
+    # the row and column are in C_vector_init_range. Get the flattened indices
+    # of these entries.
+    C_matrix_init_range, count = get_C_buffer_matrix_init_range(C_vector_init_range,
+                                                                schur_complement_buffer,
+                                                                ind_type)
+
+    # Make a copy so that any extra memory allocated to the Vector is freed.
+    C_matrix_init_range = C_matrix_init_range[1:count-1]
+
+    return C_vector_init_range, C_matrix_init_range
+end
 
 struct Dimension{Ti<:Integer}
     n::Ti
@@ -1243,6 +1383,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_shared_comm = this_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_shared_comm)
+        this_level_comm_size = MPI.Comm_size(this_level_shared_comm)
+        this_level_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         if level < n_levels
             # The A blocks may be sparse at the top level, but will generally be dense on
             # lower levels, so only use a sparse LU solver on level=1.
@@ -1256,15 +1398,18 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                    this_level_info.a_block_B_column_indices,
                                                    use_sparse && level == 1, check_lu)
             end
+
+            if reduce_proc_count_with_blocks || synchronize_shared === nothing
+                level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
+            else
+                level_synchronize_shared = synchronize_shared
+            end
+
+            C_buffer = nothing
             if use_sparse
                 Ainv_dot_B_buffer =
-                    get_shared_sparse_matrix_csc_buffer(dimensions,
-                                                        this_level_info.block_sizes,
-                                                        this_level_info.top_vector_indices,
-                                                        this_level_info.bottom_vector_indices,
-                                                        this_level_shared_comm,
-                                                        level_allocate_shared_float,
-                                                        level_allocate_shared_int)
+                    BlockAinvDotB{data_type}(this_level_info.a_block_sub_selection_indices,
+                                             this_level_info.a_block_B_column_indices)
                 schur_complement_buffer =
                     get_shared_sparse_matrix_csc_buffer(dimensions,
                                                         this_level_info.block_sizes,
@@ -1273,14 +1418,25 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                         this_level_shared_comm,
                                                         level_allocate_shared_float,
                                                         level_allocate_shared_int)
+                C_vector_intermediate_buffer =
+                    level_allocate_shared_float(this_level_info.global_bottom_vector_size,
+                                                this_level_comm_size)
+                C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
+                C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc, this_level_info.global_bottom_vector_size)
+                C_block_row_inds = this_level_info.a_block_B_column_indices
+
+                C_vector_init_range, C_matrix_init_range =
+                    get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind_type, timer)
+
+                C_buffer =
+                    BlockC{data_type}(this_level_info.a_block_B_column_indices,
+                                      this_level_info.a_block_sub_selection_indices,
+                                      C_vector_intermediate_buffer, C_vector_range,
+                                      C_vector_init_range, C_matrix_init_range,
+                                      this_level_comm_rank, level_synchronize_shared)
             else
                 Ainv_dot_B_buffer = nothing
                 schur_complement_buffer = nothing
-            end
-            if reduce_proc_count_with_blocks || synchronize_shared === nothing
-                level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
-            else
-                level_synchronize_shared = synchronize_shared
             end
             this_level_sc =
                 mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
@@ -1292,6 +1448,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                      allocate_shared_int=level_allocate_shared_int,
                                      synchronize_shared=level_synchronize_shared,
                                      Ainv_dot_B_buffer=Ainv_dot_B_buffer,
+                                     C_buffer=C_buffer,
                                      schur_complement_buffer=schur_complement_buffer,
                                      use_sparse=use_sparse, sparse_Ainv_B=use_sparse,
                                      parallel_schur=this_level_schur_solver,
@@ -1462,7 +1619,7 @@ function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{
 
     return nothing
 end
-function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
+@inline function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
                                rowinds, colinds) where {Tf,Ti}
     full_rowinds, full_colinds = new_A.indices
     return @views update_sparse_matrix!(A, parent(new_A), full_rowinds[rowinds],
@@ -1768,6 +1925,16 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
     end
     return nothing
 end
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
+                       B::BlockAinvDotB{T}) where T
+    for (solver, block) ∈ zip(block_diagonal_solver.local_block_solver, B.blocks)
+        @views ldiv!(solver, block)
+    end
+    return nothing
+end
+function ldiv_Bmatrix!(::MPIStaticCondensationNull, B)
+    return nothing
+end
 
 function lu!(solver::MPIStaticCondensationNull, A::AbstractMatrix)
     return nothing
@@ -1786,6 +1953,183 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
     return nothing
 end
 
+# Don't think dense-matrix version is needed?
+#function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::AbstractMatrix)
+#    blocks = Ainv_dot_B.blocks
+#    if length(blocks) == 0
+#        # Nothing to do.
+#        return nothing
+#    end
+#
+#    block_rowinds = Ainv_dot_B.block_rowinds
+#    block_colinds = Ainv_dot_B.block_colinds
+#    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+#        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
+#            block[i1,j1] = B[i2,j2]
+#        end
+#    end
+#    return nothing
+#end
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::AbstractSparseMatrixCSC, B_rowinds, B_colinds)
+    blocks = Ainv_dot_B.blocks
+    if length(blocks) == 0
+        # Nothing to do.
+        return nothing
+    end
+
+    block_rowinds = Ainv_dot_B.block_rowinds
+    block_colinds = Ainv_dot_B.block_colinds
+    B_colptr = B.colptr
+    B_rowval = B.rowval
+    B_nzval = B.nzval
+    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+        block_nrow = length(rowinds)
+        first_row = first(rowinds)
+        for (j1, j2) ∈ enumerate(colinds)
+            B_col = B_colinds[j2]
+            first_i = B_colptr[B_col]
+            last_i = B_colptr[B_col+1] - 1
+            col_rv = @view B_rowval[first_i:last_i]
+            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+            i1 = 1
+            while flat_i ≤ last_i && i1 ≤ block_nrow
+                B_row = B_rowval[flat_i]
+                block_global_row = B_rowinds[rowinds[i1]]
+                if B_row == block_global_row
+                    block[i1,j1] = B_nzval[flat_i]
+                    i1 += 1
+                    flat_i += 1
+                elseif B_row > block_global_row
+                    block[i1,j1] = 0.0
+                    i1 += 1
+                else
+                    flat_i += 1
+                end
+            end
+        end
+    end
+    return nothing
+end
+@inline function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::SubArray)
+    return copy_B_submatrix!(Ainv_dot_B, B.parent, B.indices[1], B.indices[2])
+end
+
+# copy_C_submatrix!() is identical to copy_B_submatrix!(), but keep as a separate function
+# instead of having a single implementation for both in case we want to experiment with
+# using a transposed representation of the C blocks at some point.
+# Don't think dense-matrix version is needed?
+#function copy_C_submatrix!(block_C::BlockC, C::AbstractMatrix)
+#    blocks = block_C.blocks
+#    if length(blocks) == 0
+#        # Nothing to do.
+#        return nothing
+#    end
+#
+#    block_rowinds = block_C.block_rowinds
+#    block_colinds = block_C.block_colinds
+#    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+#        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
+#            block[i1,j1] = C[i2,j2]
+#        end
+#    end
+#    return nothing
+#end
+function copy_C_submatrix!(block_C::BlockC, C::AbstractSparseMatrixCSC, C_rowinds, C_colinds)
+    blocks = block_C.blocks
+    if length(blocks) == 0
+        # Nothing to do.
+        return nothing
+    end
+
+    block_rowinds = block_C.block_rowinds
+    block_colinds = block_C.block_colinds
+    C_colptr = C.colptr
+    C_rowval = C.rowval
+    C_nzval = C.nzval
+    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+        block_nrow = length(rowinds)
+        first_row = first(rowinds)
+        for (j1, j2) ∈ enumerate(colinds)
+            C_col = C_colinds[j2]
+            first_i = C_colptr[C_col]
+            last_i = C_colptr[C_col+1] - 1
+            col_rv = @view C_rowval[first_i:last_i]
+            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+            i1 = 1
+            while flat_i ≤ last_i && i1 ≤ block_nrow
+                C_row = C_rowval[flat_i]
+                block_global_row = C_rowinds[rowinds[i1]]
+                if C_row == block_global_row
+                    block[i1,j1] = C_nzval[flat_i]
+                    i1 += 1
+                    flat_i += 1
+                elseif C_row > block_global_row
+                    block[i1,j1] = 0.0
+                    i1 += 1
+                else
+                    flat_i += 1
+                end
+            end
+        end
+    end
+    return nothing
+end
+@inline function copy_C_submatrix!(block_C::BlockC, C::SubArray)
+    return copy_C_submatrix!(block_C, C.parent, C.indices[1], C.indices[2])
+end
+
+# Note that combining all the contributions to C_dot_Ainv_dot_B from different processes
+# is taken care of by MPISchurComplements.
+function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockC,
+                           Ainv_dot_B::BlockAinvDotB)
+    C_blocks = C.blocks
+    if length(C_blocks) == 0
+        # Nothing to do.
+        return nothing
+    end
+
+    mul_blocks = C.right_multiplication_buffer_blocks
+    Ainv_dot_B_blocks = Ainv_dot_B.blocks
+    block_output_inds = C.block_rowinds # This is identical to Ainv_dot_B.block_colinds
+    matrix_init_range = C.matrix_init_range
+    colptr = C_dot_Ainv_dot_B.colptr
+    rowval = C_dot_Ainv_dot_B.rowval
+    nzval = C_dot_Ainv_dot_B.nzval
+
+    # Initialise buffer to zero. All entries not in matrix_init_range are never modified,
+    # and were initialised to zero.
+    for i ∈ matrix_init_range
+        nzval[i] = 0.0
+    end
+
+    for (mb, Cb, AiBb, output_inds) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
+                                          block_output_inds)
+        mul!(mb, Cb, AiBb, -1.0, 0.0)
+
+        # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
+        first_row = first(output_inds)
+        nrows = length(output_inds)
+        for (j, col) ∈ enumerate(output_inds)
+            first_i = colptr[col]
+            last_i = colptr[col+1] - 1
+            col_rv = @view rowval[first_i:last_i]
+            flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+            i = 1
+            while flat_i ≤ last_i && i ≤ nrows
+                if rowval[flat_i] == output_inds[i]
+                    nzval[flat_i] += mb[i,j]
+                    flat_i += 1
+                    i += 1
+                else
+                    # rowval[flat_i] must be less than output_inds[i]
+                    flat_i += 1
+                end
+            end
+        end
+    end
+    return nothing
+end
+
 function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
     @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
         local_top_vector_indices = solver.local_top_vector_indices
@@ -1797,6 +2141,69 @@ function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
         d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
         update_schur_complement!(solver.local_block_solver, a, b, c, d)
     end
+    return nothing
+end
+
+function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector, Ainv_dot_B::BlockAinvDotB,
+                           global_y::AbstractVector)
+    blocks = Ainv_dot_B.blocks
+    if length(blocks) == 0
+        # Nothing to do.
+        return nothing
+    end
+
+    for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
+            zip(Ainv_dot_B.vector_buffer_blocks_in, Ainv_dot_B.vector_buffer_blocks_out,
+                Ainv_dot_B.block_rowinds, Ainv_dot_B.block_colinds, blocks)
+        for (i1, i2) ∈ enumerate(colinds)
+            vec_buffer_in[i1] = global_y[i2]
+        end
+        mul!(vec_buffer_out, block, vec_buffer_in)
+        for (i2, i1) ∈ enumerate(rowinds)
+            top_vec_buffer[i1] = vec_buffer_out[i2]
+        end
+    end
+    return nothing
+end
+
+function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockC,
+                               Ainv_dot_u::AbstractVector)
+
+    blocks = C.blocks
+    vector_range = C.vector_range
+    vector_intermediate_buffer = C.vector_intermediate_buffer
+    synchronize_shared = C.synchronize_shared
+
+    if length(blocks) > 0
+        vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
+        vector_init_range = C.vector_init_range
+
+        # Initialise buffer to zero. All entries not in vector_init_range are never modified,
+        # and were initialised to zero in the BlockC constructor.
+        for i ∈ vector_init_range
+            vector_intermediate_buffer_local[i] = 0.0
+        end
+
+        for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
+                zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out, C.block_rowinds,
+                    C.block_colinds, blocks)
+            for (i1, i2) ∈ enumerate(colinds)
+                vec_buffer_in[i1] = Ainv_dot_u[i2]
+            end
+            mul!(vec_buffer_out, block, vec_buffer_in)
+            for (i2, i1) ∈ enumerate(rowinds)
+                vector_intermediate_buffer_local[i1] -= vec_buffer_out[i2]
+            end
+        end
+    end
+
+    synchronize_shared()
+
+    # Sum contributions from all processes into the output.
+    if !isempty(vector_range)
+        @views sum!(C_dot_Ainv_dot_u[vector_range], vector_intermediate_buffer[vector_range,:])
+    end
+
     return nothing
 end
 
