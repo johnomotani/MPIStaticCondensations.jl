@@ -471,6 +471,163 @@ function test_split_indices_1d_2proc()
     return nothing
 end
 
+function test_split_indices_1d_4proc()
+    nelement_list = [2]
+    periodic_list = [false]
+    remove_boundaries_list = [false]
+
+    # The interiors and boundaries are:
+    # -----===-----
+    # 1:2 | 3 | 4:5
+    # -----===-----
+    nrank = 4
+    n_shared = 4
+    block_sizes_list = [[1], [2]]
+    @testset "nelement_list=$nelement_list, block_sizes_list=$block_sizes_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list, nrank=$nrank, n_shared=$n_shared" begin
+        irank = 0
+        @testset "irank=$irank" begin
+            li, _ = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                   remove_boundaries_list, [nrank÷n_shared],
+                                   [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].all_local_top_vector_a_block_indices == 1:2
+            @test li[1].local_top_vector_a_block_indices == [[1, 2]]
+            @test li[1].all_a_block_sub_selection_indices == 1:2
+            @test li[1].a_block_sub_selection_indices == [[1, 2]]
+            @test li[1].a_block_lu_selection_indices == [[1, 2]]
+            @test li[1].a_block_B_column_indices == [[1]]
+            @test li[1].bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].all_local_top_vector_a_block_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == [[1]]
+            @test li[2].all_a_block_sub_selection_indices == [1]
+            @test li[2].a_block_sub_selection_indices == [[1]]
+            @test li[2].a_block_lu_selection_indices == [[1]]
+            @test li[2].a_block_B_column_indices == [[]]
+            @test li[2].bottom_vector_indices == []
+            @test li[2].local_bottom_vector_indices == []
+            @test li[2].local_bottom_vector_no_overlap_indices == []
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+        end
+
+        irank = 1
+        @testset "irank=$irank" begin
+            li, _ = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                   remove_boundaries_list, [nrank÷n_shared],
+                                   [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].all_local_top_vector_a_block_indices == 4:5
+            @test li[1].local_top_vector_a_block_indices == [[4, 5]]
+            @test li[1].all_a_block_sub_selection_indices == 3:4
+            @test li[1].a_block_sub_selection_indices == [[3, 4]]
+            @test li[1].a_block_lu_selection_indices == [[1, 2]]
+            @test li[1].a_block_B_column_indices == [[1]]
+            @test li[1].bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].all_local_top_vector_a_block_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == [[1]]
+            @test li[2].all_a_block_sub_selection_indices == [1]
+            @test li[2].a_block_sub_selection_indices == [[1]]
+            @test li[2].a_block_lu_selection_indices == [[1]]
+            @test li[2].a_block_B_column_indices == [[]]
+            @test li[2].bottom_vector_indices == []
+            @test li[2].local_bottom_vector_indices == []
+            @test li[2].local_bottom_vector_no_overlap_indices == []
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+        end
+
+        irank = 2
+        @testset "irank=$irank" begin
+            li, _ = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                   remove_boundaries_list, [nrank÷n_shared],
+                                   [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].all_local_top_vector_a_block_indices == 1:0
+            @test li[1].local_top_vector_a_block_indices == []
+            @test li[1].all_a_block_sub_selection_indices == 1:0
+            @test li[1].a_block_sub_selection_indices == []
+            @test li[1].a_block_lu_selection_indices == []
+            @test li[1].a_block_B_column_indices == []
+            @test li[1].bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].all_local_top_vector_a_block_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == [[1]]
+            @test li[2].all_a_block_sub_selection_indices == [1]
+            @test li[2].a_block_sub_selection_indices == [[1]]
+            @test li[2].a_block_lu_selection_indices == [[1]]
+            @test li[2].a_block_B_column_indices == [[]]
+            @test li[2].bottom_vector_indices == []
+            @test li[2].local_bottom_vector_indices == []
+            @test li[2].local_bottom_vector_no_overlap_indices == []
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+        end
+
+        irank = 3
+        @testset "irank=$irank" begin
+            li, _ = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
+                                   remove_boundaries_list, [nrank÷n_shared],
+                                   [irank÷n_shared], n_shared, irank)
+            @test li[1].top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].all_local_top_vector_a_block_indices == 1:0
+            @test li[1].local_top_vector_a_block_indices == []
+            @test li[1].all_a_block_sub_selection_indices == 1:0
+            @test li[1].a_block_sub_selection_indices == []
+            @test li[1].a_block_lu_selection_indices == []
+            @test li[1].a_block_B_column_indices == []
+            @test li[1].bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[2].top_vector_indices == [3]
+            @test li[2].local_top_vector_indices == [1]
+            @test li[2].all_local_top_vector_a_block_indices == [1]
+            @test li[2].local_top_vector_a_block_indices == [[1]]
+            @test li[2].all_a_block_sub_selection_indices == [1]
+            @test li[2].a_block_sub_selection_indices == [[1]]
+            @test li[2].a_block_lu_selection_indices == [[1]]
+            @test li[2].a_block_B_column_indices == [[]]
+            @test li[2].bottom_vector_indices == []
+            @test li[2].local_bottom_vector_indices == []
+            @test li[2].local_bottom_vector_no_overlap_indices == []
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
+        end
+    end
+
+    return nothing
+end
+
 function test_split_indices_1d_2proc_periodic()
     nelement_list = [4]
     periodic_list = [true]
@@ -1760,6 +1917,7 @@ function test_indices()
         @testset "test_split_indices_1d_1proc_remove_boundaries" test_split_indices_1d_1proc_remove_boundaries()
         @testset "test_split_indices_1d_1proc_periodic" test_split_indices_1d_1proc_periodic()
         @testset "test_split_indices_1d_2proc" test_split_indices_1d_2proc()
+        @testset "test_split_indices_1d_4proc" test_split_indices_1d_4proc()
         @testset "test_split_indices_1d_2proc_periodic" test_split_indices_1d_2proc_periodic()
         @testset "test_split_indices_2d_1proc" test_split_indices_2d_1proc()
         @testset "test_split_indices_2d_1proc_remove_boundaries" test_split_indices_2d_1proc_remove_boundaries()

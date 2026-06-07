@@ -71,6 +71,7 @@ export mpi_static_condensation, create_dimension
 using LinearAlgebra
 using LinearAlgebra.LAPACK: getrf!
 using MPI
+using MPIDenseLUs
 using MPISchurComplements
 using MPISchurComplements: MPISchurComplementAFactorization,
                            MPISchurComplementBlockAinvDotB, MPISchurComplementBlockC
@@ -105,7 +106,8 @@ struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIS
     local_block_solver::Tsolver
     local_top_vector_indices::Tranget
     all_local_top_vector_a_block_indices::Trangeatab
-    all_a_block_sub_selection_indices::Trangeabs
+    partial_local_top_vector_a_block_indices::Trangeatab
+    partial_a_block_sub_selection_indices::Trangeabs
     local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_no_overlap_indices::Trangeb
@@ -124,7 +126,7 @@ Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Trange
@@ -136,9 +138,9 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
     B_buffers_out::Vector{Matrix{Tf}}
     B_buffers_in::Vector{Matrix{Tf}}
     check_lu::Bool
-    function BlockDiagonalSolver{Tf}(n::Ti, block_indices, lu_selection_indices,
-                                     B_column_indices, use_sparse,
-                                     check_lu) where {Tf, Ti <: Integer}
+    function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, lu_selection_indices,
+                                           B_column_indices, use_sparse, timer,
+                                           check_lu) where {Tf, Ti <: Integer}
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
         block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
@@ -182,18 +184,102 @@ struct BlockDiagonalSolver{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factoriz
                    B_buffers_in, check_lu)
     end
 end
-Base.size(Alu::BlockDiagonalSolver) = (Alu.n, Alu.n)
-Base.size(Alu::BlockDiagonalSolver, d::Integer) = size(Alu)[d]
+Base.size(Alu::BlockDiagonalSolverSerial) = (Alu.n, Alu.n)
+Base.size(Alu::BlockDiagonalSolverSerial, d::Integer) = size(Alu)[d]
 
-struct BlockAinvDotB{Tf,Ti} <: MPISchurComplementBlockAinvDotB
+# When this solver is used there are more processes than blocks, so we use multiple
+# processes to solve each block, with shared-memory parallelism.
+struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Trange,Tsync} <: MPISchurComplementAFactorization{Tf}
+    n::Ti
+    local_block_solver::Tsolver
+    local_block_serial_solver::Tserialsolver
+    factors::Tm
+    block_indices::Trange
+    lu_selection_indices::Trange
+    partial_lu_selection_indices::Trange
+    partial_col_range::UnitRange{Ti}
+    x_buffer::Vector{Tf}
+    u_buffer::Vector{Tf}
+    B_column_indices::Trange
+    block_comm_rank::Ti
+    synchronize_shared::Tsync
+    check_lu::Bool
+    function BlockDiagonalSolverShared{Tf}(n::Ti, block_indices, lu_selection_indices,
+                                           B_column_indices, block_comm,
+                                           allocate_shared_float, allocate_shared_int,
+                                           synchronize_shared::F, timer,
+                                           check_lu) where {Tf, Ti <: Integer, F}
+        block_size = length(block_indices)
+        block_comm_rank = MPI.Comm_rank(block_comm)
+        block_comm_size = MPI.Comm_size(block_comm)
+
+        if block_size == 0
+            local_block_solver = nothing
+            local_block_serial_solver = nothing
+            factors = nothing
+            x_buffer = fill(NaN, block_size)
+            u_buffer = fill(NaN, block_size)
+        elseif block_comm_size > 1 && block_size > 1024
+            # Have multiple processes working on this block, and the block size is
+            # big enough to be worth using a parallel dense-matrix LU solver.
+            factors = allocate_shared_float(block_size, block_size)
+            if MPI.Comm_rank(block_comm) == 0
+                copyto!(factors, I)
+            end
+
+            local_block_solver =
+                mpi_dense_lu(factors, 128, block_comm, block_comm, MPI.COMM_SELF,
+                             allocate_shared_float, allocate_shared_int;
+                             synchronize_shared=synchronize_shared,
+                             skip_factorization=true, check_lu=check_lu, timer=timer)
+            local_block_serial_solver = LU(factors,
+                                           local_block_solver.factorization_shared_lu.ipiv,
+                                           block_size)
+            x_buffer = allocate_shared_float(block_size)
+            u_buffer = allocate_shared_float(block_size)
+            if block_comm_rank == 0
+                x_buffer .= NaN
+                u_buffer .= NaN
+            end
+        else
+            factors = allocate_shared_float(block_size, block_size)
+            ipiv = allocate_shared_int(block_size)
+            if MPI.Comm_rank(block_comm) == 0
+                copyto!(factors, I)
+                getrf!(factors, ipiv; check=check_lu)
+                local_block_solver = LU(factors, ipiv, block_size)
+                local_block_serial_solver = local_block_solver
+            else
+                local_block_solver = nothing
+                local_block_serial_solver = LU(factors, ipiv, block_size)
+            end
+            x_buffer = fill(NaN, block_size)
+            u_buffer = fill(NaN, block_size)
+        end
+
+        cols_per_proc = (block_size + block_comm_size - 1) ÷ block_comm_size
+        partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,block_size)
+        partial_lu_selection_indices = lu_selection_indices[partial_col_range]
+
+        return new{Tf,Ti,typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),typeof(block_indices),F}(
+                   n, local_block_solver, local_block_serial_solver, factors,
+                   block_indices, lu_selection_indices, partial_lu_selection_indices,
+                   partial_col_range, x_buffer, u_buffer, B_column_indices,
+                   block_comm_rank, synchronize_shared, check_lu)
+    end
+end
+Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
+Base.size(Alu::BlockDiagonalSolverShared, d::Integer) = size(Alu)[d]
+
+struct BlockAinvDotBSerial{Tf,Ti} <: MPISchurComplementBlockAinvDotB
     blocks::Vector{Matrix{Tf}}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
 
-    function BlockAinvDotB{Tf}(block_rowinds::Vector{Vector{Ti}},
-                               block_colinds::Vector{Vector{Ti}}) where {Tf,Ti}
+    function BlockAinvDotBSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
+                                     block_colinds::Vector{Vector{Ti}}) where {Tf,Ti}
         non_empty_blocks = [!isempty(ri) && !isempty(ci)
                             for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
         block_rowinds = block_rowinds[non_empty_blocks]
@@ -213,7 +299,63 @@ struct BlockAinvDotB{Tf,Ti} <: MPISchurComplementBlockAinvDotB
     end
 end
 
-struct BlockC{Tf,Ti,Tbuff,F<:Function} <: MPISchurComplementBlockC
+# This version has a single block, and operations are parallelised using shared-memory
+# MPI.
+struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync} <: MPISchurComplementBlockAinvDotB
+    block::Tm
+    partial_block::Matrix{Tf}
+    block_rowinds::Vector{Ti}
+    block_partial_rowinds::Vector{Ti}
+    block_colinds::Vector{Ti}
+    block_partial_colinds::Vector{Ti}
+    buffer::Tm
+    partial_col_range::UnitRange{Ti}
+    partial_row_range::UnitRange{Ti}
+    vector_buffer_block_in::Vector{Tf}
+    vector_buffer_block_out::Vector{Tf}
+    synchronize_shared::Tsync
+
+    function BlockAinvDotBShared{Tf}(block_rowinds::Vector{Ti}, block_colinds::Vector{Ti},
+                                     block_comm_rank::Integer, block_comm_size::Integer,
+                                     allocate_shared_float::Fa,
+                                     synchronize_shared::Fs) where {Tf,Ti,Fa,Fs}
+        if isempty(block_rowinds) || isempty(block_colinds)
+            return new{Tf,Ti,Matrix{Tf},Fs}(zeros(Tf, 0, 0), zeros(Tf, 0, 0),
+                                            block_rowinds, zeros(Ti, 0), block_colinds,
+                                            zeros(Ti, 0), zeros(Tf, 0, 0), 1:0, 1:0,
+                                            zeros(Tf, 0), zeros(Tf, 0),
+                                            synchronize_shared)
+        end
+
+        nrow = length(block_rowinds)
+        ncol = length(block_colinds)
+        block = allocate_shared_float(length(block_rowinds), length(block_colinds))
+        buffer = allocate_shared_float(length(block_rowinds), length(block_colinds))
+        cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
+        partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
+        block_partial_colinds = block_colinds[partial_col_range]
+        rows_per_proc = (nrow + block_comm_size - 1) ÷ block_comm_size
+        partial_row_range = block_comm_rank*rows_per_proc+1:min((block_comm_rank+1)*rows_per_proc,nrow)
+        partial_nrow = length(partial_row_range)
+        block_partial_rowinds = block_rowinds[partial_row_range]
+        vector_buffer_block_in = allocate_shared_float(ncol)
+        vector_buffer_block_out = zeros(Tf, partial_nrow)
+        partial_block = zeros(Tf, partial_nrow, ncol)
+
+        block[:,partial_col_range] .= 0.0
+        vector_buffer_block_in[partial_col_range] .= 0.0
+        vector_buffer_block_out .= 0.0
+
+        return new{Tf,Ti,typeof(block),Fs}(block, partial_block, block_rowinds,
+                                           block_partial_rowinds, block_colinds,
+                                           block_partial_colinds, buffer,
+                                           partial_col_range, partial_row_range,
+                                           vector_buffer_block_in,
+                                           vector_buffer_block_out, synchronize_shared)
+    end
+end
+
+struct BlockCSerial{Tf,Ti,Tbuff,Tib,F<:Function} <: MPISchurComplementBlockC
     blocks::Vector{Matrix{Tf}}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
@@ -221,19 +363,18 @@ struct BlockC{Tf,Ti,Tbuff,F<:Function} <: MPISchurComplementBlockC
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
     vector_intermediate_buffer_local::Tbuff
-    vector_intermediate_buffer::Matrix{Tf}
+    vector_intermediate_buffer::Tib
     vector_range::UnitRange{Ti}
     vector_init_range::Vector{Ti}
     matrix_init_range::Vector{Ti}
-    comm_rank::Ti
     synchronize_shared::F
 
-    function BlockC{Tf}(block_rowinds::Vector{Vector{Ti}},
-                        block_colinds::Vector{Vector{Ti}},
-                        vector_intermediate_buffer::Matrix{Tf},
-                        vector_range::UnitRange{Ti}, vector_init_range::Vector{Ti},
-                        matrix_init_range::Vector{Ti}, comm_rank::Ti,
-                        synchronize_shared::F) where {Tf,Ti,F<:Function}
+    function BlockCSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
+                              block_colinds::Vector{Vector{Ti}},
+                              vector_intermediate_buffer::AbstractMatrix{Tf},
+                              vector_range::UnitRange{Ti}, vector_init_range::Vector{Ti},
+                              matrix_init_range::Vector{Ti}, comm_rank::Ti,
+                              synchronize_shared::F) where {Tf,Ti,F<:Function}
         non_empty_blocks = [!isempty(ri) && !isempty(ci)
                             for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
         block_rowinds = block_rowinds[non_empty_blocks]
@@ -250,14 +391,77 @@ struct BlockC{Tf,Ti,Tbuff,F<:Function} <: MPISchurComplementBlockC
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
         end
-        vector_intermediate_buffer_local = @view vector_intermediate_buffer[:,comm_rank+1]
-        vector_intermediate_buffer_local .= 0.0
-        return new{Tf,Ti,typeof(vector_intermediate_buffer_local),F}(
+        if comm_rank ≥ 0
+            vector_intermediate_buffer_local = @view vector_intermediate_buffer[:,comm_rank+1]
+            vector_intermediate_buffer_local .= 0.0
+        else
+            vector_intermediate_buffer_local = zeros(Tf, 0)
+        end
+        return new{Tf,Ti,typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),F}(
                    blocks, block_rowinds, block_colinds,
                    right_multiplication_buffer_blocks, vector_buffer_blocks_in,
                    vector_buffer_blocks_out, vector_intermediate_buffer_local,
                    vector_intermediate_buffer, vector_range, vector_init_range,
-                   matrix_init_range, comm_rank, synchronize_shared)
+                   matrix_init_range, synchronize_shared)
+    end
+end
+
+struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
+    block::Matrix{Tf}
+    block_rowinds::Vector{Ti}
+    block_colinds::Vector{Ti}
+    partial_block_colinds::Vector{Ti}
+    partial_col_range::UnitRange{Ti}
+    right_multiplication_buffer_block::Matrix{Tf}
+    block_right_multiplication_output_colinds::Vector{Ti}
+    vector_buffer_block_in::Tbi
+    vector_buffer_block_out::Vector{Tf}
+    vector_intermediate_buffer_local::Tbuff
+    vector_intermediate_buffer::Tib
+    vector_range::UnitRange{Ti}
+    vector_init_range::Vector{Ti}
+    matrix_init_range::Vector{Ti}
+    block_synchronize_shared::Fbs
+    synchronize_shared::Fs
+
+    function BlockCShared{Tf}(block_rowinds_full::Vector{Ti},
+                              partial_row_range::UnitRange{Ti}, block_colinds::Vector{Ti},
+                              vector_intermediate_buffer::AbstractMatrix{Tf},
+                              vector_range::UnitRange{Ti}, vector_init_range::Vector{Ti},
+                              matrix_init_range::Vector{Ti}, subgroup_i::Ti,
+                              block_allocate_shared_float::Fa,
+                              block_synchronize_shared::Fbs, block_comm_rank::Integer,
+                              block_comm_size::Integer,
+                              synchronize_shared::Fs) where {Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
+        block_rowinds = block_rowinds_full[partial_row_range]
+        nrow_full = length(block_rowinds_full)
+        nrow = length(block_rowinds)
+        ncol = length(block_colinds)
+        block = zeros(Tf, nrow, ncol)
+        cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
+        partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
+        partial_block_colinds = block_colinds[partial_col_range]
+        right_multiplication_buffer_block = zeros(Tf, nrow, nrow_full)
+        vector_buffer_block_in = block_allocate_shared_float(ncol)
+        vector_buffer_block_out = zeros(Tf, nrow)
+        if subgroup_i < 0
+            vector_intermediate_buffer_local = zeros(Tf, 0)
+        else
+            vector_intermediate_buffer_local = @view vector_intermediate_buffer[:,subgroup_i+1]
+            # When the block has no columns, `vector_init_range` will be empty but we
+            # still need to zero-initialize the buffer, so just initialize on rank-0,
+            # rather than using `vector_init_range` to initialize in parallel.
+            if block_comm_rank == 0
+                vector_intermediate_buffer_local .= 0.0
+            end
+        end
+        return new{Tf,Ti,typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+                   block, block_rowinds, block_colinds, partial_block_colinds,
+                   partial_col_range, right_multiplication_buffer_block,
+                   block_rowinds_full, vector_buffer_block_in, vector_buffer_block_out,
+                   vector_intermediate_buffer_local, vector_intermediate_buffer,
+                   vector_range, vector_init_range, matrix_init_range,
+                   block_synchronize_shared, synchronize_shared)
     end
 end
 
@@ -297,7 +501,8 @@ function get_C_buffer_matrix_init_range(C_vector_init_range, schur_complement_bu
     return C_matrix_init_range, count
 end
 
-function get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind_type, timer)
+function get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind_type,
+                                  timer, C_partial_row_range=nothing)
     init_n = sum(length(ri) for ri ∈ C_block_row_inds; init=0)
     C_vector_init_range = Vector{ind_type}(undef, init_n)
     count = 1
@@ -307,6 +512,10 @@ function get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind
     end
     sort!(C_vector_init_range)
     unique!(C_vector_init_range)
+
+    if C_partial_row_range !== nothing
+        C_vector_init_range = C_vector_init_range[C_partial_row_range]
+    end
 
     # When initialising the matrix output buffer (used for the output of
     # C*Ainv_dot_B), the entries modified by this process are those where both
@@ -656,7 +865,7 @@ struct FakeComm
 end
 MPI.Comm_rank(comm::FakeComm) = comm.rank
 MPI.Comm_size(comm::FakeComm) = comm.size
-#MPI.Comm_split(comm::FakeComm, color, key) = comm
+MPI.Comm_split(comm::FakeComm, color, key) = comm
 MPI.Allreduce!(buff, op, comm::FakeComm) = buff # This is not a sensible result!
 MPI.Bcast!(buff, comm::FakeComm; root=nothing) = buff # This is not a sensible result!
 MPI.Barrier(comm::FakeComm) = nothing
@@ -675,6 +884,10 @@ MPI.Barrier(comm::FakeComm) = nothing
     a_block_sub_selection_indices::Vector{Vector{Ti}}
     a_block_lu_selection_indices::Vector{Vector{Ti}}
     a_block_B_column_indices::Vector{Vector{Ti}}
+    n_subgroups::Ti
+    subgroup_i::Ti
+    subgroup_size::Ti
+    block_comm::Tcomm
     bottom_vector_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     local_bottom_vector_no_overlap_indices::Vector{Ti}
@@ -710,7 +923,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          all_a_block_sub_selection_indices=Ti[],
                          a_block_sub_selection_indices=Vector{Ti}[],
                          a_block_lu_selection_indices=Vector{Ti}[],
-                         a_block_B_column_indices=Vector{Ti}[],
+                         a_block_B_column_indices=Vector{Ti}[], n_subgroups=0,
+                         subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
                          bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
                          local_bottom_vector_no_overlap_indices=Ti[],
                          local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
@@ -794,8 +1008,27 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     total_nblocks = prod(nblocks_list)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
+    if is_top_level
+        # At the top level we might use sparse blocks, which are not supported by
+        # shared-memory parallelised blocks. Usually the top level should have more blocks
+        # than processes, so lack of parallelisation should not matter.
+        subgroup_size = 1
+    else
+        subgroup_size = max(shared_comm_size ÷ total_nblocks, 1)
+    end
+    if shared_comm_rank ≥ total_nblocks * subgroup_size
+        subgroup_i = -1
+    else
+        subgroup_i = shared_comm_rank ÷ subgroup_size
+    end
+    n_subgroups = min(shared_comm_size ÷ subgroup_size, total_nblocks)
+    block_comm = MPI.Comm_split(shared_comm, subgroup_i < 0 ? nothing : subgroup_i, 0)
     blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
-    this_proc_blocks = shared_comm_rank*blocks_per_proc+1:min((shared_comm_rank+1)*blocks_per_proc,total_nblocks)
+    if subgroup_i < 0
+        this_proc_blocks = 1:0
+    else
+        this_proc_blocks = subgroup_i*blocks_per_proc+1:min((subgroup_i+1)*blocks_per_proc,total_nblocks)
+    end
     block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
     block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
     function get_block_points!(bi, b)
@@ -1160,6 +1393,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                      a_block_sub_selection_indices=a_block_sub_selection_indices,
                      a_block_lu_selection_indices=a_block_lu_selection_indices,
                      a_block_B_column_indices=a_block_B_column_indices,
+                     n_subgroups=n_subgroups, subgroup_i=subgroup_i,
+                     subgroup_size=subgroup_size, block_comm=block_comm,
                      bottom_vector_indices=global_bottom_vector_indices,
                      local_bottom_vector_indices=local_bottom_vector_indices,
                      local_bottom_vector_no_overlap_indices=local_bottom_vector_no_overlap_indices,
@@ -1167,6 +1402,34 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                      local_bottom_vector_repeat_indices=local_bottom_vector_repeat_indices,
                      local_bottom_vector_periodic_pairs=local_bottom_vector_periodic_pairs,
                      level_shared_comm=shared_comm)
+end
+
+function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_level,
+                                   use_shared_blocks, timer, check_lu,
+                                   block_allocate_shared_float=nothing,
+                                   block_allocate_shared_int=nothing,
+                                   block_synchronize_shared=nothing)
+    # The A blocks may be sparse at the top level, but will generally be dense on lower
+    # levels, so only use a sparse LU solver when is_top_level=true.
+    if isempty(level_info.a_block_sub_selection_indices)
+        return MPIStaticCondensationNull{data_type}()
+    elseif use_shared_blocks
+        return BlockDiagonalSolverShared{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
+                                                    level_info.a_block_sub_selection_indices[1],
+                                                    level_info.a_block_lu_selection_indices[1],
+                                                    level_info.a_block_B_column_indices[1],
+                                                    level_info.block_comm,
+                                                    block_allocate_shared_float,
+                                                    block_allocate_shared_int,
+                                                    block_synchronize_shared, timer,
+                                                    check_lu)
+    else
+        return BlockDiagonalSolverSerial{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
+                                                    level_info.a_block_sub_selection_indices,
+                                                    level_info.a_block_lu_selection_indices,
+                                                    level_info.a_block_B_column_indices,
+                                                    use_sparse && is_top_level, timer, check_lu)
+    end
 end
 
 """
@@ -1330,22 +1593,46 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_indices = this_level_info.bottom_vector_indices
         level_global_size = this_level_info.global_bottom_vector_size
     end
+end
 
     # Create lowest level MPISchurComplement solver
     # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
     # long as the last Schur complement matrix is not too small.
     last_level_info = level_info_list[end]
     if last_level_info.level_shared_comm != MPI.COMM_NULL
-        if isempty(last_level_info.a_block_sub_selection_indices)
-            last_A_block_solver = MPIStaticCondensationNull{data_type}()
+        last_use_shared_blocks = (length(level_info_list) > 1
+                                  && length(last_level_info.local_top_vector_a_block_indices) == 1
+                                  && MPI.Comm_size(last_level_info.block_comm) > 1)
+        if last_use_shared_blocks
+            block_comm_rank = MPI.Comm_rank(last_level_info.block_comm)
+            block_comm_size = MPI.Comm_size(last_level_info.block_comm)
+            if block_comm_size == shared_comm_size
+                last_block_allocate_shared_float = allocate_shared_float
+                last_block_allocate_shared_int = allocate_shared_int
+                if synchronize_shared === nothing
+                    last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+                else
+                    last_block_synchronize_shared = synchronize_shared
+                end
+            else
+                last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info.block_comm)
+                last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info.block_comm)
+                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+            end
+            last_A_block_solver = get_block_diagonal_solver(last_level_info, data_type,
+                                                            use_sparse,
+                                                            length(level_info_list) == 1,
+                                                            true, timer, check_lu,
+                                                            last_block_allocate_shared_float,
+                                                            last_block_allocate_shared_int,
+                                                            last_block_synchronize_shared)
         else
-            last_A_block_solver =
-                BlockDiagonalSolver{data_type}(last_level_info.global_size - last_level_info.global_bottom_vector_size,
-                                               last_level_info.a_block_sub_selection_indices,
-                                               last_level_info.a_block_lu_selection_indices,
-                                               last_level_info.a_block_B_column_indices,
-                                               use_sparse && length(level_info_list) == 1,
-                                               check_lu)
+            block_comm_rank = 0
+            block_comm_size = 1
+            last_A_block_solver = get_block_diagonal_solver(last_level_info, data_type,
+                                                            use_sparse,
+                                                            length(level_info_list) == 1,
+                                                            false, timer, check_lu)
         end
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
@@ -1386,30 +1673,33 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_level_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         if level < n_levels
-            # The A blocks may be sparse at the top level, but will generally be dense on
-            # lower levels, so only use a sparse LU solver on level=1.
-            if isempty(this_level_info.a_block_sub_selection_indices)
-                this_A_block_solver = MPIStaticCondensationNull{data_type}()
-            else
-                this_A_block_solver =
-                    BlockDiagonalSolver{data_type}(this_level_info.global_size - this_level_info.global_bottom_vector_size,
-                                                   this_level_info.a_block_sub_selection_indices,
-                                                   this_level_info.a_block_lu_selection_indices,
-                                                   this_level_info.a_block_B_column_indices,
-                                                   use_sparse && level == 1, check_lu)
-            end
-
             if reduce_proc_count_with_blocks || synchronize_shared === nothing
                 level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
             else
                 level_synchronize_shared = synchronize_shared
             end
 
+            if this_level_info.block_comm == MPI.COMM_NULL
+                block_comm_rank = 0
+                block_comm_size = 1
+            else
+                block_comm_rank = MPI.Comm_rank(this_level_info.block_comm)
+                block_comm_size = MPI.Comm_size(this_level_info.block_comm)
+            end
+            use_shared_blocks = (level > 1 && length(this_level_info.local_top_vector_a_block_indices) == 1
+                                 && block_comm_size > 1)
+            if block_comm_size == shared_comm_size
+                block_allocate_shared_float = allocate_shared_float
+                block_allocate_shared_int = allocate_shared_int
+                block_synchronize_shared = synchronize_shared
+            else
+                block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_info.block_comm)
+                block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_info.block_comm)
+                block_synchronize_shared = () -> MPI.Barrier(this_level_info.block_comm)
+            end
+
             C_buffer = nothing
             if use_sparse
-                Ainv_dot_B_buffer =
-                    BlockAinvDotB{data_type}(this_level_info.a_block_sub_selection_indices,
-                                             this_level_info.a_block_B_column_indices)
                 schur_complement_buffer =
                     get_shared_sparse_matrix_csc_buffer(dimensions,
                                                         this_level_info.block_sizes,
@@ -1418,23 +1708,98 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                         this_level_shared_comm,
                                                         level_allocate_shared_float,
                                                         level_allocate_shared_int)
-                C_vector_intermediate_buffer =
-                    level_allocate_shared_float(this_level_info.global_bottom_vector_size,
-                                                this_level_comm_size)
-                C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
-                C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc, this_level_info.global_bottom_vector_size)
-                C_block_row_inds = this_level_info.a_block_B_column_indices
+                if use_shared_blocks
+                    if this_level_info.block_comm == MPI.COMM_NULL
+                        this_A_block_solver = MPIStaticCondensationNull{data_type}()
+                        Ainv_dot_B_buffer = nothing
+                        C_buffer = nothing
+                    else
+                        this_A_block_solver = get_block_diagonal_solver(this_level_info,
+                                                                        data_type, use_sparse,
+                                                                        level==1,
+                                                                        use_shared_blocks,
+                                                                        timer, check_lu,
+                                                                        block_allocate_shared_float,
+                                                                        block_allocate_shared_int,
+                                                                        block_synchronize_shared)
+                        Ainv_dot_B_buffer =
+                            BlockAinvDotBShared{data_type}(this_level_info.a_block_sub_selection_indices[1],
+                                                           this_level_info.a_block_B_column_indices[1],
+                                                           block_comm_rank, block_comm_size,
+                                                           block_allocate_shared_float,
+                                                           block_synchronize_shared)
+                        C_vector_intermediate_buffer =
+                            level_allocate_shared_float(this_level_info.global_bottom_vector_size,
+                                                        this_level_info.n_subgroups)
+                        C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
+                        C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc,this_level_info.global_bottom_vector_size)
+                        C_block_row_inds_full = this_level_info.a_block_B_column_indices[1]
 
-                C_vector_init_range, C_matrix_init_range =
-                    get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind_type, timer)
+                       C_nrow = length(C_block_row_inds_full)
+                       C_rows_per_proc = (C_nrow + block_comm_size - 1) ÷ block_comm_size
+                       if isempty(this_level_info.a_block_sub_selection_indices[1])
+                           # There are no entries in the block handled by this process, so
+                           # to avoid accessing zero-length vectors, set the row range to
+                           # be empty also.
+                           C_partial_row_range = 1:0
+                       else
+                           C_partial_row_range = block_comm_rank*C_rows_per_proc+1:min((block_comm_rank+1)*C_rows_per_proc,C_nrow)
+                       end
 
-                C_buffer =
-                    BlockC{data_type}(this_level_info.a_block_B_column_indices,
-                                      this_level_info.a_block_sub_selection_indices,
-                                      C_vector_intermediate_buffer, C_vector_range,
-                                      C_vector_init_range, C_matrix_init_range,
-                                      this_level_comm_rank, level_synchronize_shared)
+                        C_vector_init_range, C_matrix_init_range =
+                            get_C_buffer_init_ranges(C_block_row_inds_full,
+                                                     schur_complement_buffer, ind_type,
+                                                     timer, C_partial_row_range)
+
+                        C_buffer =
+                            BlockCShared{data_type}(C_block_row_inds_full,
+                                                    C_partial_row_range,
+                                                    this_level_info.a_block_sub_selection_indices[1],
+                                                    C_vector_intermediate_buffer,
+                                                    C_vector_range, C_vector_init_range,
+                                                    C_matrix_init_range,
+                                                    this_level_info.subgroup_i,
+                                                    block_allocate_shared_float,
+                                                    block_synchronize_shared,
+                                                    block_comm_rank, block_comm_size,
+                                                    level_synchronize_shared)
+                    end
+                else
+                    this_A_block_solver = get_block_diagonal_solver(this_level_info,
+                                                                    data_type, use_sparse,
+                                                                    level==1, false,
+                                                                    timer, check_lu)
+                    Ainv_dot_B_buffer =
+                        BlockAinvDotBSerial{data_type}(this_level_info.a_block_sub_selection_indices,
+                                                       this_level_info.a_block_B_column_indices)
+                    C_vector_intermediate_buffer =
+                        level_allocate_shared_float(this_level_info.global_bottom_vector_size,
+                                                    this_level_info.n_subgroups)
+                    C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
+                    C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc, this_level_info.global_bottom_vector_size)
+                    C_block_row_inds = this_level_info.a_block_B_column_indices
+
+                    C_vector_init_range, C_matrix_init_range =
+                        get_C_buffer_init_ranges(C_block_row_inds,
+                                                 schur_complement_buffer, ind_type, timer)
+
+                    C_buffer =
+                        BlockCSerial{data_type}(C_block_row_inds,
+                                                this_level_info.a_block_sub_selection_indices,
+                                                C_vector_intermediate_buffer, C_vector_range,
+                                                C_vector_init_range, C_matrix_init_range,
+                                                this_level_info.subgroup_i,
+                                                level_synchronize_shared)
+                end
             else
+                this_A_block_solver = get_block_diagonal_solver(this_level_info,
+                                                                data_type, use_sparse,
+                                                                level==1,
+                                                                use_shared_blocks, timer,
+                                                                check_lu,
+                                                                block_allocate_shared_float,
+                                                                block_allocate_shared_int,
+                                                                block_synchronize_shared)
                 Ainv_dot_B_buffer = nothing
                 schur_complement_buffer = nothing
             end
@@ -1509,11 +1874,16 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
+        na = length(this_level_info.all_local_top_vector_a_block_indices)
+        a_points_per_block_proc = (na + block_comm_size - 1) ÷ block_comm_size
+        partial_a_block_range = block_comm_rank*a_points_per_block_proc+1:min((block_comm_rank+1)*a_points_per_block_proc,na)
+
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
                                           this_level_info.all_local_top_vector_a_block_indices,
-                                          this_level_info.all_a_block_sub_selection_indices,
+                                          this_level_info.all_local_top_vector_a_block_indices[partial_a_block_range],
+                                          this_level_info.all_a_block_sub_selection_indices[partial_a_block_range],
                                           this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_no_overlap_indices,
@@ -1626,7 +1996,7 @@ end
                                         full_colinds[colinds])
 end
 
-function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
+function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, A::AbstractMatrix)
     solver = block_diagonal_solver.local_block_solver
     check_lu = block_diagonal_solver.check_lu
     if solver != [nothing]
@@ -1646,8 +2016,33 @@ function lu!(block_diagonal_solver::BlockDiagonalSolver, A::AbstractMatrix)
     end
     return nothing
 end
+function lu!(block_diagonal_solver::BlockDiagonalSolverShared, A::AbstractMatrix)
+    solver = block_diagonal_solver.local_block_solver
+    factors = block_diagonal_solver.factors
+    lu_selection_indices = block_diagonal_solver.lu_selection_indices
+    partial_lu_selection_indices = block_diagonal_solver.partial_lu_selection_indices
+    partial_col_range = block_diagonal_solver.partial_col_range
+    synchronize_shared = block_diagonal_solver.synchronize_shared
 
-function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+# Could make this branch more efficient when A is a (view of a) sparse matrix?
+    for (j1, j2) ∈ zip(partial_col_range, partial_lu_selection_indices), (i1, i2) ∈ enumerate(lu_selection_indices)
+        factors[i1,j1] = A[i2,j2]
+    end
+
+    synchronize_shared()
+
+    if isa(solver, MPIDenseLU)
+        # Note that this would not work if we were using distributed MPI in the MPIDenseLU
+        # `solver`, as in the distributed-MPI case, `factors` is not factorised directly,
+        # and we require that it is for `local_block_serial_solver` to work.
+        lu!(solver, factors)
+    elseif isa(solver, LU)
+        getrf!(factors, solver.ipiv; check=block_diagonal_solver.check_lu)
+    end
+    return nothing
+end
+
+function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::AbstractVector{T}) where T
     solvers = block_diagonal_solver.local_block_solver
     if solvers != [nothing]
@@ -1668,10 +2063,53 @@ function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolver{
     end
     return nothing
 end
-function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractVector{T}) where T
+function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
+               u::AbstractVector{T}) where T
+    solver = block_diagonal_solver.local_block_solver
+    x_buffer = block_diagonal_solver.x_buffer
+    block_comm_rank = block_diagonal_solver.block_comm_rank
+    block_indices = block_diagonal_solver.block_indices
+    synchronize_shared = block_diagonal_solver.synchronize_shared
+
+    # Need to synchronize here as `u_buffer` is filled only on block_comm_rank==0, but `u`
+    # was filled in parallel. Maybe it would be worth filling `u_buffer` in parallel? Then
+    # would need to synchronize before `ldiv!()` call.
+    synchronize_shared()
+
+    if solver === nothing
+        # Nothing to do.
+    elseif isa(solver, MPIDenseLU)
+        u_buffer = block_diagonal_solver.u_buffer
+        if block_comm_rank == 0
+            for (i1, i2) ∈ enumerate(block_indices)
+                u_buffer[i1] = u[i2]
+            end
+        end
+        ldiv!(x_buffer, solver, u_buffer)
+        if block_comm_rank == 0
+            for (i2, i1) ∈ enumerate(block_indices)
+                x[i1] = x_buffer[i2]
+            end
+        end
+    else
+        if block_comm_rank == 0
+            for (i1, i2) ∈ enumerate(block_indices)
+                x_buffer[i1] = u[i2]
+            end
+            ldiv!(solver, x_buffer)
+            for (i2, i1) ∈ enumerate(block_indices)
+                x[i1] = x_buffer[i2]
+            end
+        end
+    end
+    return nothing
+end
+function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
+               u::AbstractVector{T}) where T
     return ldiv!(u, block_diagonal_solver, u)
 end
-function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+function ldiv!(x::AbstractMatrix{T},
+               block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
                u::AbstractMatrix{T}) where T
     if block_diagonal_solver.local_block_solver !== nothing
         for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
@@ -1680,7 +2118,7 @@ function ldiv!(x::AbstractMatrix{T}, block_diagonal_solver::BlockDiagonalSolver{
     end
     return nothing
 end
-function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
+function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::Matrix{T}) where T
     solvers = block_diagonal_solver.local_block_solver
     if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
@@ -1695,10 +2133,18 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolver{T},
     end
     return nothing
 end
-function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::AbstractMatrix{T}) where T
+function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
+               u::Matrix{T}) where T
+    for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
+        ldiv!(this_x, block_diagonal_solver, this_u)
+    end
+    return nothing
+end
+function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
+               u::AbstractMatrix{T}) where T
     return ldiv!(u, block_diagonal_solver, u)
 end
-function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::Matrix{T}) where T
+function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{T}, u::Matrix{T}) where T
     solvers = block_diagonal_solver.local_block_solver
     if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
         # There is only one block, so do not need to select range out of u.
@@ -1707,6 +2153,9 @@ function ldiv!(block_diagonal_solver::BlockDiagonalSolver{T}, u::Matrix{T}) wher
     else
         return ldiv!(u, block_diagonal_solver, u)
     end
+end
+function ldiv!(block_diagonal_solver::BlockDiagonalSolverShared{T}, u::Matrix{T}) where T
+    return ldiv!(u, block_diagonal_solver, u)
 end
 function sparse_column_has_overlap(rowval, bi)
     r_count = 1
@@ -1723,7 +2172,7 @@ function sparse_column_has_overlap(rowval, bi)
     return false
 end
 function ldiv!(x::AbstractSparseMatrixCSC{T},
-               block_diagonal_solver::BlockDiagonalSolver{T},
+               block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::AbstractSparseMatrixCSC{T}) where T
     solvers = block_diagonal_solver.local_block_solver
     if solvers != [nothing]
@@ -1793,7 +2242,7 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
 end
 
 # Specialized implementations to be used for A^{-1}.B
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::AbstractMatrix{T}) where T
     solvers = block_diagonal_solver.local_block_solver
     if solvers != [nothing]
@@ -1827,7 +2276,7 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
     end
     return nothing
 end
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::AbstractSparseMatrixCSC{T}) where T
     solvers = block_diagonal_solver.local_block_solver
     if solvers != [nothing]
@@ -1925,12 +2374,39 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
     end
     return nothing
 end
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolver{T},
-                       B::BlockAinvDotB{T}) where T
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
+                       B::BlockAinvDotBSerial{T}) where T
     for (solver, block) ∈ zip(block_diagonal_solver.local_block_solver, B.blocks)
-        @views ldiv!(solver, block)
+        ldiv!(solver, block)
     end
     return nothing
+end
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
+                       B::BlockAinvDotBShared{T}) where T
+    solver = block_diagonal_solver.local_block_serial_solver
+    if solver !== nothing
+        block = B.block
+        partial_block = B.partial_block
+        partial_col_range = B.partial_col_range
+        partial_row_range = B.partial_row_range
+        synchronize_shared = B.synchronize_shared
+
+        # Probably more efficient to parallelise over columns in `block` than to use a
+        # parallelised `ldiv!()` on the full block.
+        ldiv!(solver, @view(block[:,partial_col_range]))
+
+        synchronize_shared()
+
+        partial_block .= @view block[partial_row_range,:]
+    end
+    return nothing
+end
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
+                       B::Matrix{T}) where T
+    # When not using BlockAinvDotBShared, this function will use a different
+    # parallelisation than copy_B_submatrix!(), so need to synchronize.
+    block_diagonal_solver.synchronize_shared()
+    return ldiv!(block_diagonal_solver, B)
 end
 function ldiv_Bmatrix!(::MPIStaticCondensationNull, B)
     return nothing
@@ -1954,7 +2430,7 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
 end
 
 # Don't think dense-matrix version is needed?
-#function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::AbstractMatrix)
+#function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractMatrix)
 #    blocks = Ainv_dot_B.blocks
 #    if length(blocks) == 0
 #        # Nothing to do.
@@ -1970,7 +2446,8 @@ end
 #    end
 #    return nothing
 #end
-function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::AbstractSparseMatrixCSC, B_rowinds, B_colinds)
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMatrixCSC,
+                           B_rowinds, B_colinds)
     blocks = Ainv_dot_B.blocks
     if length(blocks) == 0
         # Nothing to do.
@@ -2010,7 +2487,50 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::AbstractSparseMatrixCSC
     end
     return nothing
 end
-@inline function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotB, B::SubArray)
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMatrixCSC,
+                           B_rowinds, B_colinds)
+    block_rowinds = Ainv_dot_B.block_rowinds
+    block_colinds = Ainv_dot_B.block_colinds
+    if isempty(block_rowinds) || isempty(block_colinds)
+        # Nothing to do.
+        return nothing
+    end
+    block = Ainv_dot_B.block
+    partial_col_range = Ainv_dot_B.partial_col_range
+    B_colptr = B.colptr
+    B_rowval = B.rowval
+    B_nzval = B.nzval
+
+    block_nrow = length(block_rowinds)
+    first_row = first(block_rowinds)
+    for j1 ∈ partial_col_range
+        j2 = block_colinds[j1]
+        B_col = B_colinds[j2]
+        first_i = B_colptr[B_col]
+        last_i = B_colptr[B_col+1] - 1
+        col_rv = @view B_rowval[first_i:last_i]
+        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+        i1 = 1
+        while flat_i ≤ last_i && i1 ≤ block_nrow
+            B_row = B_rowval[flat_i]
+            block_global_row = B_rowinds[block_rowinds[i1]]
+            if B_row == block_global_row
+                block[i1,j1] = B_nzval[flat_i]
+                i1 += 1
+                flat_i += 1
+            elseif B_row > block_global_row
+                block[i1,j1] = 0.0
+                i1 += 1
+            else
+                flat_i += 1
+            end
+        end
+    end
+
+    return nothing
+end
+@inline function copy_B_submatrix!(Ainv_dot_B::Union{BlockAinvDotBSerial,BlockAinvDotBShared},
+                                   B::SubArray)
     return copy_B_submatrix!(Ainv_dot_B, B.parent, B.indices[1], B.indices[2])
 end
 
@@ -2018,7 +2538,7 @@ end
 # instead of having a single implementation for both in case we want to experiment with
 # using a transposed representation of the C blocks at some point.
 # Don't think dense-matrix version is needed?
-#function copy_C_submatrix!(block_C::BlockC, C::AbstractMatrix)
+#function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractMatrix)
 #    blocks = block_C.blocks
 #    if length(blocks) == 0
 #        # Nothing to do.
@@ -2034,7 +2554,8 @@ end
 #    end
 #    return nothing
 #end
-function copy_C_submatrix!(block_C::BlockC, C::AbstractSparseMatrixCSC, C_rowinds, C_colinds)
+function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_rowinds,
+                           C_colinds)
     blocks = block_C.blocks
     if length(blocks) == 0
         # Nothing to do.
@@ -2074,14 +2595,53 @@ function copy_C_submatrix!(block_C::BlockC, C::AbstractSparseMatrixCSC, C_rowind
     end
     return nothing
 end
-@inline function copy_C_submatrix!(block_C::BlockC, C::SubArray)
+function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_rowinds,
+                           C_colinds)
+    block_rowinds = block_C.block_rowinds
+    block_colinds = block_C.block_colinds
+    if isempty(block_rowinds) || isempty(block_colinds)
+        # Nothing to do.
+        return nothing
+    end
+    block = block_C.block
+    C_colptr = C.colptr
+    C_rowval = C.rowval
+    C_nzval = C.nzval
+
+    block_nrow = length(block_rowinds)
+    first_row = first(block_rowinds)
+    for (j1, j2) ∈ enumerate(block_colinds)
+        C_col = C_colinds[j2]
+        first_i = C_colptr[C_col]
+        last_i = C_colptr[C_col+1] - 1
+        col_rv = @view C_rowval[first_i:last_i]
+        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+        i1 = 1
+        while flat_i ≤ last_i && i1 ≤ block_nrow
+            C_row = C_rowval[flat_i]
+            block_global_row = C_rowinds[block_rowinds[i1]]
+            if C_row == block_global_row
+                block[i1,j1] = C_nzval[flat_i]
+                i1 += 1
+                flat_i += 1
+            elseif C_row > block_global_row
+                block[i1,j1] = 0.0
+                i1 += 1
+            else
+                flat_i += 1
+            end
+        end
+    end
+    return nothing
+end
+@inline function copy_C_submatrix!(block_C::Union{BlockCSerial,BlockCShared}, C::SubArray)
     return copy_C_submatrix!(block_C, C.parent, C.indices[1], C.indices[2])
 end
 
 # Note that combining all the contributions to C_dot_Ainv_dot_B from different processes
 # is taken care of by MPISchurComplements.
-function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockC,
-                           Ainv_dot_B::BlockAinvDotB)
+function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockCSerial,
+                           Ainv_dot_B::BlockAinvDotBSerial)
     C_blocks = C.blocks
     if length(C_blocks) == 0
         # Nothing to do.
@@ -2129,6 +2689,52 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockC,
     end
     return nothing
 end
+function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockCShared,
+                           Ainv_dot_B::BlockAinvDotBShared)
+    block_output_inds = C.block_rowinds
+    if isempty(block_output_inds)
+        # Nothing to do.
+        return nothing
+    end
+    C_block = C.block
+    mul_block = C.right_multiplication_buffer_block
+    block_output_colinds = C.block_right_multiplication_output_colinds
+    Ainv_dot_B_block = Ainv_dot_B.block
+    matrix_init_range = C.matrix_init_range
+    colptr = C_dot_Ainv_dot_B.colptr
+    rowval = C_dot_Ainv_dot_B.rowval
+    nzval = C_dot_Ainv_dot_B.nzval
+
+    # Initialise buffer to zero. All entries not in matrix_init_range are never modified,
+    # and were initialised to zero.
+    for i ∈ matrix_init_range
+        nzval[i] = 0.0
+    end
+
+    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+
+    # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
+    first_row = first(block_output_inds)
+    nrows = length(block_output_inds)
+    for (j, col) ∈ enumerate(block_output_colinds)
+        first_i = colptr[col]
+        last_i = colptr[col+1] - 1
+        col_rv = @view rowval[first_i:last_i]
+        flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+        i = 1
+        while flat_i ≤ last_i && i ≤ nrows
+            if rowval[flat_i] == block_output_inds[i]
+                nzval[flat_i] += mul_block[i,j]
+                flat_i += 1
+                i += 1
+            else
+                # rowval[flat_i] must be less than block_output_inds[i].
+                flat_i += 1
+            end
+        end
+    end
+    return nothing
+end
 
 function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
     @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
@@ -2144,8 +2750,8 @@ function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
     return nothing
 end
 
-function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector, Ainv_dot_B::BlockAinvDotB,
-                           global_y::AbstractVector)
+function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
+                           Ainv_dot_B::BlockAinvDotBSerial, global_y::AbstractVector)
     blocks = Ainv_dot_B.blocks
     if length(blocks) == 0
         # Nothing to do.
@@ -2165,8 +2771,29 @@ function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector, Ainv_dot_B::BlockAinv
     end
     return nothing
 end
+function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
+                           Ainv_dot_B::BlockAinvDotBShared, global_y::AbstractVector)
+    partial_block = Ainv_dot_B.partial_block
+    vector_buffer_block_in = Ainv_dot_B.vector_buffer_block_in
+    vector_buffer_block_out = Ainv_dot_B.vector_buffer_block_out
+    block_partial_rowinds = Ainv_dot_B.block_partial_rowinds
+    block_partial_colinds = Ainv_dot_B.block_partial_colinds
+    partial_col_range = Ainv_dot_B.partial_col_range
+    synchronize_shared = Ainv_dot_B.synchronize_shared
 
-function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockC,
+    for (i1, i2) ∈ zip(partial_col_range, block_partial_colinds)
+        vector_buffer_block_in[i1] = global_y[i2]
+    end
+    synchronize_shared()
+
+    mul!(vector_buffer_block_out, partial_block, vector_buffer_block_in)
+    for (i2, i1) ∈ enumerate(block_partial_rowinds)
+        top_vec_buffer[i1] = vector_buffer_block_out[i2]
+    end
+    return nothing
+end
+
+function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial,
                                Ainv_dot_u::AbstractVector)
 
     blocks = C.blocks
@@ -2179,7 +2806,7 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockC,
         vector_init_range = C.vector_init_range
 
         # Initialise buffer to zero. All entries not in vector_init_range are never modified,
-        # and were initialised to zero in the BlockC constructor.
+        # and were initialised to zero in the BlockCSerial constructor.
         for i ∈ vector_init_range
             vector_intermediate_buffer_local[i] = 0.0
         end
@@ -2206,6 +2833,49 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockC,
 
     return nothing
 end
+function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared,
+                               Ainv_dot_u::AbstractVector)
+
+    block = C.block
+    vector_range = C.vector_range
+    vector_intermediate_buffer = C.vector_intermediate_buffer
+    synchronize_shared = C.synchronize_shared
+    vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
+    vector_init_range = C.vector_init_range
+    vec_buffer_block_in = C.vector_buffer_block_in
+    vec_buffer_block_out = C.vector_buffer_block_out
+    block_rowinds = C.block_rowinds
+    partial_block_colinds = C.partial_block_colinds
+    partial_col_range = C.partial_col_range
+    block_synchronize_shared = C.block_synchronize_shared
+    synchronize_shared = C.synchronize_shared
+
+    # Initialise buffer to zero. All entries not in vector_init_range are never modified,
+    # and were initialised to zero in the BlockCShared constructor.
+    for i ∈ vector_init_range
+        vector_intermediate_buffer_local[i] = 0.0
+    end
+
+    for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
+        vec_buffer_block_in[i1] = Ainv_dot_u[i2]
+    end
+
+    block_synchronize_shared()
+
+    mul!(vec_buffer_block_out, block, vec_buffer_block_in)
+    for (i2, i1) ∈ enumerate(block_rowinds)
+        vector_intermediate_buffer_local[i1] -= vec_buffer_block_out[i2]
+    end
+
+    synchronize_shared()
+
+    # Sum contributions from all processes into the output.
+    if !isempty(vector_range)
+        @views sum!(C_dot_Ainv_dot_u[vector_range], vector_intermediate_buffer[vector_range,:])
+    end
+
+    return nothing
+end
 
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractVector{T}) where T
@@ -2213,8 +2883,8 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         # It is slightly faster to copy the data to/from local buffers than to use @view
         # with Vector{Int64} indices.
-        all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
-        all_a_block_sub_selection_indices = solver.all_a_block_sub_selection_indices
+        partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
+        partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
         this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
         this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
@@ -2224,9 +2894,10 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         u = solver.u_buffer
         v = solver.v_buffer
         # Use the a_block_indices here so that no shared-memory synchronization is needed
-        # before the ldiv!() call for the A subblock with the BlockDiagonalSolver inside
-        # the MPISchurComplement ldiv!().
-        for (i1, i2) ∈ zip(all_a_block_sub_selection_indices, all_local_top_vector_a_block_indices)
+        # before the ldiv!() call for the A subblock with the
+        # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
+        # MPISchurComplement ldiv!().
+        for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
@@ -2250,7 +2921,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             end
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i1, i2) ∈ zip(all_local_top_vector_a_block_indices, all_a_block_sub_selection_indices)
+        for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
             X[i1] = u[i2]
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
@@ -2264,8 +2935,8 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         # It is slightly faster to copy the data to/from local buffers than to use @view
         # with Vector{Int64} indices.
-        all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
-        all_a_block_sub_selection_indices = solver.all_a_block_sub_selection_indices
+        partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
+        partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
         this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
         this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
         this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
@@ -2275,9 +2946,10 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
         u = solver.u_buffer
         v = solver.v_buffer
         # Use the a_block_indices here so that no shared-memory synchronization is needed
-        # before the ldiv!() call for the A subblock with the BlockDiagonalSolver inside
-        # the MPISchurComplement ldiv!().
-        for (i1, i2) ∈ zip(all_a_block_sub_selection_indices, all_local_top_vector_a_block_indices)
+        # before the ldiv!() call for the A subblock with the
+        # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
+        # MPISchurComplement ldiv!().
+        for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
             u[i1] = U[i2]
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
@@ -2301,7 +2973,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             end
         end
         ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i1, i2) ∈ zip(all_local_top_vector_a_block_indices, all_a_block_sub_selection_indices)
+        for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
             U[i1] = u[i2]
         end
         for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
