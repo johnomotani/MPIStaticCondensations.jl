@@ -612,8 +612,8 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
     end
 
     shared_comm_rank = MPI.Comm_rank(shared_comm)
-    n_colptr = allocate_shared_int(1)
-    n_rowval = allocate_shared_int(1)
+    n_colptr = Ref(-1)
+    n_rowval = Ref(-1)
     if shared_comm_rank == 0
         cp = Int64[]
         rv = Int64[]
@@ -632,7 +632,8 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
         n_colptr[] = length(cp)
         n_rowval[] = length(rv)
 
-        MPI.Barrier(shared_comm)
+        MPI.Bcast!(n_colptr, shared_comm; root=0)
+        MPI.Bcast!(n_rowval, shared_comm; root=0)
 
         colptr = allocate_shared_int(n_colptr[])
         rowval = allocate_shared_int(n_rowval[])
@@ -642,7 +643,8 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
         rowval .= rv
         nzval .= 0.0
     else
-        MPI.Barrier(shared_comm)
+        MPI.Bcast!(n_colptr, shared_comm; root=0)
+        MPI.Bcast!(n_rowval, shared_comm; root=0)
 
         colptr = allocate_shared_int(n_colptr[])
         rowval = allocate_shared_int(n_rowval[])
