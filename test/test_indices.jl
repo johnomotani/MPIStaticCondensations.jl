@@ -81,6 +81,7 @@ function test_split_indices_1d_1proc_remove_boundaries()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].local_top_vector_indices == [2, 4, 6]
+            @test li[1].iblock_list == [1 2 3;]
             @test li[1].all_local_top_vector_a_block_indices == [2, 4, 6]
             @test li[1].local_top_vector_a_block_indices == [[2], [4], [6]]
             @test li[1].all_a_block_sub_selection_indices == 1:3
@@ -95,6 +96,7 @@ function test_split_indices_1d_1proc_remove_boundaries()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [2]
+            @test li[2].iblock_list == [1 2;]
             @test li[2].all_local_top_vector_a_block_indices == [2]
             @test li[2].local_top_vector_a_block_indices == [[2], []]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -109,6 +111,7 @@ function test_split_indices_1d_1proc_remove_boundaries()
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].top_vector_indices == [5]
             @test li[3].local_top_vector_indices == [2]
+            @test li[3].iblock_list == [1;;]
             @test li[3].all_local_top_vector_a_block_indices == [2]
             @test li[3].local_top_vector_a_block_indices == [[2]]
             @test li[3].all_a_block_sub_selection_indices == [1]
@@ -147,6 +150,7 @@ function test_split_indices_1d_1proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2]
             @test li[1].local_top_vector_indices == [2]
+            @test li[1].iblock_list == [1;;]
             @test li[1].all_local_top_vector_a_block_indices == [2]
             @test li[1].local_top_vector_a_block_indices == [[2]]
             @test li[1].all_a_block_sub_selection_indices == [1]
@@ -181,6 +185,7 @@ function test_split_indices_1d_1proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].local_top_vector_indices == [2, 4, 6]
+            @test li[1].iblock_list == [1 2 3;]
             @test li[1].all_local_top_vector_a_block_indices == [2, 4, 6]
             @test li[1].local_top_vector_a_block_indices == [[2], [4], [6]]
             @test li[1].all_a_block_sub_selection_indices == 1:3
@@ -195,6 +200,7 @@ function test_split_indices_1d_1proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [2]
+            @test li[2].iblock_list == [1 2;]
             @test li[2].all_local_top_vector_a_block_indices == [2]
             @test li[2].local_top_vector_a_block_indices == [[2], []]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -209,6 +215,7 @@ function test_split_indices_1d_1proc_periodic()
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].top_vector_indices == [5]
             @test li[3].local_top_vector_indices == [2]
+            @test li[3].iblock_list == [1;;]
             @test li[3].all_local_top_vector_a_block_indices == [2]
             @test li[3].local_top_vector_a_block_indices == [[2]]
             @test li[3].all_a_block_sub_selection_indices == [1]
@@ -247,6 +254,7 @@ function test_split_indices_1d_2proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4)
             @test li[1].local_top_vector_indices == vcat(1:2, 4)
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == vcat(1:2, 4)
             @test li[1].local_top_vector_a_block_indices == [[1, 2], [4]]
             @test li[1].all_a_block_sub_selection_indices == 1:3
@@ -261,6 +269,7 @@ function test_split_indices_1d_2proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [1;;]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
             @test li[2].a_block_sub_selection_indices == [[1]]
@@ -281,6 +290,7 @@ function test_split_indices_1d_2proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(6, 8:9)
             @test li[1].local_top_vector_indices == vcat(2, 4:5)
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == vcat(2, 4:5)
             @test li[1].local_top_vector_a_block_indices == [[2], [4,5]]
             @test li[1].all_a_block_sub_selection_indices == 1:3
@@ -295,6 +305,7 @@ function test_split_indices_1d_2proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [7]
             @test li[2].local_top_vector_indices == [2]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [2]
             @test li[2].local_top_vector_a_block_indices == [[2]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -321,6 +332,7 @@ function test_split_indices_1d_2proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6, 8:9)
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == vcat(1:2, 4)
             @test li[1].local_top_vector_a_block_indices == [[1, 2], [4]]
             @test li[1].all_a_block_sub_selection_indices == 1:3
@@ -335,6 +347,7 @@ function test_split_indices_1d_2proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3, 7]
             @test li[2].local_top_vector_indices == [1, 3]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [1]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -356,6 +369,7 @@ function test_split_indices_1d_2proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6, 8:9)
+            @test li[1].iblock_list == [3 4;]
             @test li[1].all_local_top_vector_a_block_indices == vcat(6, 8:9)
             @test li[1].local_top_vector_a_block_indices == [[6], [8, 9]]
             @test li[1].all_a_block_sub_selection_indices == 4:6
@@ -370,6 +384,7 @@ function test_split_indices_1d_2proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3, 7]
             @test li[2].local_top_vector_indices == [1, 3]
+            @test li[2].iblock_list == [2;;]
             @test li[2].all_local_top_vector_a_block_indices == [3]
             @test li[2].local_top_vector_a_block_indices == [[3]]
             @test li[2].all_a_block_sub_selection_indices == [2]
@@ -404,6 +419,7 @@ function test_split_indices_1d_2proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4, 6:7)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6:7)
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == vcat(1:2, 4)
             @test li[1].local_top_vector_a_block_indices == [[1, 2], [4]]
             @test li[1].all_a_block_sub_selection_indices == 1:3
@@ -418,6 +434,7 @@ function test_split_indices_1d_2proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [1]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -439,6 +456,7 @@ function test_split_indices_1d_2proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4, 6:7)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6:7)
+            @test li[1].iblock_list == [3;;]
             @test li[1].all_local_top_vector_a_block_indices == vcat(6:7)
             @test li[1].local_top_vector_a_block_indices == [[6, 7]]
             @test li[1].all_a_block_sub_selection_indices == 4:5
@@ -453,6 +471,7 @@ function test_split_indices_1d_2proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [2;;]
             @test li[2].all_local_top_vector_a_block_indices == []
             @test li[2].local_top_vector_a_block_indices == [[]]
             @test li[2].all_a_block_sub_selection_indices == []
@@ -491,6 +510,7 @@ function test_split_indices_1d_4proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].iblock_list == [1;;]
             @test li[1].all_local_top_vector_a_block_indices == 1:2
             @test li[1].local_top_vector_a_block_indices == [[1, 2]]
             @test li[1].all_a_block_sub_selection_indices == 1:2
@@ -505,6 +525,7 @@ function test_split_indices_1d_4proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [1]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -526,6 +547,7 @@ function test_split_indices_1d_4proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].iblock_list == [2;;]
             @test li[1].all_local_top_vector_a_block_indices == 4:5
             @test li[1].local_top_vector_a_block_indices == [[4, 5]]
             @test li[1].all_a_block_sub_selection_indices == 3:4
@@ -540,6 +562,7 @@ function test_split_indices_1d_4proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [1]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -561,6 +584,7 @@ function test_split_indices_1d_4proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].iblock_list == zeros(Int64, 1, 0)
             @test li[1].all_local_top_vector_a_block_indices == 1:0
             @test li[1].local_top_vector_a_block_indices == []
             @test li[1].all_a_block_sub_selection_indices == 1:0
@@ -575,6 +599,7 @@ function test_split_indices_1d_4proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [1]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -596,6 +621,7 @@ function test_split_indices_1d_4proc()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
+            @test li[1].iblock_list == zeros(Int64, 1, 0)
             @test li[1].all_local_top_vector_a_block_indices == 1:0
             @test li[1].local_top_vector_a_block_indices == []
             @test li[1].all_a_block_sub_selection_indices == 1:0
@@ -610,6 +636,7 @@ function test_split_indices_1d_4proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [1]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [1]
             @test li[2].local_top_vector_a_block_indices == [[1]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -648,6 +675,7 @@ function test_split_indices_1d_2proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4]
             @test li[1].local_top_vector_indices == [2, 4]
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == [2, 4]
             @test li[1].local_top_vector_a_block_indices == [[2], [4]]
             @test li[1].all_a_block_sub_selection_indices == 1:2
@@ -662,6 +690,7 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3]
             @test li[2].local_top_vector_indices == [2]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [2]
             @test li[2].local_top_vector_a_block_indices == [[2]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -683,6 +712,7 @@ function test_split_indices_1d_2proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [6, 8]
             @test li[1].local_top_vector_indices == [2, 4]
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == [2, 4]
             @test li[1].local_top_vector_a_block_indices == [[2], [4]]
             @test li[1].all_a_block_sub_selection_indices == 1:2
@@ -697,6 +727,7 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [7]
             @test li[2].local_top_vector_indices == [2]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [2]
             @test li[2].local_top_vector_a_block_indices == [[2]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -723,6 +754,7 @@ function test_split_indices_1d_2proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4, 6, 8]
             @test li[1].local_top_vector_indices == [2, 4, 6, 8]
+            @test li[1].iblock_list == [1 2;]
             @test li[1].all_local_top_vector_a_block_indices == [2, 4]
             @test li[1].local_top_vector_a_block_indices == [[2], [4]]
             @test li[1].all_a_block_sub_selection_indices == 1:2
@@ -737,6 +769,7 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3, 7]
             @test li[2].local_top_vector_indices == [2, 4]
+            @test li[2].iblock_list == [1;;]
             @test li[2].all_local_top_vector_a_block_indices == [2]
             @test li[2].local_top_vector_a_block_indices == [[2]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -758,6 +791,7 @@ function test_split_indices_1d_2proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4, 6, 8]
             @test li[1].local_top_vector_indices == [2, 4, 6, 8]
+            @test li[1].iblock_list == [3 4;]
             @test li[1].all_local_top_vector_a_block_indices == [6, 8]
             @test li[1].local_top_vector_a_block_indices == [[6], [8]]
             @test li[1].all_a_block_sub_selection_indices == 3:4
@@ -772,6 +806,7 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3, 7]
             @test li[2].local_top_vector_indices == [2, 4]
+            @test li[2].iblock_list == [2;;]
             @test li[2].all_local_top_vector_a_block_indices == [4]
             @test li[2].local_top_vector_a_block_indices == [[4]]
             @test li[2].all_a_block_sub_selection_indices == [2]
@@ -819,6 +854,7 @@ function test_split_indices_2d_1proc()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]
             @test li[1].local_top_vector_indices == [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]
+            @test li[1].iblock_list == [1 2; 1 1]
             @test li[1].all_local_top_vector_a_block_indices == [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]
             @test li[1].local_top_vector_a_block_indices == [[1, 2, 6, 7, 11, 12], [4, 5, 9, 10, 14, 15]]
             @test li[1].all_a_block_sub_selection_indices == 1:12
@@ -833,6 +869,7 @@ function test_split_indices_2d_1proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [3, 8, 13]
             @test li[2].local_top_vector_indices == 1:3
+            @test li[2].iblock_list == [1; 1;;]
             @test li[2].all_local_top_vector_a_block_indices == 1:3
             @test li[2].local_top_vector_a_block_indices == [[1, 2, 3]]
             @test li[2].all_a_block_sub_selection_indices == 1:3
@@ -872,6 +909,7 @@ function test_split_indices_2d_1proc()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == vcat(1:6, 10:15)
             @test li[1].local_top_vector_indices == vcat(1:6, 10:15)
+            @test li[1].iblock_list == [1 1; 1 2]
             @test li[1].all_local_top_vector_a_block_indices == vcat(1:6, 10:15)
             @test li[1].local_top_vector_a_block_indices == [1:6, 10:15]
             @test li[1].all_a_block_sub_selection_indices == 1:12
@@ -886,6 +924,7 @@ function test_split_indices_2d_1proc()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == 7:9
             @test li[2].local_top_vector_indices == 1:3
+            @test li[2].iblock_list == [1; 1;;]
             @test li[2].all_local_top_vector_a_block_indices == 1:3
             @test li[2].local_top_vector_a_block_indices == [[1, 2, 3]]
             @test li[2].all_a_block_sub_selection_indices == 1:3
@@ -929,6 +968,7 @@ function test_split_indices_2d_1proc_remove_boundaries()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [5]
             @test li[1].local_top_vector_indices == [5]
+            @test li[1].iblock_list == [1; 1;;]
             @test li[1].all_local_top_vector_a_block_indices == [5]
             @test li[1].local_top_vector_a_block_indices == [[5]]
             @test li[1].all_a_block_sub_selection_indices == [1]
@@ -972,6 +1012,7 @@ function test_split_indices_2d_1proc_periodic()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [2, 5, 8]
             @test li[1].local_top_vector_indices == [2, 5, 8]
+            @test li[1].iblock_list == [1; 1;;]
             @test li[1].all_local_top_vector_a_block_indices == [2, 5, 8]
             @test li[1].local_top_vector_a_block_indices == [[2, 5, 8]]
             @test li[1].all_a_block_sub_selection_indices == [1, 2, 3]
@@ -1009,6 +1050,7 @@ function test_split_indices_2d_1proc_periodic()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [4, 5, 6]
             @test li[1].local_top_vector_indices == [4, 5, 6]
+            @test li[1].iblock_list == [1; 1;;]
             @test li[1].all_local_top_vector_a_block_indices == [4, 5, 6]
             @test li[1].local_top_vector_a_block_indices == [[4, 5, 6]]
             @test li[1].all_a_block_sub_selection_indices == [1, 2, 3]
@@ -1046,6 +1088,7 @@ function test_split_indices_2d_1proc_periodic()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [5]
             @test li[1].local_top_vector_indices == [5]
+            @test li[1].iblock_list == [1; 1;;]
             @test li[1].all_local_top_vector_a_block_indices == [5]
             @test li[1].local_top_vector_a_block_indices == [[5]]
             @test li[1].all_a_block_sub_selection_indices == [1]
@@ -1085,6 +1128,7 @@ function test_split_indices_2d_1proc_periodic()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [2, 5, 11, 14]
             @test li[1].local_top_vector_indices == [2, 5, 11, 14]
+            @test li[1].iblock_list == [1 1; 1 2]
             @test li[1].all_local_top_vector_a_block_indices == [2, 5, 11, 14]
             @test li[1].local_top_vector_a_block_indices == [[2, 5], [11, 14]]
             @test li[1].all_a_block_sub_selection_indices == [1, 2, 3, 4]
@@ -1099,6 +1143,7 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [8]
             @test li[2].local_top_vector_indices == [6]
+            @test li[2].iblock_list == [1; 1;;]
             @test li[2].all_local_top_vector_a_block_indices == [6]
             @test li[2].local_top_vector_a_block_indices == [[6]]
             @test li[2].all_a_block_sub_selection_indices == [1]
@@ -1138,6 +1183,7 @@ function test_split_indices_2d_1proc_periodic()
                                    [1, 1], [0, 0], n_shared, irank)
             @test li[1].top_vector_indices == [5, 11]
             @test li[1].local_top_vector_indices == [5, 11]
+            @test li[1].iblock_list == [1 1; 1 2]
             @test li[1].all_local_top_vector_a_block_indices == [5, 11]
             @test li[1].local_top_vector_a_block_indices == [[5], [11]]
             @test li[1].all_a_block_sub_selection_indices == [1, 2]
@@ -1152,6 +1198,7 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].top_vector_indices == [8]
             @test li[2].local_top_vector_indices == [7]
+            @test li[2].iblock_list == [1; 1;;]
             @test li[2].all_local_top_vector_a_block_indices == [7]
             @test li[2].local_top_vector_a_block_indices == [[7]]
             @test li[2].all_a_block_sub_selection_indices == [1]

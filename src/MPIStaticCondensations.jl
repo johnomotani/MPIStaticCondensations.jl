@@ -355,26 +355,34 @@ struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync} <: MPISchurComplementBlockAinvDotB
     end
 end
 
-struct BlockCSerial{Tf,Ti,Tbuff,Tib,F<:Function} <: MPISchurComplementBlockC
+struct BlockCSerial{Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurComplementBlockC
     blocks::Vector{Matrix{Tf}}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
+    block_hypercube_positions::Vector{Ti}
+    output_buffer_ncopies::Ti
     right_multiplication_buffer_blocks::Vector{Matrix{Tf}}
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
-    vector_intermediate_buffer_local::Tbuff
     vector_intermediate_buffer::Tib
     vector_range::UnitRange{Ti}
-    vector_init_range::Vector{Ti}
-    matrix_init_range::Vector{Ti}
-    synchronize_shared::F
+    vector_init_range::Tir
+    matrix_init_range::Tir
+    buffer_position::Tbc
+    block_synchronize_shared::Fsb
+    synchronize_shared::Fs
 
     function BlockCSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
                               block_colinds::Vector{Vector{Ti}},
+                              block_hypercube_positions::Vector{Ti},
+                              output_buffer_ncopies::Ti,
                               vector_intermediate_buffer::AbstractMatrix{Tf},
-                              vector_range::UnitRange{Ti}, vector_init_range::Vector{Ti},
-                              matrix_init_range::Vector{Ti}, comm_rank::Ti,
-                              synchronize_shared::F) where {Tf,Ti,F<:Function}
+                              vector_range::UnitRange{Ti},
+                              vector_init_range::Union{UnitRange{Ti},Nothing},
+                              matrix_init_range::Union{UnitRange{Ti},Nothing},
+                              buffer_position::Union{Ti,Nothing}, comm_rank::Ti,
+                              block_synchronize_shared::Fsb,
+                              synchronize_shared::Fs) where {Tf,Ti,Fsb<:Function,Fs<:Function}
         non_empty_blocks = [!isempty(ri) && !isempty(ci)
                             for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
         block_rowinds = block_rowinds[non_empty_blocks]
@@ -391,27 +399,24 @@ struct BlockCSerial{Tf,Ti,Tbuff,Tib,F<:Function} <: MPISchurComplementBlockC
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
         end
-        if comm_rank ≥ 0
-            vector_intermediate_buffer_local = @view vector_intermediate_buffer[:,comm_rank+1]
-            vector_intermediate_buffer_local .= 0.0
-        else
-            vector_intermediate_buffer_local = zeros(Tf, 0)
-        end
-        return new{Tf,Ti,typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),F}(
-                   blocks, block_rowinds, block_colinds,
-                   right_multiplication_buffer_blocks, vector_buffer_blocks_in,
-                   vector_buffer_blocks_out, vector_intermediate_buffer_local,
+        return new{Tf,Ti,typeof(vector_intermediate_buffer),typeof(buffer_position),typeof(vector_init_range),Fsb,Fs}(
+                   blocks, block_rowinds, block_colinds, block_hypercube_positions,
+                   output_buffer_ncopies, right_multiplication_buffer_blocks,
+                   vector_buffer_blocks_in, vector_buffer_blocks_out,
                    vector_intermediate_buffer, vector_range, vector_init_range,
-                   matrix_init_range, synchronize_shared)
+                   matrix_init_range, buffer_position, block_synchronize_shared,
+                   synchronize_shared)
     end
 end
 
-struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
+struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
     block::Matrix{Tf}
     block_rowinds::Vector{Ti}
     block_colinds::Vector{Ti}
     partial_block_colinds::Vector{Ti}
     partial_col_range::UnitRange{Ti}
+    block_hypercube_position::Ti
+    output_buffer_ncopies::Ti
     right_multiplication_buffer_block::Matrix{Tf}
     block_right_multiplication_output_colinds::Vector{Ti}
     vector_buffer_block_in::Tbi
@@ -419,17 +424,55 @@ struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function} <: MPISchurC
     vector_intermediate_buffer_local::Tbuff
     vector_intermediate_buffer::Tib
     vector_range::UnitRange{Ti}
-    vector_init_range::Vector{Ti}
-    matrix_init_range::Vector{Ti}
+    buffer_column_per_subgroup::Bool
+    vector_init_range::Tir
+    matrix_init_range::Tir
     block_synchronize_shared::Fbs
     synchronize_shared::Fs
 
+    # When multiplying a vector or a BlockAinvDotBShared matrix by a BlockCShared
+    # block-structured C matrix, the output from each block can overlap as the outputs are
+    # on the 'boundary points' of the grid, not the decoupled 'interior points'. To deal
+    # with this, we first write the results from each block into an intermediate buffer
+    # (`vector_intermediate_buffer`, or a buffer provided by MPISchurComplements), which
+    # has several columns that collect different contributions to the result (where the
+    # blocks written to a single column do not have overlapping results, unless they come
+    # from the same process and therefore cannot conflict). The columns are summed to give
+    # the final result.
+    # To minimise memory bandwidth and computational time, we would like to minimise the
+    # number of columns in the intermediate buffer.
+    # When the number of processes is less than 2^d, where d is the number of dimensions,
+    # we use one column per process.
+    # When the number of processes is ≥2^d, we restrict the buffer to 2^d columns by
+    # choosing the output column for each block in such a way that the blocks in a single
+    # column never overlap. At any level of the solver, the grid is divided into blocks.
+    # Blocks that are adjacent in any dimension share a face/edge/corner/etc. and
+    # therefore have an overlap in 'C'. We group the blocks into 2x2x...
+    # squares/cubes/hypercubes. Use 3d language for simplicity in the rest of this note,
+    # but the same argument applies in any number of dimensions. A block in a certain
+    # position within a cube cannot overlap with the blocks in the same position in
+    # adjacent cubes, because they are fully separated by another block (cannot share even
+    # an edge or a corner). Therefore if we put the outputs from all blocks in one
+    # position in the cubes in one column, there are no overlaps (and so no conflicts
+    # between outputs from different processes). The number of positions in a cube is 2^3
+    # (or 2^d in d dimensions), so we need 2^d columns. We also need to keep track for
+    # each block of which position it has in its cube, which translates to the column its
+    # output should be written to in the intermediate buffer.
+    # To find the block's position within its cube, get the block index in un-flattened
+    # form. Transforming the index in each dimension to 0 for even values and 1 for odd
+    # values, the binary number formed by the string of 0s and 1s (ordered in the same way
+    # as the dimensions) is translated back to an integer to give the intermediate buffer
+    # column.
     function BlockCShared{Tf}(block_rowinds_full::Vector{Ti},
                               partial_row_range::UnitRange{Ti}, block_colinds::Vector{Ti},
+                              block_hypercube_position::Ti,
+                              output_buffer_ncopies::Ti,
                               vector_intermediate_buffer::AbstractMatrix{Tf},
-                              vector_range::UnitRange{Ti}, vector_init_range::Vector{Ti},
-                              matrix_init_range::Vector{Ti}, subgroup_i::Ti,
-                              block_allocate_shared_float::Fa,
+                              vector_range::UnitRange{Ti},
+                              buffer_column_per_subgroup::Bool,
+                              vector_init_range::Union{UnitRange{Ti},Nothing},
+                              matrix_init_range::Union{UnitRange{Ti},Nothing},
+                              subgroup_i::Ti, block_allocate_shared_float::Fa,
                               block_synchronize_shared::Fbs, block_comm_rank::Integer,
                               block_comm_size::Integer,
                               synchronize_shared::Fs) where {Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
@@ -447,88 +490,45 @@ struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function} <: MPISchurC
         if subgroup_i < 0
             vector_intermediate_buffer_local = zeros(Tf, 0)
         else
-            vector_intermediate_buffer_local = @view vector_intermediate_buffer[:,subgroup_i+1]
-            # When the block has no columns, `vector_init_range` will be empty but we
-            # still need to zero-initialize the buffer, so just initialize on rank-0,
-            # rather than using `vector_init_range` to initialize in parallel.
-            if block_comm_rank == 0
-                vector_intermediate_buffer_local .= 0.0
-            end
+            vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{Tf,Ti,typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+        return new{Tf,Ti,typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),typeof(vector_init_range),Fbs,Fs}(
                    block, block_rowinds, block_colinds, partial_block_colinds,
-                   partial_col_range, right_multiplication_buffer_block,
-                   block_rowinds_full, vector_buffer_block_in, vector_buffer_block_out,
+                   partial_col_range, block_hypercube_position, output_buffer_ncopies,
+                   right_multiplication_buffer_block, block_rowinds_full,
+                   vector_buffer_block_in, vector_buffer_block_out,
                    vector_intermediate_buffer_local, vector_intermediate_buffer,
-                   vector_range, vector_init_range, matrix_init_range,
-                   block_synchronize_shared, synchronize_shared)
+                   vector_range, buffer_column_per_subgroup, vector_init_range,
+                   matrix_init_range, block_synchronize_shared, synchronize_shared)
     end
 end
 
-function get_C_buffer_matrix_init_range(C_vector_init_range, schur_complement_buffer,
-                                        ind_type)
-    if isempty(C_vector_init_range)
-        return ind_type[], 0
-    end
-    schur_colptr = schur_complement_buffer.colptr
-    schur_rowval = schur_complement_buffer.rowval
-    first_row = first(C_vector_init_range)
-    nrow = length(C_vector_init_range)
-    C_matrix_init_range = Vector{ind_type}(undef, nrow^2)
-    count = 1
-    for col ∈ C_vector_init_range
-        first_i = schur_colptr[col]
-        last_i = schur_colptr[col+1] - 1
-        col_rv = @view schur_rowval[first_i:last_i]
-        flat_i = max(searchsortedlast(col_rv, first_row)-1, 1)
-        i = 1
-        while flat_i ≤ last_i && i ≤ nrow
-            schur_row = schur_rowval[flat_i]
-            C_row = C_vector_init_range[i]
-            if schur_row == C_row
-                C_matrix_init_range[count] = flat_i
-                count += 1
-                flat_i += 1
-                i += 1
-            elseif schur_row < C_row
-                flat_i += 1
-            else
-                i += 1
-            end
+function get_C_buffer_init_ranges(vector_n, schur_complement_buffer,
+                                  C_buffer_column_per_subgroup, C_buffer_ncopies,
+                                  subgroup_i, n_subgroups, subgroup_size, block_comm_rank)
+    matrix_n = length(schur_complement_buffer.nzval)
+
+    if C_buffer_column_per_subgroup
+        vector_points_per_proc = (vector_n + subgroup_size - 1) ÷ subgroup_size
+        C_vector_init_range = block_comm_rank*vector_points_per_proc+1:min((block_comm_rank+1)*vector_points_per_proc,vector_n)
+        matrix_points_per_proc = (matrix_n + subgroup_size - 1) ÷ subgroup_size
+        C_matrix_init_range = block_comm_rank*matrix_points_per_proc+1:min((block_comm_rank+1)*matrix_points_per_proc,matrix_n)
+        if 0 ≤ subgroup_i ≤ C_buffer_ncopies
+            C_buffer_column = subgroup_i + 1
+        else
+            C_buffer_column = nothing
         end
+    else
+        C_vector_init_range = nothing
+        C_matrix_init_range = nothing
+        C_buffer_column = nothing
     end
 
-    return C_matrix_init_range, count
+    return C_vector_init_range, C_matrix_init_range, C_buffer_column
 end
 
-function get_C_buffer_init_ranges(C_block_row_inds, schur_complement_buffer, ind_type,
-                                  timer, C_partial_row_range=nothing)
-    init_n = sum(length(ri) for ri ∈ C_block_row_inds; init=0)
-    C_vector_init_range = Vector{ind_type}(undef, init_n)
-    count = 1
-    for ri ∈ C_block_row_inds, i ∈ ri
-        C_vector_init_range[count] = i
-        count += 1
-    end
-    sort!(C_vector_init_range)
-    unique!(C_vector_init_range)
-
-    if C_partial_row_range !== nothing
-        C_vector_init_range = C_vector_init_range[C_partial_row_range]
-    end
-
-    # When initialising the matrix output buffer (used for the output of
-    # C*Ainv_dot_B), the entries modified by this process are those where both
-    # the row and column are in C_vector_init_range. Get the flattened indices
-    # of these entries.
-    C_matrix_init_range, count = get_C_buffer_matrix_init_range(C_vector_init_range,
-                                                                schur_complement_buffer,
-                                                                ind_type)
-
-    # Make a copy so that any extra memory allocated to the Vector is freed.
-    C_matrix_init_range = C_matrix_init_range[1:count-1]
-
-    return C_vector_init_range, C_matrix_init_range
+function get_C_hypercube_position(iblock)
+    return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock)) + 1
 end
 
 struct Dimension{Ti<:Integer}
@@ -878,6 +878,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     global_bottom_vector_size::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
+    iblock_list::Matrix{Ti}
     all_local_top_vector_a_block_indices::Vector{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
     all_a_block_sub_selection_indices::Vector{Ti}
@@ -920,6 +921,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          local_top_vector_indices=Ti[],
                          all_local_top_vector_a_block_indices=Ti[],
                          local_top_vector_a_block_indices=Vector{Ti}[],
+                         iblock_list=zeros(Ti, 2, 0),
                          all_a_block_sub_selection_indices=Ti[],
                          a_block_sub_selection_indices=Vector{Ti}[],
                          a_block_lu_selection_indices=Vector{Ti}[],
@@ -1031,6 +1033,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     end
     block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
     block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
+    iblock_list = Matrix{Ti}(undef, length(nblocks_list), length(this_proc_blocks))
     function get_block_points!(bi, b)
         iblock = zeros(Ti, length(dimensions))
         temp = b - 1
@@ -1038,6 +1041,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             temp, iblock[idim] = divrem(temp, nb)
         end
         iblock .+= 1
+        iblock_list[:,bi] .= iblock
         this_bii = Ti[]
         block_interior_indices[bi] = this_bii
         function get_block_interior_indices_from_dim!(this_dim, flat_i)
@@ -1387,6 +1391,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
     return LevelInfo(; has_periodic, block_sizes, global_size, global_bottom_vector_size,
                      top_vector_indices=global_top_vector_indices,
                      local_top_vector_indices=local_top_vector_indices,
+                     iblock_list=iblock_list,
                      all_local_top_vector_a_block_indices=all_a_block_indices,
                      local_top_vector_a_block_indices=a_block_indices,
                      all_a_block_sub_selection_indices=all_a_block_sub_selection_indices,
@@ -1593,7 +1598,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_indices = this_level_info.bottom_vector_indices
         level_global_size = this_level_info.global_bottom_vector_size
     end
-end
 
     # Create lowest level MPISchurComplement solver
     # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
@@ -1691,7 +1695,11 @@ end
             if block_comm_size == shared_comm_size
                 block_allocate_shared_float = allocate_shared_float
                 block_allocate_shared_int = allocate_shared_int
-                block_synchronize_shared = synchronize_shared
+                if synchronize_shared === nothing
+                    block_synchronize_shared = () -> MPI.Barrier(this_level_info.block_comm)
+                else
+                    block_synchronize_shared = synchronize_shared
+                end
             else
                 block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_info.block_comm)
                 block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_info.block_comm)
@@ -1699,6 +1707,7 @@ end
             end
 
             C_buffer = nothing
+            C_buffer_ncopies = nothing
             if use_sparse
                 schur_complement_buffer =
                     get_shared_sparse_matrix_csc_buffer(dimensions,
@@ -1728,9 +1737,18 @@ end
                                                            block_comm_rank, block_comm_size,
                                                            block_allocate_shared_float,
                                                            block_synchronize_shared)
+                        C_buffer_column_per_subgroup = this_level_info.n_subgroups < 2^length(dimensions)
+                        if C_buffer_column_per_subgroup
+                            C_buffer_ncopies = this_level_info.n_subgroups
+                        else
+                            C_buffer_ncopies = 2^length(dimensions)
+                        end
                         C_vector_intermediate_buffer =
-                            level_allocate_shared_float(this_level_info.global_bottom_vector_size,
-                                                        this_level_info.n_subgroups)
+                            level_allocate_shared_float(C_buffer_ncopies,
+                                                        this_level_info.global_bottom_vector_size)
+                        if this_level_comm_rank == 0
+                            C_vector_intermediate_buffer .= 0.0
+                        end
                         C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
                         C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc,this_level_info.global_bottom_vector_size)
                         C_block_row_inds_full = this_level_info.a_block_B_column_indices[1]
@@ -1746,17 +1764,33 @@ end
                            C_partial_row_range = block_comm_rank*C_rows_per_proc+1:min((block_comm_rank+1)*C_rows_per_proc,C_nrow)
                        end
 
-                        C_vector_init_range, C_matrix_init_range =
-                            get_C_buffer_init_ranges(C_block_row_inds_full,
-                                                     schur_complement_buffer, ind_type,
-                                                     timer, C_partial_row_range)
+                        C_vector_init_range, C_matrix_init_range, C_buffer_column =
+                            get_C_buffer_init_ranges(this_level_info.global_bottom_vector_size,
+                                                     schur_complement_buffer,
+                                                     C_buffer_column_per_subgroup,
+                                                     C_buffer_ncopies,
+                                                     this_level_info.subgroup_i,
+                                                     this_level_info.n_subgroups,
+                                                     this_level_info.subgroup_size,
+                                                     block_comm_rank)
+
+                        block_hypercube_position =
+                            get_C_hypercube_position(this_level_info.iblock_list[:,1])
+
+                        if !C_buffer_column_per_subgroup
+                            C_buffer_column = block_hypercube_position
+                        end
 
                         C_buffer =
                             BlockCShared{data_type}(C_block_row_inds_full,
                                                     C_partial_row_range,
                                                     this_level_info.a_block_sub_selection_indices[1],
+                                                    C_buffer_column,
+                                                    C_buffer_ncopies,
                                                     C_vector_intermediate_buffer,
-                                                    C_vector_range, C_vector_init_range,
+                                                    C_vector_range,
+                                                    C_buffer_column_per_subgroup,
+                                                    C_vector_init_range,
                                                     C_matrix_init_range,
                                                     this_level_info.subgroup_i,
                                                     block_allocate_shared_float,
@@ -1772,23 +1806,46 @@ end
                     Ainv_dot_B_buffer =
                         BlockAinvDotBSerial{data_type}(this_level_info.a_block_sub_selection_indices,
                                                        this_level_info.a_block_B_column_indices)
+                    C_buffer_column_per_subgroup = this_level_info.n_subgroups < 2^length(dimensions)
+                    if C_buffer_column_per_subgroup
+                        C_buffer_ncopies = this_level_info.n_subgroups
+                    else
+                        C_buffer_ncopies = 2^length(dimensions)
+                    end
                     C_vector_intermediate_buffer =
-                        level_allocate_shared_float(this_level_info.global_bottom_vector_size,
-                                                    this_level_info.n_subgroups)
+                        level_allocate_shared_float(C_buffer_ncopies,
+                                                    this_level_info.global_bottom_vector_size)
+                    if this_level_comm_rank == 0
+                        C_vector_intermediate_buffer .= 0.0
+                    end
                     C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
                     C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc, this_level_info.global_bottom_vector_size)
                     C_block_row_inds = this_level_info.a_block_B_column_indices
 
-                    C_vector_init_range, C_matrix_init_range =
-                        get_C_buffer_init_ranges(C_block_row_inds,
-                                                 schur_complement_buffer, ind_type, timer)
+                    C_vector_init_range, C_matrix_init_range, C_buffer_column =
+                        get_C_buffer_init_ranges(this_level_info.global_bottom_vector_size,
+                                                 schur_complement_buffer,
+                                                 C_buffer_column_per_subgroup,
+                                                 C_buffer_ncopies,
+                                                 this_level_info.subgroup_i,
+                                                 this_level_info.n_subgroups,
+                                                 this_level_info.subgroup_size,
+                                                 block_comm_rank)
+
+                    C_block_hypercube_positions =
+                        [get_C_hypercube_position(iblock)
+                         for iblock ∈ eachcol(this_level_info.iblock_list)]
 
                     C_buffer =
                         BlockCSerial{data_type}(C_block_row_inds,
                                                 this_level_info.a_block_sub_selection_indices,
-                                                C_vector_intermediate_buffer, C_vector_range,
-                                                C_vector_init_range, C_matrix_init_range,
+                                                C_block_hypercube_positions,
+                                                C_buffer_ncopies,
+                                                C_vector_intermediate_buffer,
+                                                C_vector_range, C_vector_init_range,
+                                                C_matrix_init_range, C_buffer_column,
                                                 this_level_info.subgroup_i,
+                                                block_synchronize_shared,
                                                 level_synchronize_shared)
                 end
             else
@@ -2640,7 +2697,7 @@ end
 
 # Note that combining all the contributions to C_dot_Ainv_dot_B from different processes
 # is taken care of by MPISchurComplements.
-function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockCSerial,
+function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCSerial,
                            Ainv_dot_B::BlockAinvDotBSerial)
     C_blocks = C.blocks
     if length(C_blocks) == 0
@@ -2651,85 +2708,165 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockCSerial,
     mul_blocks = C.right_multiplication_buffer_blocks
     Ainv_dot_B_blocks = Ainv_dot_B.blocks
     block_output_inds = C.block_rowinds # This is identical to Ainv_dot_B.block_colinds
-    matrix_init_range = C.matrix_init_range
+    buffer_position = C.buffer_position
+
     colptr = C_dot_Ainv_dot_B.colptr
     rowval = C_dot_Ainv_dot_B.rowval
-    nzval = C_dot_Ainv_dot_B.nzval
+    C_dot_Ainv_dot_B_storage = C_dot_Ainv_dot_B.storage
 
-    # Initialise buffer to zero. All entries not in matrix_init_range are never modified,
-    # and were initialised to zero.
-    for i ∈ matrix_init_range
-        nzval[i] = 0.0
-    end
+    if buffer_position !== nothing
+        block_synchronize_shared = C.block_synchronize_shared
 
-    for (mb, Cb, AiBb, output_inds) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                          block_output_inds)
-        mul!(mb, Cb, AiBb, -1.0, 0.0)
+        nzval = @view C_dot_Ainv_dot_B_storage[buffer_position,:]
 
-        # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
-        first_row = first(output_inds)
-        nrows = length(output_inds)
-        for (j, col) ∈ enumerate(output_inds)
-            first_i = colptr[col]
-            last_i = colptr[col+1] - 1
-            col_rv = @view rowval[first_i:last_i]
-            flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
-            i = 1
-            while flat_i ≤ last_i && i ≤ nrows
-                if rowval[flat_i] == output_inds[i]
-                    nzval[flat_i] += mb[i,j]
-                    flat_i += 1
-                    i += 1
-                else
-                    # rowval[flat_i] must be less than output_inds[i]
-                    flat_i += 1
+        # Initialise buffer to zero.
+        matrix_init_range = C.matrix_init_range
+        for i ∈ matrix_init_range
+            nzval[i] = 0.0
+        end
+
+        block_synchronize_shared()
+
+        for (mb, Cb, AiBb, output_inds) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
+                                              block_output_inds)
+            mul!(mb, Cb, AiBb, -1.0, 0.0)
+
+            # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
+            first_row = first(output_inds)
+            nrows = length(output_inds)
+            for (j, col) ∈ enumerate(output_inds)
+                first_i = colptr[col]
+                last_i = colptr[col+1] - 1
+                col_rv = @view rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+                i = 1
+                while flat_i ≤ last_i && i ≤ nrows
+                    if rowval[flat_i] == output_inds[i]
+                        nzval[flat_i] += mb[i,j]
+                        flat_i += 1
+                        i += 1
+                    else
+                        # rowval[flat_i] must be less than output_inds[i]
+                        flat_i += 1
+                    end
+                end
+            end
+        end
+    else
+        # When choosing the column by block_hypercube_position, there are no overlaps, so
+        # we can directly set entries, instead of adding to them, and so do not need to
+        # zero-initialise the output buffer.
+        block_hypercube_positions = C.block_hypercube_positions
+        for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                   Ainv_dot_B_blocks, block_output_inds,
+                                                   block_hypercube_positions)
+            nzval = @view C_dot_Ainv_dot_B_storage[bhp,:]
+
+            mul!(mb, Cb, AiBb, -1.0, 0.0)
+
+            # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
+            first_row = first(output_inds)
+            nrows = length(output_inds)
+            for (j, col) ∈ enumerate(output_inds)
+                first_i = colptr[col]
+                last_i = colptr[col+1] - 1
+                col_rv = @view rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+                i = 1
+                while flat_i ≤ last_i && i ≤ nrows
+                    if rowval[flat_i] == output_inds[i]
+                        nzval[flat_i] = mb[i,j]
+                        flat_i += 1
+                        i += 1
+                    else
+                        # rowval[flat_i] must be less than output_inds[i]
+                        flat_i += 1
+                    end
                 end
             end
         end
     end
     return nothing
 end
-function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::FixedSparseCSC, C::BlockCShared,
+function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
                            Ainv_dot_B::BlockAinvDotBShared)
-    block_output_inds = C.block_rowinds
-    if isempty(block_output_inds)
-        # Nothing to do.
-        return nothing
-    end
     C_block = C.block
     mul_block = C.right_multiplication_buffer_block
+    block_output_inds = C.block_rowinds
     block_output_colinds = C.block_right_multiplication_output_colinds
     Ainv_dot_B_block = Ainv_dot_B.block
     matrix_init_range = C.matrix_init_range
-    colptr = C_dot_Ainv_dot_B.colptr
-    rowval = C_dot_Ainv_dot_B.rowval
-    nzval = C_dot_Ainv_dot_B.nzval
 
-    # Initialise buffer to zero. All entries not in matrix_init_range are never modified,
-    # and were initialised to zero.
-    for i ∈ matrix_init_range
-        nzval[i] = 0.0
+    if isempty(block_output_inds) || isempty(block_output_colinds)
+        return nothing
     end
 
-    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+    colptr = C_dot_Ainv_dot_B.colptr
+    rowval = C_dot_Ainv_dot_B.rowval
+    nzval = @view C_dot_Ainv_dot_B.storage[C.block_hypercube_position,:]
 
-    # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
-    first_row = first(block_output_inds)
-    nrows = length(block_output_inds)
-    for (j, col) ∈ enumerate(block_output_colinds)
-        first_i = colptr[col]
-        last_i = colptr[col+1] - 1
-        col_rv = @view rowval[first_i:last_i]
-        flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
-        i = 1
-        while flat_i ≤ last_i && i ≤ nrows
-            if rowval[flat_i] == block_output_inds[i]
-                nzval[flat_i] += mul_block[i,j]
-                flat_i += 1
-                i += 1
-            else
-                # rowval[flat_i] must be less than block_output_inds[i].
-                flat_i += 1
+    if matrix_init_range !== nothing
+        # C.block_hypercube_position is actually the subgroup index, as there are fewer
+        # subgroups than 2^d where d is the number of dimensions, and each subgroup writes
+        # to a single column of the output buffer.
+
+        block_synchronize_shared = C.block_synchronize_shared
+
+        # Initialise buffer to zero.
+        for i ∈ matrix_init_range
+            nzval[i] = 0.0
+        end
+
+        block_synchronize_shared()
+
+        if !isempty(block_output_inds)
+            mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+
+            # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
+            first_row = first(block_output_inds)
+            nrows = length(block_output_inds)
+            for (j, col) ∈ enumerate(block_output_colinds)
+                first_i = colptr[col]
+                last_i = colptr[col+1] - 1
+                col_rv = @view rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+                i = 1
+                while flat_i ≤ last_i && i ≤ nrows
+                    if rowval[flat_i] == block_output_inds[i]
+                        nzval[flat_i] += mul_block[i,j]
+                        flat_i += 1
+                        i += 1
+                    else
+                        # rowval[flat_i] must be less than block_output_inds[i].
+                        flat_i += 1
+                    end
+                end
+            end
+        end
+    elseif !isempty(block_output_inds)
+        # Output buffer columns are divided by 'hypercube position' so there are no
+        # overlaps, and we can directly set entries, instead of adding to them, and so do
+        # not need to zero-initialise the output buffer.
+        mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+
+        # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
+        first_row = first(block_output_inds)
+        nrows = length(block_output_inds)
+        for (j, col) ∈ enumerate(block_output_colinds)
+            first_i = colptr[col]
+            last_i = colptr[col+1] - 1
+            col_rv = @view rowval[first_i:last_i]
+            flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+            i = 1
+            while flat_i ≤ last_i && i ≤ nrows
+                if rowval[flat_i] == block_output_inds[i]
+                    nzval[flat_i] = mul_block[i,j]
+                    flat_i += 1
+                    i += 1
+                else
+                    # rowval[flat_i] must be less than block_output_inds[i].
+                    flat_i += 1
+                end
             end
         end
     end
@@ -2799,27 +2936,51 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
     blocks = C.blocks
     vector_range = C.vector_range
     vector_intermediate_buffer = C.vector_intermediate_buffer
+    buffer_position = C.buffer_position
     synchronize_shared = C.synchronize_shared
 
-    if length(blocks) > 0
-        vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
+    if buffer_position !== nothing
+        block_synchronize_shared = C.block_synchronize_shared
         vector_init_range = C.vector_init_range
+        vector_intermediate_buffer_local = @view vector_intermediate_buffer[buffer_position,:]
 
-        # Initialise buffer to zero. All entries not in vector_init_range are never modified,
-        # and were initialised to zero in the BlockCSerial constructor.
+        # Initialise buffer to zero.
         for i ∈ vector_init_range
             vector_intermediate_buffer_local[i] = 0.0
         end
 
-        for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
-                zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out, C.block_rowinds,
-                    C.block_colinds, blocks)
-            for (i1, i2) ∈ enumerate(colinds)
-                vec_buffer_in[i1] = Ainv_dot_u[i2]
+        block_synchronize_shared()
+
+        if length(blocks) > 0
+            for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
+                    zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out, C.block_rowinds,
+                        C.block_colinds, blocks)
+                for (i1, i2) ∈ enumerate(colinds)
+                    vec_buffer_in[i1] = Ainv_dot_u[i2]
+                end
+                mul!(vec_buffer_out, block, vec_buffer_in)
+                for (i2, i1) ∈ enumerate(rowinds)
+                    vector_intermediate_buffer_local[i1] -= vec_buffer_out[i2]
+                end
             end
-            mul!(vec_buffer_out, block, vec_buffer_in)
-            for (i2, i1) ∈ enumerate(rowinds)
-                vector_intermediate_buffer_local[i1] -= vec_buffer_out[i2]
+        end
+    else
+        # When choosing the column by block_hypercube_position, there are no overlaps, so
+        # we can directly set entries, instead of adding to them, and so do not need to
+        # zero-initialise the intermediate buffer.
+        block_hypercube_positions = C.block_hypercube_positions
+        if length(blocks) > 0
+            for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block, bhp) ∈
+                    zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out, C.block_rowinds,
+                        C.block_colinds, blocks, block_hypercube_positions)
+                vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
+                for (i1, i2) ∈ enumerate(colinds)
+                    vec_buffer_in[i1] = Ainv_dot_u[i2]
+                end
+                mul!(vec_buffer_out, block, vec_buffer_in)
+                for (i2, i1) ∈ enumerate(rowinds)
+                    vector_intermediate_buffer_local[i1] = -vec_buffer_out[i2]
+                end
             end
         end
     end
@@ -2828,7 +2989,7 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
 
     # Sum contributions from all processes into the output.
     if !isempty(vector_range)
-        @views sum!(C_dot_Ainv_dot_u[vector_range], vector_intermediate_buffer[vector_range,:])
+        @views sum!(C_dot_Ainv_dot_u[vector_range]', vector_intermediate_buffer[:,vector_range])
     end
 
     return nothing
@@ -2850,28 +3011,47 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
     block_synchronize_shared = C.block_synchronize_shared
     synchronize_shared = C.synchronize_shared
 
-    # Initialise buffer to zero. All entries not in vector_init_range are never modified,
-    # and were initialised to zero in the BlockCShared constructor.
-    for i ∈ vector_init_range
-        vector_intermediate_buffer_local[i] = 0.0
-    end
+    if vector_init_range !== nothing
+        # C.block_hypercube_position is actually the subgroup index, as there are fewer
+        # subgroups than 2^d where d is the number of dimensions, and each subgroup writes
+        # to a single column of the intermediate buffer.
 
-    for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
-        vec_buffer_block_in[i1] = Ainv_dot_u[i2]
-    end
+        # Initialise buffer to zero.
+        for i ∈ vector_init_range
+            vector_intermediate_buffer_local[i] = 0.0
+        end
 
-    block_synchronize_shared()
+        for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
+            vec_buffer_block_in[i1] = Ainv_dot_u[i2]
+        end
 
-    mul!(vec_buffer_block_out, block, vec_buffer_block_in)
-    for (i2, i1) ∈ enumerate(block_rowinds)
-        vector_intermediate_buffer_local[i1] -= vec_buffer_block_out[i2]
+        block_synchronize_shared()
+
+        mul!(vec_buffer_block_out, block, vec_buffer_block_in)
+        for (i2, i1) ∈ enumerate(block_rowinds)
+            vector_intermediate_buffer_local[i1] -= vec_buffer_block_out[i2]
+        end
+    else
+        # Output buffer columns are divided by 'hypercube position' so there are no
+        # overlaps, and we can directly set entries, instead of adding to them, and so do
+        # not need to zero-initialise the intermediate buffer.
+        for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
+            vec_buffer_block_in[i1] = Ainv_dot_u[i2]
+        end
+
+        block_synchronize_shared()
+
+        mul!(vec_buffer_block_out, block, vec_buffer_block_in)
+        for (i2, i1) ∈ enumerate(block_rowinds)
+            vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
+        end
     end
 
     synchronize_shared()
 
     # Sum contributions from all processes into the output.
     if !isempty(vector_range)
-        @views sum!(C_dot_Ainv_dot_u[vector_range], vector_intermediate_buffer[vector_range,:])
+        @views sum!(C_dot_Ainv_dot_u[vector_range]', vector_intermediate_buffer[:,vector_range])
     end
 
     return nothing
