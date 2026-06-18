@@ -885,9 +885,13 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         B_column_boundary_indices = boundary_indices
     end
     for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
-        b_count = 1
+        nbbi = length(this_block_boundary_indices)
+        if nbbi == 0
+            continue
+        end
+        b_count = max(searchsortedlast(B_column_boundary_indices, first(this_block_boundary_indices)) - 1, 1)
         bb_count = 1
-        while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ length(this_block_boundary_indices)
+        while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ nbbi
             i = B_column_boundary_indices[b_count]
             bi = this_block_boundary_indices[bb_count]
             if i == bi
@@ -989,9 +993,12 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
 
     a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
     for (abi, lti) ∈ zip(a_block_indices, local_top_vector_a_block_indices)
-        count = 1
-        a_count = 1
         na = length(lti)
+        if na == 0
+            continue
+        end
+        count = max(searchsortedlast(level_indices, first(lti)) - 1, 1)
+        a_count = 1
         while a_count ≤ na && count ≤ n
             if a_count ≤ na && lti[a_count] == level_indices[count]
                 push!(abi, count)
