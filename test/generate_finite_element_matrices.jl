@@ -17,62 +17,132 @@ function construct_sparse_finite_element_matrix(dimensions::Tuple, rng,
                                                 sparse_stencils::Bool,
                                                 handle_periodicity::Bool=true)
 
+    nd = length(dimensions)
     data = Float64[]
     global_inds = Tuple{Int64,Int64}[]
     n_tuple = map(d->d.n, dimensions)
     ngrid_tuple = map(d->d.ngrid, dimensions)
     nelement_tuple = map(d->d.nelement, dimensions)
     element_indices = CartesianIndices(ngrid_tuple)
+
+    last_dim_dense_boundaries = dimensions[end].dense_boundaries
+    dense_boundary_nelement_tuple_first = ntuple((d) -> d == nd ? (1:1) : nelement_tuple[d], nd)
+    dense_boundary_ngrid_tuple_first = ntuple((d) -> d == nd ? (1:1) : ngrid_tuple[d], nd)
+    dense_boundary_nelement_tuple_last = ntuple((d) -> d == nd ? (dimensions[end].nelement:dimensions[end].nelement) : nelement_tuple[d], nd)
+    dense_boundary_ngrid_tuple_last = ntuple((d) -> d == nd ? (dimensions[end].ngrid:dimensions[end].ngrid) : ngrid_tuple[d], nd)
+
     counter = 0
+    function add_point!(ielement, igrid, jelement, jgrid)
+        global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
+        global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(jelement), jgrid)
+        i = (global_i, global_j)
+        push!(global_inds, i)
+        if igrid == Tuple(jgrid)
+            # Add 1 to diagonal to ensure matrix is invertible.
+            push!(data, 1.0 + rand(rng))
+            counter += 1
+        else
+            push!(data, rand(rng))
+            counter += 1
+        end
+        return nothing
+    end
     if sparse_stencils
         nd = length(dimensions)
         for ielement ∈ CartesianIndices(nelement_tuple)
             istart = counter
-            for igrid ∈ element_indices, d ∈ 1:nd, this_jgrid ∈ 1:ngrid_tuple[d]
-                if d > 1 && this_jgrid == igrid[d]
-                    # This repeats the diagonal entry that was already included.
-                    continue
-                end
-                jgrid = [this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd]
-                if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
-                        && any(jg == 1 && je > 1 for (jg, je) ∈ zip(jgrid, Tuple(ielement))))
-                    # Avoid repeated global index pairs.
-                    continue
-                end
-                global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
-                global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), jgrid)
-                i = (global_i, global_j)
-                # Search global_inds to avoid appending repeats.
-                push!(global_inds, i)
-                if [Tuple(igrid)...] == jgrid
-                    # Add 1 to diagonal to ensure matrix is invertible.
-                    push!(data, 1.0 + rand(rng))
-                    counter += 1
+            for igrid ∈ element_indices
+                if last_dim_dense_boundaries && ielement[nd] == 1 && igrid[nd] == 1
+                    # Fill all the boundary entries that are allowed to be non-zero when
+                    # the last dimension has dense_boundaries=true.
+                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_first), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_first)
+                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
+                    end
+                    skip_last_dim_first = true
                 else
-                    push!(data, rand(rng))
-                    counter += 1
+                    skip_last_dim_first = false
+                end
+                if last_dim_dense_boundaries && ielement[nd] == nelement_tuple[nd] && igrid[nd] == ngrid_tuple[nd]
+                    # Fill all the boundary entries that are allowed to be non-zero when
+                    # the last dimension has dense_boundaries=true.
+                    skip_last_dim_last = true
+                else
+                    skip_last_dim_last = false
+                end
+                for d ∈ 1:nd, this_jgrid ∈ 1:ngrid_tuple[d]
+                    if d > 1 && this_jgrid == igrid[d]
+                        # This repeats the diagonal entry that was already included.
+                        continue
+                    end
+                    if skip_last_dim_first && d == nd && this_jgrid == 1
+                        # Already included these points in the 'dense boundaries' branch.
+                        continue
+                    end
+                    if skip_last_dim_last && d == nd && this_jgrid == ngrid_tuple[end]
+                        # Will include these points in the following 'dense boundaries' branch.
+                        continue
+                    end
+                    jgrid = [this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd]
+                    if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
+                            && any(jg == 1 && je > 1 for (jg, je) ∈ zip(jgrid, Tuple(ielement))))
+                        # Avoid repeated global index pairs.
+                        continue
+                    end
+                    add_point!(ielement, igrid, ielement, jgrid)
+                end
+                if skip_last_dim_last
+                    # Fill all the boundary entries that are allowed to be non-zero when
+                    # the last dimension has dense_boundaries=true.
+                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_last), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_last)
+                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
+                    end
                 end
             end
             iend = counter
         end
     else
         for ielement ∈ CartesianIndices(nelement_tuple)
-            for igrid ∈ element_indices, jgrid ∈ element_indices
-                if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
-                        && any(jg == 1 && je > 1 for (jg, je) ∈ zip(Tuple(jgrid), Tuple(ielement))))
-                    # Avoid repeated global index pairs.
-                    continue
-                end
-                global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
-                global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(jgrid))
-                i = (global_i, global_j)
-                # Search global_inds to avoid appending repeats.
-                push!(global_inds, i)
-                if igrid == jgrid
-                    # Add 1 to diagonal to ensure matrix is invertible.
-                    push!(data, 1.0 + rand(rng))
+            for igrid ∈ element_indices
+                if last_dim_dense_boundaries && ielement[nd] == 1 && igrid[nd] == 1
+                    # Fill all the boundary entries that are allowed to be non-zero when
+                    # the last dimension has dense_boundaries=true.
+                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_first), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_first)
+                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
+                    end
+                    skip_last_dim_first = true
                 else
-                    push!(data, rand(rng))
+                    skip_last_dim_first = false
+                end
+                if last_dim_dense_boundaries && ielement[nd] == nelement_tuple[nd] && igrid[nd] == ngrid_tuple[nd]
+                    # Fill all the boundary entries that are allowed to be non-zero when
+                    # the last dimension has dense_boundaries=true.
+                    skip_last_dim_last = true
+                else
+                    skip_last_dim_last = false
+                end
+                for jgrid ∈ element_indices
+                    if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
+                            && any(jg == 1 && je > 1 for (jg, je) ∈ zip(Tuple(jgrid), Tuple(ielement))))
+                        # Avoid repeated global index pairs.
+                        continue
+                    end
+                    global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
+                    global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(jgrid))
+                    i = (global_i, global_j)
+                    push!(global_inds, i)
+                    if igrid == jgrid
+                        # Add 1 to diagonal to ensure matrix is invertible.
+                        push!(data, 1.0 + rand(rng))
+                    else
+                        push!(data, rand(rng))
+                    end
+                end
+                if skip_last_dim_last
+                    # Fill all the boundary entries that are allowed to be non-zero when
+                    # the last dimension has dense_boundaries=true.
+                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_last), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_last)
+                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
+                    end
                 end
             end
         end
