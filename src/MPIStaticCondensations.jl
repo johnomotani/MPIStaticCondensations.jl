@@ -540,12 +540,14 @@ struct Dimension{Ti<:Integer}
     irank::Ti
     global_inds::Vector{Ti}
     periodic::Bool
+    dense_boundaries::Bool
     #has_lower_boundary::Bool
     #has_upper_boundary::Bool
     remove_boundaries::Bool
 
     function Dimension(; nelement::Ti, ngrid::Ti, nrank::Ti, irank::Ti, periodic::Bool,
-                       remove_boundaries::Bool) where Ti <: Integer
+                       dense_boundaries::Bool,
+                       remove_boundaries::Union{Bool,Nothing}) where Ti <: Integer
 
         if nelement % nrank != 0
             error("`nrank=$nrank` does not divide nelement=$nelement")
@@ -581,6 +583,10 @@ struct Dimension{Ti<:Integer}
         first_global_ind = irank * nelement_local * (ngrid - 1) + 1
         last_global_ind = (irank + 1) * nelement_local * (ngrid - 1) + 1
 
+        if remove_boundaries === nothing
+            remove_boundaries = periodic || dense_boundaries
+        end
+
         #if !has_lower_boundary
         #    if nelement > 0
         #        n -= 1
@@ -610,13 +616,14 @@ struct Dimension{Ti<:Integer}
         end
 
         return new{Ti}(n, n_local, nelement, ngrid, nrank, irank, global_inds, periodic,
-                       remove_boundaries)
+                       dense_boundaries, remove_boundaries)
     end
 end
 
 """
     create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
-                     irank::Integer, periodic::Bool, remove_boundaries::Bool=false)
+                     irank::Integer, periodic::Bool, dense_boundaries::Bool=false,
+                     remove_boundaries::Bool=nothing)
 
 Create a `Dimension` object for input to the `dimensions` argument of
 `mpi_static_condensation()`.
@@ -631,15 +638,27 @@ point on the boundary between the blocks is duplicated on both blocks.
 The number of shared-memory blocks that this dimension is divided into is given by
 `nrank`, and the rank of the block that this process belongs to is `irank`.
 
+`periodic` indicates whether the dimension is (`true`) or is not (`false`) periodic.
+
+`dense_boundaries=true` can be passed to indicate that at a boundary of this dimension
+each point can be coupled to every other point in the dimensions to the left of this one
+in the list of dimensions. For example, if there are both velocity and spatial dimensions
+\${v_\\parallel,v_\\perp,z,r}\$ and \$z\$ has `dense_boundaries=true`, then at the
+\$z\$-boundaries the matrix may couple all points in \$v_\\parallel\$ and \$v_\\perp\$.
+
 `remove_boundaries=true` can be passed if the grid at the boundary in this dimension does
 not fit in to the sparsity pattern of the rest of the grid. In this case, the boundary
 points can be included in the 'bottom vector' part of the Schur complement split on the
 top level of the static-condensation solve, in order to ensure that the 'top vector' part
-can be split by removing any element boundary.
+can be split by removing any element boundary. `remove_boundaries` is set by default to
+`true` if `periodic=true` or `dense_boundaries=true`, so it should not usually be
+necessary to pass `remove_boundaries` explicitly.
 """
 function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
-                          irank::Integer, periodic::Bool, remove_boundaries::Bool=false)
-    return Dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
+                          irank::Integer, periodic::Bool, dense_boundaries::Bool=false,
+                          remove_boundaries::Union{Bool,Nothing}=nothing)
+    return Dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries,
+                     remove_boundaries)
 end
 
 function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{<:Integer})
@@ -746,6 +765,34 @@ function get_dim_indices!(dimensions, block_sizes, flat_i)
     end
     return block_inds, inner_inds
 end
+
+function add_all_row_inds!(rv, idim, dimensions, row_indices, rowind, count, row_count)
+    if idim == 0
+        # rowind is constructed as a 0-based index for convenience. Convert to
+        # 1-based before adding to `rv`.
+        rowind += 1
+        # Only add row indices that are contained in row_indices. For each column,
+        # we iterate through the rows in order so we use row_count to avoid
+        # searching row_indices here.
+        while row_count[] ≤ length(row_indices) && rowind > row_indices[row_count[]]
+            row_count[] += 1
+        end
+        if row_count[] ≤ length(row_indices) && rowind == row_indices[row_count[]]
+            push!(rv, row_count[])
+            count[] += 1
+            row_count[] += 1
+        end
+        return nothing
+    end
+    d = dimensions[idim]
+    rowind *= d.n_local
+    for i ∈ 1:d.n_local
+        add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + i - 1, count,
+                          row_count)
+    end
+    return nothing
+end
+
 function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indices,
                        block_inds, inner_inds, rowind, count, row_count)
     if idim == 0
@@ -766,10 +813,13 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
         return nothing
     end
     d = dimensions[idim]
+    dn = d.n_local
     block_npoints = block_sizes[idim] * (d.ngrid - 1)
     iblock = block_inds[idim]
     iinner = inner_inds[idim]
-    rowind *= d.n_local
+    rowind *= dn
+    is_first_point = (iinner == 1 && iblock == 1)
+    is_last_point = (((iblock - 1) * block_npoints + iinner) == dn)
     if iinner == 1 && iblock > 1
         # Is a block boundary, so include points from previous block.
         row_offset = (iblock - 2) * block_npoints
@@ -780,28 +830,64 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
         end
     end
     row_offset = (iblock - 1) * block_npoints
-    if iblock > nblock_list[idim]
+    if d.dense_boundaries && is_first_point
+        # This is the first or last point in a dimension that should have 'dense
+        # boundaries'.
+        block_start = 2
+        add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + row_offset,
+                          count, row_count)
+    else
+        block_start = 1
+    end
+    if d.dense_boundaries && is_last_point
+        row_end = dn - 1
+    else
+        row_end = dn
+    end
+    if iblock > nblock_list[idim] && d.dense_boundaries
+        # Have added all points already.
+    elseif iblock > nblock_list[idim]
         # Creating entries for the last grid point, this is 'really'
         # iel=nelement_local-1, col_igr=ngrid, so only need to add the row_igr=1
         # point.
         add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
                       block_inds, inner_inds, rowind + row_offset, count, row_count)
     else
-        for row_inner ∈ 1:block_npoints+1
+        for row_inner ∈ block_start:block_npoints+1
+            if row_offset + row_inner > row_end
+                # Do not want to advance past the end of the dimension. The last block in
+                # any dimension may not be full-sized.
+                break
+            end
             add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
                           block_inds, inner_inds, rowind + row_offset + row_inner - 1,
                           count, row_count)
         end
     end
+    if d.dense_boundaries && is_last_point
+        add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + dn - 1,
+                          count, row_count)
+    end
     return nothing
 end
 function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
-                                             block_sizes::Vector{<:Integer},
-                                             row_indices::Vector{<:Integer},
-                                             column_indices::Vector{<:Integer},
                                              shared_comm, allocate_shared_float::F1,
-                                             allocate_shared_int::F2) where {F1, F2}
+                                             allocate_shared_int::F2,
+                                             block_sizes::Union{Vector{<:Integer},Nothing}=nothing,
+                                             row_indices::Union{Vector{<:Integer},Nothing}=nothing,
+                                             column_indices::Union{Vector{<:Integer},Nothing}=nothing;
+                                             ind_type::Type=Int64) where {F1, F2}
     n_local_list = [d.n_local for d ∈ dimensions]
+    n_total = prod(n_local_list; init=1)
+    if block_sizes === nothing
+        block_sizes = ones(ind_type, length(dimensions))
+    end
+    if row_indices === nothing
+        row_indices = 1:n_total
+    end
+    if column_indices === nothing
+        column_indices = 1:n_total
+    end
     nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
     nblock_list = [(nel + bs - 1) ÷ bs for (nel, bs) ∈ zip(nelement_local_list, block_sizes)]
     m = length(row_indices)
@@ -810,6 +896,14 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
         # FixedSparseCSC constructor errors when one of the matrix sizes is zero, and
         # there are no entries anyway so do not need shared-memory allocation.
         return spzeros(m, n)
+    end
+
+    for (idim, d) ∈ enumerate(dimensions)
+        if d.dense_boundaries && any(x.nrank > 1 for x ∈ dimensions[1:idim-1])
+            error("Dimensions to the left of a dimension with dense_boundaries=true "
+                  * "(dimension $idim) cannot be distributed across multiple MPI "
+                  * "shared-memory blocks")
+        end
     end
 
     shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -1558,6 +1652,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
                                              nrank=d.nrank, irank=d.irank, periodic=false,
+                                             dense_boundaries=d.dense_boundaries,
                                              remove_boundaries=(d.periodic || d.remove_boundaries))
                                    for d ∈ dimensions]
 
@@ -1711,12 +1806,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             if use_sparse
                 schur_complement_buffer =
                     get_shared_sparse_matrix_csc_buffer(dimensions,
-                                                        this_level_info.block_sizes,
-                                                        this_level_info.bottom_vector_indices,
-                                                        this_level_info.bottom_vector_indices,
                                                         this_level_shared_comm,
                                                         level_allocate_shared_float,
-                                                        level_allocate_shared_int)
+                                                        level_allocate_shared_int,
+                                                        this_level_info.block_sizes,
+                                                        this_level_info.bottom_vector_indices,
+                                                        this_level_info.bottom_vector_indices)
                 if use_shared_blocks
                     if this_level_info.block_comm == MPI.COMM_NULL
                         this_A_block_solver = MPIStaticCondensationNull{data_type}()

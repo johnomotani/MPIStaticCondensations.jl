@@ -81,7 +81,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
                                      comm_size, n_shared, tol, this_seed;
                                      all_use_sparse=true,
                                      all_sparse_stencils=true, all_periodic=true,
-                                     all_remove_boundaries=true, both_remove_procs=true)
+                                     all_dense_boundaries=true, both_remove_procs=true)
     if length(nelement_list) != length(ngrid_list)
         error("nelement_list and ngrid_list must have the same length")
     end
@@ -113,20 +113,20 @@ function test_dimension_combinations(nelement_list, ngrid_list, max_nproc, rank,
             println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, use_sparse=$use_sparse, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks")
         end
 
-        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list" for
+        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
                 periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
-                remove_boundaries_list ∈ (all_remove_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),))
+                dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),))
             if rank == 0
-                println("  - n_shared=$n_shared, ($use_sparse, $sparse_stencils), this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, remove_boundaries_list=$remove_boundaries_list")
+                println("  - n_shared=$n_shared, ($use_sparse, $sparse_stencils), this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list")
             end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
-            dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
-                          for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
-                          ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, remove_boundaries_list)]
+            dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries)
+                          for (nelement, ngrid, irank, nrank, periodic, dense_boundaries)
+                          ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list)]
 
             test_matrix(dimensions, n_shared, this_seed, use_sparse, sparse_stencils, reduce_proc_count_with_blocks, tol)
             this_seed += 1
@@ -183,9 +183,9 @@ function test_finite_element_matrices()
                 test_dimension_combinations([1, 1, 1], [3, 3, 3], 1, rank, comm_size, n_shared, tol, 3000; all_use_sparse=false, all_sparse_stencils=false, both_remove_procs=false)
                 test_dimension_combinations([2, 2, 2], [3, 4, 5], 8, rank, comm_size, n_shared, tol, 3001; all_use_sparse=false, all_sparse_stencils=false, both_remove_procs=false)
                 test_dimension_combinations([2, 3, 4], [3, 4, 5], 24, rank, comm_size, n_shared, tol, 3002; all_use_sparse=false, all_sparse_stencils=false, both_remove_procs=false)
-                test_dimension_combinations([8, 8, 8], [3, 4, 5], 512, rank, comm_size, n_shared, tol, 3003; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false, both_remove_procs=false)
+                test_dimension_combinations([8, 8, 8], [3, 4, 5], 512, rank, comm_size, n_shared, tol, 3003; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
                 if comm_size ≥ 16
-                    test_dimension_combinations([9, 9, 32], [3, 3, 3], 2592, rank, comm_size, n_shared, tol, 3004; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_remove_boundaries=false, both_remove_procs=false)
+                    test_dimension_combinations([9, 9, 32], [3, 3, 3], 2592, rank, comm_size, n_shared, tol, 3004; all_use_sparse=false, all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
                 end
             end
         end
