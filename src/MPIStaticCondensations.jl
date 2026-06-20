@@ -355,13 +355,13 @@ struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync} <: MPISchurComplementBlockAinvDotB
     end
 end
 
-struct BlockCSerial{Tb,Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurComplementBlockC
+struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurComplementBlockC
     blocks::Vector{Tb}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
     block_hypercube_positions::Vector{Ti}
     output_buffer_ncopies::Ti
-    right_multiplication_buffer_blocks::Vector{Matrix{Tf}}
+    right_multiplication_buffer_blocks::Trmbb
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
     vector_intermediate_buffer::Tib
@@ -379,6 +379,7 @@ struct BlockCSerial{Tb,Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchur
                               matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
                               block_hypercube_positions::Vector{Ti},
                               output_buffer_ncopies::Ti,
+                              right_multiplication_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
                               vector_init_range::Union{UnitRange{Ti},Nothing},
@@ -395,9 +396,13 @@ struct BlockCSerial{Tb,Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchur
         else
             blocks = FixedSparseCSC{Tf,Ti}[]
         end
-        right_multiplication_buffer_blocks = Matrix{Tf}[]
         vector_buffer_blocks_in = Vector{Tf}[]
         vector_buffer_blocks_out = Vector{Tf}[]
+
+        # Using Vector{Any} here, we convert to a concretely typed Vector after collecting
+        # the buffer blocks.
+        right_multiplication_buffer_blocks = []
+
         for (ri, ci) ∈ zip(block_rowinds, block_colinds)
             nrow = length(ri)
             ncol = length(ci)
@@ -409,11 +414,22 @@ struct BlockCSerial{Tb,Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchur
                                                       matrix_template, Tf)
                 push!(blocks, b)
             end
-            push!(right_multiplication_buffer_blocks, zeros(Tf, nrow, nrow))
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
+            right_multiplication_buffer_size = nrow^2
+            if length(right_multiplication_buffer_storage) < right_multiplication_buffer_size
+                resize!(right_multiplication_buffer_storage,
+                        right_multiplication_buffer_size)
+            end
+            push!(right_multiplication_buffer_blocks,
+                  reshape(@view(right_multiplication_buffer_storage[1:right_multiplication_buffer_size]),
+                          nrow, nrow))
         end
-        return new{eltype(blocks),Tf,Ti,typeof(vector_intermediate_buffer),typeof(buffer_position),typeof(vector_init_range),Fsb,Fs}(
+
+        # Convert from Vector{Any} to concretely-typed vector of reshaped views.
+        right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
+
+        return new{eltype(blocks),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(vector_intermediate_buffer),typeof(buffer_position),typeof(vector_init_range),Fsb,Fs}(
                    blocks, block_rowinds, block_colinds, block_hypercube_positions,
                    output_buffer_ncopies, right_multiplication_buffer_blocks,
                    vector_buffer_blocks_in, vector_buffer_blocks_out,
@@ -423,7 +439,7 @@ struct BlockCSerial{Tb,Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchur
     end
 end
 
-struct BlockCShared{Tb,Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
+struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
     block::Tb
     block_rowinds::Vector{Ti}
     block_colinds::Vector{Ti}
@@ -431,7 +447,7 @@ struct BlockCShared{Tb,Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MP
     partial_col_range::UnitRange{Ti}
     block_hypercube_position::Ti
     output_buffer_ncopies::Ti
-    right_multiplication_buffer_block::Matrix{Tf}
+    right_multiplication_buffer_block::Trmbb
     block_right_multiplication_output_colinds::Vector{Ti}
     vector_buffer_block_in::Tbi
     vector_buffer_block_out::Vector{Tf}
@@ -484,6 +500,7 @@ struct BlockCShared{Tb,Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MP
                               matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
                               block_hypercube_position::Ti,
                               output_buffer_ncopies::Ti,
+                              right_multiplication_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
                               buffer_column_per_subgroup::Bool,
@@ -507,7 +524,14 @@ struct BlockCShared{Tb,Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MP
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
         partial_block_colinds = block_colinds[partial_col_range]
-        right_multiplication_buffer_block = zeros(Tf, nrow, nrow_full)
+        right_multiplication_buffer_block_size = nrow * nrow_full
+        if length(right_multiplication_buffer_storage) < right_multiplication_buffer_block_size
+            resize!(right_multiplication_buffer_storage,
+                    right_multiplication_buffer_block_size)
+        end
+        right_multiplication_buffer_block =
+            reshape(@view(right_multiplication_buffer_storage[1:right_multiplication_buffer_block_size]),
+                    nrow, nrow_full)
         vector_buffer_block_in = block_allocate_shared_float(ncol)
         vector_buffer_block_out = zeros(Tf, nrow)
         if subgroup_i < 0
@@ -515,7 +539,7 @@ struct BlockCShared{Tb,Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MP
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{typeof(block),Tf,Ti,typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),typeof(vector_init_range),Fbs,Fs}(
+        return new{typeof(block),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),typeof(vector_init_range),Fbs,Fs}(
                    block, block_rowinds, block_colinds, partial_block_colinds,
                    partial_col_range, block_hypercube_position, output_buffer_ncopies,
                    right_multiplication_buffer_block, block_rowinds_full,
@@ -1857,6 +1881,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     end
 
     this_level_schur_solver = nothing
+    right_multiplication_buffer_storage = zeros(data_type, 0)
     for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
         if this_level_info.level_shared_comm == MPI.COMM_NULL
             this_level_schur_solver = MPIStaticCondensationNull{data_type}()
@@ -1976,8 +2001,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     this_level_info.a_block_sub_selection_indices[1],
                                                     this_level_info.local_top_vector_indices,
                                                     this_level_info.local_bottom_vector_indices,
-                                                    matrix_template, C_buffer_column,
-                                                    C_buffer_ncopies,
+                                                    matrix_template,
+                                                    C_buffer_column, C_buffer_ncopies,
+                                                    right_multiplication_buffer_storage,
                                                     C_vector_intermediate_buffer,
                                                     C_vector_range,
                                                     C_buffer_column_per_subgroup,
@@ -2035,6 +2061,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                 matrix_template,
                                                 C_block_hypercube_positions,
                                                 C_buffer_ncopies,
+                                                right_multiplication_buffer_storage,
                                                 C_vector_intermediate_buffer,
                                                 C_vector_range, C_vector_init_range,
                                                 C_matrix_init_range, C_buffer_column,
