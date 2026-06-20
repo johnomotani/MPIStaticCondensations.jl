@@ -355,8 +355,8 @@ struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync} <: MPISchurComplementBlockAinvDotB
     end
 end
 
-struct BlockCSerial{Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurComplementBlockC
-    blocks::Vector{Matrix{Tf}}
+struct BlockCSerial{Tb,Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurComplementBlockC
+    blocks::Vector{Tb}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
     block_hypercube_positions::Vector{Ti}
@@ -373,6 +373,9 @@ struct BlockCSerial{Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurCom
 
     function BlockCSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
                               block_colinds::Vector{Vector{Ti}},
+                              local_top_vector_indices::Vector{Ti},
+                              local_bottom_vector_indices::Vector{Ti},
+                              matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
                               block_hypercube_positions::Vector{Ti},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
@@ -385,19 +388,30 @@ struct BlockCSerial{Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurCom
                             for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
         block_rowinds = block_rowinds[non_empty_blocks]
         block_colinds = block_colinds[non_empty_blocks]
-        blocks = Matrix{Tf}[]
+        if matrix_template === nothing
+            blocks = Matrix{Tf}[]
+        else
+            blocks = FixedSparseCSC{Tf,Ti}[]
+        end
         right_multiplication_buffer_blocks = Matrix{Tf}[]
         vector_buffer_blocks_in = Vector{Tf}[]
         vector_buffer_blocks_out = Vector{Tf}[]
         for (ri, ci) ∈ zip(block_rowinds, block_colinds)
             nrow = length(ri)
             ncol = length(ci)
-            push!(blocks, zeros(Tf, nrow, ncol))
+            if matrix_template === nothing
+                push!(blocks, zeros(Tf, nrow, ncol))
+            else
+                b = get_partial_FixedSparseCSC_buffer(local_bottom_vector_indices[ri],
+                                                      local_top_vector_indices[ci],
+                                                      matrix_template, Tf)
+                push!(blocks, b)
+            end
             push!(right_multiplication_buffer_blocks, zeros(Tf, nrow, nrow))
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
         end
-        return new{Tf,Ti,typeof(vector_intermediate_buffer),typeof(buffer_position),typeof(vector_init_range),Fsb,Fs}(
+        return new{eltype(blocks),Tf,Ti,typeof(vector_intermediate_buffer),typeof(buffer_position),typeof(vector_init_range),Fsb,Fs}(
                    blocks, block_rowinds, block_colinds, block_hypercube_positions,
                    right_multiplication_buffer_blocks, vector_buffer_blocks_in,
                    vector_buffer_blocks_out, vector_intermediate_buffer, vector_range,
@@ -406,8 +420,8 @@ struct BlockCSerial{Tf,Ti,Tib,Tbc,Tir,Fsb<:Function,Fs<:Function} <: MPISchurCom
     end
 end
 
-struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
-    block::Matrix{Tf}
+struct BlockCShared{Tb,Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
+    block::Tb
     block_rowinds::Vector{Ti}
     block_colinds::Vector{Ti}
     partial_block_colinds::Vector{Ti}
@@ -461,6 +475,9 @@ struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISc
     # column.
     function BlockCShared{Tf}(block_rowinds_full::Vector{Ti},
                               partial_row_range::UnitRange{Ti}, block_colinds::Vector{Ti},
+                              local_top_vector_indices::Vector{Ti},
+                              local_bottom_vector_indices::Vector{Ti},
+                              matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
                               block_hypercube_position::Ti,
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
@@ -475,7 +492,13 @@ struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISc
         nrow_full = length(block_rowinds_full)
         nrow = length(block_rowinds)
         ncol = length(block_colinds)
-        block = zeros(Tf, nrow, ncol)
+        if matrix_template === nothing
+            block = zeros(Tf, nrow, ncol)
+        else
+            block = get_partial_FixedSparseCSC_buffer(local_bottom_vector_indices[block_rowinds],
+                                                      local_top_vector_indices[block_colinds],
+                                                      matrix_template, Tf)
+        end
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
         partial_block_colinds = block_colinds[partial_col_range]
@@ -487,7 +510,7 @@ struct BlockCShared{Tf,Ti,Tbi,Tbuff,Tib,Tir,Fbs<:Function,Fs<:Function} <: MPISc
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{Tf,Ti,typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),typeof(vector_init_range),Fbs,Fs}(
+        return new{typeof(block),Tf,Ti,typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),typeof(vector_init_range),Fbs,Fs}(
                    block, block_rowinds, block_colinds, partial_block_colinds,
                    partial_col_range, block_hypercube_position,
                    right_multiplication_buffer_block, block_rowinds_full,
@@ -524,6 +547,54 @@ end
 
 function get_C_hypercube_position(iblock)
     return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock)) + 1
+end
+
+function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer,
+                                           float_type=Float64)
+    # Initialize buffer with the same non-zero pattern as existing_buffer, but only for a
+    # subset of rows given by row_range and columns given by col_range.
+    nrow = length(row_range)
+    ncol = length(col_range)
+    ind_type = eltype(row_range)
+    if nrow == 0 || ncol == 0
+        return FixedSparseCSC(nrow, ncol, ones(ind_type, ncol + 1), ind_type[],
+                              zeros(eltype(existing_buffer), 0))
+    end
+
+    colptr = ind_type[1]
+    rowval = ind_type[]
+    firstrow = first(row_range)
+    lastrow = last(row_range)
+    existing_colptr = existing_buffer.colptr
+    existing_rowval = existing_buffer.rowval
+    for j ∈ col_range
+        existing_col_start = existing_colptr[j]
+        existing_col_end = existing_colptr[j+1]-1
+        existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+        n_existing = existing_col_end - existing_col_start + 1
+        if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
+            # Definitely no overlapping entries in this column, so skip.
+            push!(colptr, length(rowval) + 1)
+            continue
+        end
+        count = max(searchsortedlast(existing_col_rowval, firstrow) - 1, 1)
+        for (i, i_global) ∈ enumerate(row_range)
+            while count ≤ n_existing && existing_col_rowval[count] < i_global
+                count += 1
+            end
+            if count > n_existing
+                break
+            end
+            if existing_col_rowval[count] == i_global
+                push!(rowval, i)
+            end
+        end
+        push!(colptr, length(rowval) + 1)
+    end
+    nzval = zeros(float_type, length(rowval))
+
+    buffer = FixedSparseCSC(nrow, ncol, colptr, rowval, nzval)
+    return buffer
 end
 
 struct Dimension{Ti<:Integer}
@@ -1530,6 +1601,7 @@ end
     mpi_static_condensation(dimensions::Vector{<:Dimension};
                             level_multiplier::Integer=2,
                             reduce_proc_count_with_blocks::Bool=false,
+                            sparse_C_blocks::Bool=false,
                             comm::MPI.Comm=MPI.COMM_WORLD,
                             distributed_comm::Union{MPI.Comm,Nothing}=missing,
                             shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1558,6 +1630,10 @@ at each level is reduced when the number of blocks at that level is less than th
 number of processes. Usually reducing the number of processes is probably not helpful
 (hence the default is `false`), but if MPI communication cost is the dominant bottleneck
 it might be faster.
+
+`sparse_C_blocks=true` can be passed to use sparse-matrix storage for the non-zero blocks
+of the 'C' sub-matrices. This will save some memory usage, but probably comes with a
+slight performance penalty.
 
 `comm` is divided into equally sized shared-memory blocks. `shared_comm` represents the
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
@@ -1596,6 +1672,7 @@ matrices being factorized.
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  level_multiplier::Integer=2,
                                  reduce_proc_count_with_blocks::Bool=false,
+                                 sparse_C_blocks::Bool=false,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1755,6 +1832,25 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_sc = MPIStaticCondensationNull{data_type}()
     end
 
+    level_allocate_shared_float_list =
+        [(args...) -> allocate_shared_float(args...; comm=li.level_shared_comm)
+         for li ∈ level_info_list]
+    level_allocate_shared_int_list =
+        [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
+         for li ∈ level_info_list]
+    if use_sparse
+        schur_complement_buffer_list =
+            [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
+                                                 lai, li.block_sizes,
+                                                 li.bottom_vector_indices,
+                                                 li.bottom_vector_indices)
+             for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
+                                      level_allocate_shared_float_list[1:end-1],
+                                      level_allocate_shared_int_list[1:end-1])]
+    else
+        schur_complement_buffer_list = [nothing for _ ∈ level_info_list[1:end-1]]
+    end
+
     this_level_schur_solver = nothing
     for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
         if this_level_info.level_shared_comm == MPI.COMM_NULL
@@ -1762,8 +1858,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             continue
         end
         this_level_shared_comm = this_level_info.level_shared_comm
-        level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_shared_comm)
-        level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_shared_comm)
+        level_allocate_shared_float = level_allocate_shared_float_list[level]
+        level_allocate_shared_int = level_allocate_shared_int_list[level]
         this_level_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_level_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         if level < n_levels
@@ -1799,14 +1895,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             C_buffer = nothing
             C_buffer_ncopies = nothing
             if use_sparse
-                schur_complement_buffer =
-                    get_shared_sparse_matrix_csc_buffer(dimensions,
-                                                        this_level_shared_comm,
-                                                        level_allocate_shared_float,
-                                                        level_allocate_shared_int,
-                                                        this_level_info.block_sizes,
-                                                        this_level_info.bottom_vector_indices,
-                                                        this_level_info.bottom_vector_indices)
+                schur_complement_buffer = schur_complement_buffer_list[level]
+                if level == 1 || !sparse_C_blocks
+                    matrix_template = nothing
+                else
+                    matrix_template = schur_complement_buffer_list[level-1]
+                end
                 if use_shared_blocks
                     if this_level_info.block_comm == MPI.COMM_NULL
                         this_A_block_solver = MPIStaticCondensationNull{data_type}()
@@ -1875,7 +1969,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                             BlockCShared{data_type}(C_block_row_inds_full,
                                                     C_partial_row_range,
                                                     this_level_info.a_block_sub_selection_indices[1],
-                                                    C_buffer_column,
+                                                    this_level_info.local_top_vector_indices,
+                                                    this_level_info.local_bottom_vector_indices,
+                                                    matrix_template, C_buffer_column,
                                                     C_vector_intermediate_buffer,
                                                     C_vector_range,
                                                     C_buffer_column_per_subgroup,
@@ -1928,6 +2024,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                     C_buffer =
                         BlockCSerial{data_type}(C_block_row_inds,
                                                 this_level_info.a_block_sub_selection_indices,
+                                                this_level_info.local_top_vector_indices,
+                                                this_level_info.local_bottom_vector_indices,
+                                                matrix_template,
                                                 C_block_hypercube_positions,
                                                 C_vector_intermediate_buffer,
                                                 C_vector_range, C_vector_init_range,
@@ -2713,28 +2812,61 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
     C_colptr = C.colptr
     C_rowval = C.rowval
     C_nzval = C.nzval
-    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-        block_nrow = length(rowinds)
-        first_row = first(rowinds)
-        for (j1, j2) ∈ enumerate(colinds)
-            C_col = C_colinds[j2]
-            first_i = C_colptr[C_col]
-            last_i = C_colptr[C_col+1] - 1
-            col_rv = @view C_rowval[first_i:last_i]
-            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-            i1 = 1
-            while flat_i ≤ last_i && i1 ≤ block_nrow
-                C_row = C_rowval[flat_i]
-                block_global_row = C_rowinds[rowinds[i1]]
-                if C_row == block_global_row
-                    block[i1,j1] = C_nzval[flat_i]
-                    i1 += 1
-                    flat_i += 1
-                elseif C_row > block_global_row
-                    block[i1,j1] = 0.0
-                    i1 += 1
-                else
-                    flat_i += 1
+    if eltype(blocks) <: Matrix
+        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+            block_nrow = length(rowinds)
+            first_row = first(rowinds)
+            for (j1, j2) ∈ enumerate(colinds)
+                C_col = C_colinds[j2]
+                first_i = C_colptr[C_col]
+                last_i = C_colptr[C_col+1] - 1
+                col_rv = @view C_rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                i1 = 1
+                while flat_i ≤ last_i && i1 ≤ block_nrow
+                    C_row = C_rowval[flat_i]
+                    block_global_row = C_rowinds[rowinds[i1]]
+                    if C_row == block_global_row
+                        block[i1,j1] = C_nzval[flat_i]
+                        i1 += 1
+                        flat_i += 1
+                    elseif C_row > block_global_row
+                        block[i1,j1] = 0.0
+                        i1 += 1
+                    else
+                        flat_i += 1
+                    end
+                end
+            end
+        end
+    else
+        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+            block_nrow = length(rowinds)
+            first_row = first(rowinds)
+            block_colptr = block.colptr
+            block_rowval = block.rowval
+            block_nzval = block.nzval
+            for (j1, j2) ∈ enumerate(colinds)
+                C_col = C_colinds[j2]
+                first_i = C_colptr[C_col]
+                last_i = C_colptr[C_col+1] - 1
+                col_rv = @view C_rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                block_i = block_colptr[j1]
+                block_last_i = block_colptr[j1+1] - 1
+                while flat_i ≤ last_i && block_i ≤ block_last_i
+                    C_row = C_rowval[flat_i]
+                    block_global_row = C_rowinds[rowinds[block_rowval[block_i]]]
+                    if C_row == block_global_row
+                        block_nzval[block_i] = C_nzval[flat_i]
+                        block_i += 1
+                        flat_i += 1
+                    elseif C_row > block_global_row
+                        block_nzval[block_i] = 0.0
+                        block_i += 1
+                    else
+                        flat_i += 1
+                    end
                 end
             end
         end
@@ -2756,25 +2888,54 @@ function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_
 
     block_nrow = length(block_rowinds)
     first_row = first(block_rowinds)
-    for (j1, j2) ∈ enumerate(block_colinds)
-        C_col = C_colinds[j2]
-        first_i = C_colptr[C_col]
-        last_i = C_colptr[C_col+1] - 1
-        col_rv = @view C_rowval[first_i:last_i]
-        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-        i1 = 1
-        while flat_i ≤ last_i && i1 ≤ block_nrow
-            C_row = C_rowval[flat_i]
-            block_global_row = C_rowinds[block_rowinds[i1]]
-            if C_row == block_global_row
-                block[i1,j1] = C_nzval[flat_i]
-                i1 += 1
-                flat_i += 1
-            elseif C_row > block_global_row
-                block[i1,j1] = 0.0
-                i1 += 1
-            else
-                flat_i += 1
+    if isa(block, Matrix)
+        for (j1, j2) ∈ enumerate(block_colinds)
+            C_col = C_colinds[j2]
+            first_i = C_colptr[C_col]
+            last_i = C_colptr[C_col+1] - 1
+            col_rv = @view C_rowval[first_i:last_i]
+            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+            i1 = 1
+            while flat_i ≤ last_i && i1 ≤ block_nrow
+                C_row = C_rowval[flat_i]
+                block_global_row = C_rowinds[block_rowinds[i1]]
+                if C_row == block_global_row
+                    block[i1,j1] = C_nzval[flat_i]
+                    i1 += 1
+                    flat_i += 1
+                elseif C_row > block_global_row
+                    block[i1,j1] = 0.0
+                    i1 += 1
+                else
+                    flat_i += 1
+                end
+            end
+        end
+    else
+        block_colptr = block.colptr
+        block_rowval = block.rowval
+        block_nzval = block.nzval
+        for (j1, j2) ∈ enumerate(block_colinds)
+            C_col = C_colinds[j2]
+            first_i = C_colptr[C_col]
+            last_i = C_colptr[C_col+1] - 1
+            col_rv = @view C_rowval[first_i:last_i]
+            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+            block_i = block_colptr[j1]
+            block_last_i = block_colptr[j1+1] - 1
+            while flat_i ≤ last_i && block_i ≤ block_last_i
+                C_row = C_rowval[flat_i]
+                block_global_row = C_rowinds[block_rowinds[block_rowval[block_i]]]
+                if C_row == block_global_row
+                    block_nzval[block_i] = C_nzval[flat_i]
+                    block_i += 1
+                    flat_i += 1
+                elseif C_row > block_global_row
+                    block_nzval[block_i] = 0.0
+                    block_i += 1
+                else
+                    flat_i += 1
+                end
             end
         end
     end
