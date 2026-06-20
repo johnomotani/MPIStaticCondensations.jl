@@ -15,9 +15,11 @@ struct BenchmarkParams
     sparse_stencils::Bool
     periodic_list::Vector{Bool}
     remove_boundaries_list::Vector{Bool}
+    sparse_C_blocks::Bool
 
-    function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils,
-                             periodic_list=nothing, remove_boundaries_list=nothing)
+    function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
+                             periodic_list=nothing, remove_boundaries_list=nothing,
+                             sparse_C_blocks=false)
         n = length(nelement_list)
         if periodic_list === nothing
             periodic_list = fill(false, n)
@@ -31,7 +33,7 @@ struct BenchmarkParams
         end
 
         return new(nelement_list, ngrid_list, sparse_stencils, periodic_list,
-                   remove_boundaries_list)
+                   remove_boundaries_list, sparse_C_blocks)
     end
 end
 
@@ -118,8 +120,9 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                               allocate_shared_float)
     x_temp = allocate_shared_float(length(rhs))
     run_solver(x_temp, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-               dimensions, level_multiplier, comm, distributed_comm, shared_comm,
-               allocate_shared_float, allocate_shared_int, 1, 1, 1, 1, timer)
+               dimensions, level_multiplier, params.sparse_C_blocks, comm,
+               distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
+               1, 1, 1, 1, timer)
 
     if timer !== nothing
         reset_timer!(timer)
@@ -137,9 +140,10 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
                 run_solver(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                           dimensions, level_multiplier, comm, distributed_comm,
-                           shared_comm, allocate_shared_float, allocate_shared_int, nmat,
-                           nrhs, matrix_repeats, rhs_repeats, timer)
+                           dimensions, level_multiplier, params.sparse_C_blocks, comm,
+                           distributed_comm, shared_comm, allocate_shared_float,
+                           allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats,
+                           timer)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)
