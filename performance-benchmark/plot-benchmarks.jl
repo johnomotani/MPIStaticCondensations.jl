@@ -17,19 +17,25 @@ function load_data(filename)
             nelement_list, ngrid_list, periodic_list, remove_boundaries_list = row
 
         key = join([nelement_list, ngrid_list], ",")
+        n_shared_blocks = nproc ÷ n_shared
         if key ∉ keys(setup_dict)
-            setup_dict[key] = Dict{Int64,Dict{Int64,Float64}}()
-            lu_dict[key] = Dict{Int64,Dict{Int64,Float64}}()
-            solve_dict[key] = Dict{Int64,Dict{Int64,Float64}}()
+            setup_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
+            lu_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
+            solve_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
         end
         if level_multiplier ∉ keys(setup_dict[key])
-            setup_dict[key][level_multiplier] = Dict{Int64,Float64}()
-            lu_dict[key][level_multiplier] = Dict{Int64,Float64}()
-            solve_dict[key][level_multiplier] = Dict{Int64,Float64}()
+            setup_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
+            lu_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
+            solve_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
         end
-        setup_dict[key][level_multiplier][nproc] = tsetup
-        lu_dict[key][level_multiplier][nproc] = tlu
-        solve_dict[key][level_multiplier][nproc] = tsolve
+        if n_shared_blocks ∉ keys(setup_dict[key][level_multiplier])
+            setup_dict[key][level_multiplier][n_shared_blocks] = Dict{Int64,Float64}()
+            lu_dict[key][level_multiplier][n_shared_blocks] = Dict{Int64,Float64}()
+            solve_dict[key][level_multiplier][n_shared_blocks] = Dict{Int64,Float64}()
+        end
+        setup_dict[key][level_multiplier][n_shared_blocks][nproc] = tsetup
+        lu_dict[key][level_multiplier][n_shared_blocks][nproc] = tlu
+        solve_dict[key][level_multiplier][n_shared_blocks][nproc] = tsolve
 
         if key ∉ keys(sizes_dict)
             base_label = "$total_size"
@@ -53,24 +59,44 @@ function load_data(filename)
     return setup_dict, lu_dict, solve_dict, sizes_dict
 end
 
-function plot_scaling!(ax, results)
+function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing)
+    if params ∉ keys(all_results)
+        # Don't have a result for these parameters, so skip.
+        return nothing
+    end
+    results = all_results[params]
+
     level_multipliers = collect(keys(results))
     sort!(level_multipliers)
 
-    first_lm = true
+    first_plot = true
     for lm ∈ level_multipliers
         level_results = results[lm]
-        nprocs = collect(keys(level_results))
-        sort!(nprocs)
-        times = [level_results[n] for n ∈ nprocs]
-        lines!(nprocs, times; label="level_multiplier=$lm")
+        n_shared_blocks_list = collect(keys(level_results))
+        sort!(n_shared_blocks_list)
+        for n_shared_blocks ∈ n_shared_blocks_list
+            nsb_results = level_results[n_shared_blocks]
+            nprocs = collect(keys(nsb_results))
+            sort!(nprocs)
+            times = [nsb_results[n] for n ∈ nprocs]
+            if label === nothting
+                label = "level_multiplier=$lm"
+            end
+            label *= " n_shared_blocks=$n_shared_blocks"
+            kwargs = Dict{Symbol,Any}()
+            kwargs[:label] = label
+            if linestyle !== nothing
+                kwargs[:linestyle] = linestyle
+            end
+            lines!(nprocs, times; kwargs...)
 
-        if first_lm
-            t0 = times[1]
-            n0 = nprocs[1]
-            expected_times = [t0 * n0 / n for n ∈ nprocs]
-            lines!(nprocs, expected_times; linestyle=:dot, label="ideal scaling")
-            first_lm = false
+            if first_plot
+                t0 = times[1]
+                n0 = nprocs[1]
+                expected_times = [t0 * n0 / n for n ∈ nprocs]
+                lines!(nprocs, expected_times; linestyle=:dot, label="ideal scaling")
+                first_plot = false
+            end
         end
     end
 
@@ -87,10 +113,11 @@ function plot_serial_reference!(ax, params, results)
     return nothing
 end
 
-function plot_comparison(solver, case, interactive_parameter=nothing;
-                         datainspector_kwargs=Dict())
+function plot_comparison(case, interactive_parameter=nothing; datainspector_kwargs=Dict())
     setup_dict, lu_dict, solve_dict, sizes_dict =
-        load_data(joinpath(results_directory, "benchmarks_$(solver)_$(case).txt"))
+        load_data(joinpath(results_directory, "benchmarks_MPIStaticCondensations_$(case).txt"))
+    MUMPS_setup_dict, MUMPS_lu_dict, MUMPS_solve_dict, MUMPS_sizes_dict =
+        load_data(joinpath(results_directory, "benchmarks_MUMPS_$(case).txt"))
     UMFPACK_setup_dict, UMFPACK_lu_dict, UMFPACK_solve_dict, UMFPACK_sizes_dict =
         load_data(joinpath(results_directory, "benchmarks_UMFPACK_$(case).txt"))
 
@@ -107,7 +134,8 @@ function plot_comparison(solver, case, interactive_parameter=nothing;
 
         setup_fig = Figure()
         setup_ax = Axis(setup_fig[1,1]; xscale=log2, yscale=log10, title="$p setup")
-        plot_scaling!(setup_ax, setup_dict[p])
+        plot_scaling!(setup_ax, p, setup_dict)
+        plot_scaling!(setup_ax, p, MUMPS_setup_dict; label="MUMPS", linestyle=:dash)
         plot_serial_reference!(setup_ax, p, UMFPACK_setup_dict)
         if interactive_plot
             DataInspector(setup_fig; datainspector_kwargs...)
@@ -119,7 +147,8 @@ function plot_comparison(solver, case, interactive_parameter=nothing;
 
         lu_fig = Figure()
         lu_ax = Axis(lu_fig[1,1]; xscale=log2, yscale=log10, title="$p lu")
-        plot_scaling!(lu_ax, lu_dict[p])
+        plot_scaling!(lu_ax, p, lu_dict)
+        plot_scaling!(lu_ax, p, MUMPS_lu_dict; label="MUMPS", linestyle=:dash)
         plot_serial_reference!(lu_ax, p, UMFPACK_lu_dict)
         if interactive_plot
             DataInspector(lu_fig; datainspector_kwargs...)
@@ -131,7 +160,8 @@ function plot_comparison(solver, case, interactive_parameter=nothing;
 
         solve_fig = Figure()
         solve_ax = Axis(solve_fig[1,1]; xscale=log2, yscale=log10, title="$p solve")
-        plot_scaling!(solve_ax, solve_dict[p])
+        plot_scaling!(solve_ax, p, solve_dict)
+        plot_scaling!(solve_ax, p, MUMPS_solve_dict; label="MUMPS", linestyle=:dash)
         plot_serial_reference!(solve_ax, p, UMFPACK_solve_dict)
         if interactive_plot
             DataInspector(solve_fig; datainspector_kwargs...)
@@ -144,5 +174,5 @@ function plot_comparison(solver, case, interactive_parameter=nothing;
 end
 
 for case ∈ cases
-    plot_comparison("MPIStaticCondensations", case)
+    plot_comparison(case)
 end
