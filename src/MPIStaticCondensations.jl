@@ -2702,23 +2702,23 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
     return nothing
 end
 
-# Don't think dense-matrix version is needed?
-#function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractMatrix)
-#    blocks = Ainv_dot_B.blocks
-#    if length(blocks) == 0
-#        # Nothing to do.
-#        return nothing
-#    end
-#
-#    block_rowinds = Ainv_dot_B.block_rowinds
-#    block_colinds = Ainv_dot_B.block_colinds
-#    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-#        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
-#            block[i1,j1] = B[i2,j2]
-#        end
-#    end
-#    return nothing
-#end
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractMatrix, B_rowinds,
+                           B_colinds)
+    blocks = Ainv_dot_B.blocks
+    if length(blocks) == 0
+        # Nothing to do.
+        return nothing
+    end
+
+    block_rowinds = Ainv_dot_B.block_rowinds
+    block_colinds = Ainv_dot_B.block_colinds
+    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
+            block[i1,j1] = B[B_rowinds[i2],B_colinds[j2]]
+        end
+    end
+    return nothing
+end
 function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMatrixCSC,
                            B_rowinds, B_colinds)
     blocks = Ainv_dot_B.blocks
@@ -2810,23 +2810,23 @@ end
 # copy_C_submatrix!() is identical to copy_B_submatrix!(), but keep as a separate function
 # instead of having a single implementation for both in case we want to experiment with
 # using a transposed representation of the C blocks at some point.
-# Don't think dense-matrix version is needed?
-#function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractMatrix)
-#    blocks = block_C.blocks
-#    if length(blocks) == 0
-#        # Nothing to do.
-#        return nothing
-#    end
-#
-#    block_rowinds = block_C.block_rowinds
-#    block_colinds = block_C.block_colinds
-#    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-#        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
-#            block[i1,j1] = C[i2,j2]
-#        end
-#    end
-#    return nothing
-#end
+function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractMatrix, C_rowinds,
+                           C_colinds)
+    blocks = block_C.blocks
+    if length(blocks) == 0
+        # Nothing to do.
+        return nothing
+    end
+
+    block_rowinds = block_C.block_rowinds
+    block_colinds = block_C.block_colinds
+    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
+            block[i1,j1] = C[C_rowinds[i2],C_colinds[j2]]
+        end
+    end
+    return nothing
+end
 function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_rowinds,
                            C_colinds)
     blocks = block_C.blocks
