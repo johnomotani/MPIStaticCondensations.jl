@@ -169,9 +169,10 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
             end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
-            dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries)
-                          for (nelement, ngrid, irank, nrank, periodic, dense_boundaries)
-                          ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list)]
+            dimensions = [create_dimension(; name=Symbol("d$i"), nelement, ngrid, nrank,
+                                           irank, periodic, dense_boundaries)
+                          for (i, (nelement, ngrid, irank, nrank, periodic, dense_boundaries))
+                          ∈ enumerate(zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list))]
 
             test_matrix(dimensions, n_shared, this_seed, use_sparse, sparse_stencils, reduce_proc_count_with_blocks, tol)
             this_seed += 1

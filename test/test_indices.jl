@@ -29,15 +29,16 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
     distributed_size = comm.size ÷ shared_comm.size
     distributed_rank = comm.rank ÷ shared_comm.size
 
-    dimensions = [create_dimension(; nelement, ngrid, nrank, irank=dim_irank, periodic,
-                                   remove_boundaries, dense_boundaries=false)
-                  for (nelement, ngrid, periodic, remove_boundaries, nrank, dim_irank) ∈
-                      zip(nelement_list, ngrid_list, periodic_list,
-                          remove_boundaries_list, nrank_list, irank_list)]
+    dimensions = [create_dimension(; name=Symbol("d$d"), nelement, ngrid, nrank,
+                                   irank=dim_irank, periodic, remove_boundaries, dense_boundaries=false)
+                  for (d, (nelement, ngrid, periodic, remove_boundaries, nrank,
+                           dim_irank)) ∈
+                      enumerate(zip(nelement_list, ngrid_list, periodic_list,
+                                    remove_boundaries_list, nrank_list, irank_list))]
 
-    dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
-                                             nrank=d.nrank, irank=d.irank, periodic=false,
-                                             dense_boundaries=false,
+    dimensions_without_periodic = [Dimension(; name=d.name, nelement=d.nelement,
+                                             ngrid=d.ngrid, nrank=d.nrank, irank=d.irank,
+                                             periodic=false, dense_boundaries=false,
                                              remove_boundaries=(d.periodic || d.remove_boundaries))
                                    for d ∈ dimensions]
     this_global_size = prod(d.n for d ∈ dimensions)
@@ -1246,18 +1247,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:4
             @test buffer.colptr == [1, 5]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1]
             @test buffer.colptr == [1, 2]
         end
@@ -1269,18 +1270,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
         end
@@ -1303,18 +1304,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:3, 3:5)
             @test buffer.colptr == [1, 4, 7]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:2)
             @test buffer.colptr == [1, 3, 5]
         end
@@ -1326,18 +1327,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1]
             @test buffer.colptr == [1, 2]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1]
             @test buffer.colptr == [1, 2]
         end
@@ -1349,18 +1350,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
         end
@@ -1383,18 +1384,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:3, 3:4, 4:6)
             @test buffer.colptr == [1, 4, 6, 9]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:3, 2:3)
             @test buffer.colptr == [1, 3, 6, 8]
         end
@@ -1406,18 +1407,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:2
             @test buffer.colptr == [1, 3]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1]
             @test buffer.colptr == [1, 2]
         end
@@ -1429,18 +1430,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
         end
@@ -1477,18 +1478,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1, 1:2, 2)
             @test buffer.colptr == [1, 2, 4, 5]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:3, 2:3)
             @test buffer.colptr == [1, 3, 6, 8]
         end
@@ -1500,18 +1501,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1, 1]
             @test buffer.colptr == [1, 2, 3]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:2)
             @test buffer.colptr == [1, 3, 5]
         end
@@ -1534,18 +1535,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1, 1:2, 2:3, 3)
             @test buffer.colptr == [1, 2, 4, 6, 7]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:3, 2:4, 3:4)
             @test buffer.colptr == [1, 3, 6, 9, 11]
         end
@@ -1557,18 +1558,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1, 1]
             @test buffer.colptr == [1, 2, 3, 3]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:3, 2:3)
             @test buffer.colptr == [1, 3, 6, 8]
         end
@@ -1580,18 +1581,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1, 1]
             @test buffer.colptr == [1, 2, 3]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:2)
             @test buffer.colptr == [1, 3, 5]
         end
@@ -1614,18 +1615,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1, 1:2, 2:3, 3:4, 4)
             @test buffer.colptr == [1, 2, 4, 6, 8, 9]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:3, 2:4, 3:5, 4:5)
             @test buffer.colptr == [1, 3, 6, 9, 12, 14]
         end
@@ -1637,18 +1638,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1, 1:2, 2)
             @test buffer.colptr == [1, 2, 4, 5]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:3, 2:3)
             @test buffer.colptr == [1, 3, 6, 8]
         end
@@ -1660,18 +1661,18 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == [1, 1]
             @test buffer.colptr == [1, 2, 3]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:2, 1:2)
             @test buffer.colptr == [1, 3, 5]
         end
@@ -1717,18 +1718,18 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:8, 1:8, 1:2, 5:6, 9:10, 13:14, 1:2, 5:6, 9:10, 13:14, 1:16, 3:4, 7:8, 11:12, 15:16, 3:4, 7:8, 11:12, 15:16, 9:16, 9:16)
             @test buffer.colptr == [1, 9, 17, 25, 33, 49, 57, 65, 73, 81]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:7, 1:7, 1:5, 8:9, 1:5, 8:9, 1:9, 1:2, 5:9, 1:2, 5:9, 3:9, 3:9)
             @test buffer.colptr == [1, 8, 15, 22, 29, 38, 45, 52, 59, 66]
         end
@@ -1740,18 +1741,18 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
             @test buffer.colptr == [1]
         end
@@ -1785,18 +1786,18 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1, 1, 1:2, 2, 2, 1, 1:2, 2, 1, 3, 1, 3, 1:4, 2, 4, 2, 4, 3, 3:4, 4, 3, 3, 3:4, 4, 4)
             @test buffer.colptr == [1, 2, 3, 5, 6, 7, 8, 10, 11, 13, 15, 19, 21, 23, 24, 26, 27, 28, 29, 31, 32, 33]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:3, 6:7, 9:11,
                                         1:3, 6:7, 9:11,
                                         1:13,
@@ -1828,18 +1829,18 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5)
             @test buffer.colptr == [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56, 61, 66, 71, 76, 81]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16)
             @test buffer.colptr == [1, 17, 33, 49, 65, 81, 97, 113, 129, 145, 161, 177, 193, 209, 225, 241, 257]
         end
@@ -1874,9 +1875,9 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3,
                                         1:6, 1:6, 1:6, 1:6, 1:6,
                                         4:6, 4:6,
@@ -1891,9 +1892,9 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:12, 1:12, 1:12, 1:12, 1:12, 1:12, 1:12,
                                         1:19, 1:19, 1:19, 1:19, 1:19,
                                         8:19, 8:19,
@@ -1913,18 +1914,18 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3)
             @test buffer.colptr == [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 49, 49, 49, 49, 49, 49, 49]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16,
                                         1:23, 1:23, 1:23, 1:23, 1:23,
                                         12:23, 12:23, 12:23, 12:23, 12:23, 12:23, 12:23)
@@ -1940,18 +1941,18 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.top_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.top_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3)
             @test buffer.colptr == [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                     allocate_shared_float,
-                                                    allocate_shared_int, block_sizes,
-                                                    level_info.bottom_vector_indices,
-                                                    level_info.bottom_vector_indices)
+                                                    allocate_shared_int; block_sizes,
+                                                    row_indices=level_info.bottom_vector_indices,
+                                                    column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == vcat(1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20)
             @test buffer.colptr == [1, 21, 41, 61, 81, 101, 121, 141, 161, 181, 201, 221, 241, 261, 281, 301, 321, 341, 361, 381, 401]
         end

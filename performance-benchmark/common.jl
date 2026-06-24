@@ -106,10 +106,12 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     nrank_list = ones(Int64, ndim)
     nrank_list[end] = distributed_nproc
     irank_list = get_iranks(nrank_list, distributed_rank)
-    dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
-                  for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
-                  ∈ zip(params.nelement_list, params.ngrid_list, irank_list, nrank_list,
-                        params.periodic_list, params.remove_boundaries_list)]
+    dimensions = [create_dimension(; name=Symbol("d$d"), nelement, ngrid, nrank, irank,
+                                   periodic, remove_boundaries)
+                  for (d, (nelement, ngrid, irank, nrank, periodic, remove_boundaries))
+                  ∈ enumerate(zip(params.nelement_list, params.ngrid_list, irank_list,
+                                  nrank_list, params.periodic_list,
+                                  params.remove_boundaries_list))]
 
     # First run ensures solver is compiled for these parameters. Do not save these timings
     # as we do not want to measure compilation time.

@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["John Omotani <john.omotani@ukaea.uk> and contributors"]
 
 [deps]
+BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 MPIDenseLUs = "e8a62dcf-60e4-418b-90b5-fa9f605e4ca5"
@@ -13,6 +14,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
 [compat]
+BlockArrays = "1.9.4"
 Combinatorics = "1.1.0"
 LinearAlgebra = "1.12.0"
 MPI = "0.20.26"
