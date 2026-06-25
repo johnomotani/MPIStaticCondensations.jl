@@ -2669,7 +2669,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMat
             col_rv = @view B_rowval[first_i:last_i]
             flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
             i1 = 1
-            while flat_i ≤ last_i && i1 ≤ block_nrow
+            while i1 ≤ block_nrow
                 B_row = B_rowval[flat_i]
                 block_global_row = B_rowinds[rowinds[i1]]
                 if B_row == block_global_row
@@ -2681,6 +2681,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMat
                     i1 += 1
                 else
                     flat_i += 1
+                end
+                if flat_i > last_i
+                    block[i1:end,j1] .= 0.0
+                    break
                 end
             end
         end
@@ -2711,7 +2715,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMat
         col_rv = @view B_rowval[first_i:last_i]
         flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
         i1 = 1
-        while flat_i ≤ last_i && i1 ≤ block_nrow
+        while i1 ≤ block_nrow
             B_row = B_rowval[flat_i]
             block_global_row = B_rowinds[block_rowinds[i1]]
             if B_row == block_global_row
@@ -2723,6 +2727,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMat
                 i1 += 1
             else
                 flat_i += 1
+            end
+            if flat_i > last_i
+                block[i1:end,j1] .= 0.0
+                break
             end
         end
     end
@@ -2778,7 +2786,7 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                 col_rv = @view C_rowval[first_i:last_i]
                 flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
                 i1 = 1
-                while flat_i ≤ last_i && i1 ≤ block_nrow
+                while i1 ≤ block_nrow
                     C_row = C_rowval[flat_i]
                     block_global_row = C_rowinds[rowinds[i1]]
                     if C_row == block_global_row
@@ -2790,6 +2798,10 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                         i1 += 1
                     else
                         flat_i += 1
+                    end
+                    if flat_i > last_i
+                        block[i1:end,j1] .= 0.0
+                        break
                     end
                 end
             end
@@ -2809,7 +2821,7 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                 flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
                 block_i = block_colptr[j1]
                 block_last_i = block_colptr[j1+1] - 1
-                while flat_i ≤ last_i && block_i ≤ block_last_i
+                while block_i ≤ block_last_i
                     C_row = C_rowval[flat_i]
                     block_global_row = C_rowinds[rowinds[block_rowval[block_i]]]
                     if C_row == block_global_row
@@ -2821,6 +2833,10 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                         block_i += 1
                     else
                         flat_i += 1
+                    end
+                    if flat_i > last_i
+                        block_nzval[block_i:block_last_i] .= 0.0
+                        break
                     end
                 end
             end
@@ -2851,7 +2867,7 @@ function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_
             col_rv = @view C_rowval[first_i:last_i]
             flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
             i1 = 1
-            while flat_i ≤ last_i && i1 ≤ block_nrow
+            while i1 ≤ block_nrow
                 C_row = C_rowval[flat_i]
                 block_global_row = C_rowinds[block_rowinds[i1]]
                 if C_row == block_global_row
@@ -2863,6 +2879,10 @@ function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_
                     i1 += 1
                 else
                     flat_i += 1
+                end
+                if flat_i > last_i
+                    block[i1:end,j1] .= 0.0
+                    break
                 end
             end
         end
@@ -2878,7 +2898,7 @@ function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_
             flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
             block_i = block_colptr[j1]
             block_last_i = block_colptr[j1+1] - 1
-            while flat_i ≤ last_i && block_i ≤ block_last_i
+            while block_i ≤ block_last_i
                 C_row = C_rowval[flat_i]
                 block_global_row = C_rowinds[block_rowinds[block_rowval[block_i]]]
                 if C_row == block_global_row
@@ -2890,6 +2910,10 @@ function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_
                     block_i += 1
                 else
                     flat_i += 1
+                end
+                if flat_i > last_i
+                    block_nzval[block_i:block_last_i] .= 0.0
+                    break
                 end
             end
         end
