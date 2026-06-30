@@ -5,11 +5,11 @@ const results_directory = "results-benchmark"
 const solvers = ("UMFPACK", "MPIStaticCondensations", "MUMPS")
 const cases = ("1d", "2d", "3d")
 
-function load_data(filename)
+function load_data(filename; count_shared_blocks=true)
     file = CSV.File(filename; delim=" ", header=false, comment="#")
-    setup_dict = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
-    lu_dict = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
-    solve_dict = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
+    setup_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
+    lu_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
+    solve_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
     sizes_set = String[]
     sizes_dict = Dict{String,String}()
     for row in file
@@ -17,7 +17,11 @@ function load_data(filename)
             nelement_list, ngrid_list, periodic_list, remove_boundaries_list = row
 
         key = join([nelement_list, ngrid_list], ",")
-        n_shared_blocks = nproc ÷ n_shared
+        if count_shared_blocks
+            shared_collect_label = nproc ÷ n_shared
+        else
+            shared_collect_label = n_shared
+        end
         if key ∉ keys(setup_dict)
             setup_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
             lu_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
@@ -28,14 +32,14 @@ function load_data(filename)
             lu_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
             solve_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
         end
-        if n_shared_blocks ∉ keys(setup_dict[key][level_multiplier])
-            setup_dict[key][level_multiplier][n_shared_blocks] = Dict{Int64,Float64}()
-            lu_dict[key][level_multiplier][n_shared_blocks] = Dict{Int64,Float64}()
-            solve_dict[key][level_multiplier][n_shared_blocks] = Dict{Int64,Float64}()
+        if shared_collect_label ∉ keys(setup_dict[key][level_multiplier])
+            setup_dict[key][level_multiplier][shared_collect_label] = Dict{Int64,Float64}()
+            lu_dict[key][level_multiplier][shared_collect_label] = Dict{Int64,Float64}()
+            solve_dict[key][level_multiplier][shared_collect_label] = Dict{Int64,Float64}()
         end
-        setup_dict[key][level_multiplier][n_shared_blocks][nproc] = tsetup
-        lu_dict[key][level_multiplier][n_shared_blocks][nproc] = tlu
-        solve_dict[key][level_multiplier][n_shared_blocks][nproc] = tsolve
+        setup_dict[key][level_multiplier][shared_collect_label][nproc] = tsetup
+        lu_dict[key][level_multiplier][shared_collect_label][nproc] = tlu
+        solve_dict[key][level_multiplier][shared_collect_label][nproc] = tsolve
 
         if key ∉ keys(sizes_dict)
             base_label = "$total_size"
@@ -72,29 +76,37 @@ function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing
     first_plot = true
     for lm ∈ level_multipliers
         level_results = results[lm]
-        n_shared_blocks_list = collect(keys(level_results))
-        sort!(n_shared_blocks_list)
-        for n_shared_blocks ∈ n_shared_blocks_list
-            nsb_results = level_results[n_shared_blocks]
+        shared_collect_label_list = collect(keys(level_results))
+        sort!(shared_collect_label_list)
+        for shared_collect_label ∈ shared_collect_label_list
+            nsb_results = level_results[shared_collect_label]
             nprocs = collect(keys(nsb_results))
             sort!(nprocs)
             times = [nsb_results[n] for n ∈ nprocs]
-            if label === nothting
-                label = "level_multiplier=$lm"
+            if label === nothing
+                this_label = "level_multiplier=$lm"
+            else
+                this_label = label
             end
-            label *= " n_shared_blocks=$n_shared_blocks"
+            this_label *= " shared_collect_label=$shared_collect_label"
             kwargs = Dict{Symbol,Any}()
-            kwargs[:label] = label
-            if linestyle !== nothing
-                kwargs[:linestyle] = linestyle
+            kwargs[:label] = this_label
+            kwargs[:inspector_label] = (self,i,p) -> "$(self.label[])\nnproc=$(p[1]), t=$(p[2])"
+            if length(nprocs) == 1
+                scatter!(nprocs, times; kwargs...)
+            else
+                if linestyle !== nothing
+                    kwargs[:linestyle] = linestyle
+                end
+                lines!(nprocs, times; kwargs...)
             end
-            lines!(nprocs, times; kwargs...)
 
             if first_plot
                 t0 = times[1]
                 n0 = nprocs[1]
                 expected_times = [t0 * n0 / n for n ∈ nprocs]
-                lines!(nprocs, expected_times; linestyle=:dot, label="ideal scaling")
+                lines!(nprocs, expected_times; linestyle=:dot, label="ideal scaling",
+                       inspector_label=(self,i,p) -> "$(self.label[])\nnproc=$(p[1]), t=$(p[2])")
                 first_plot = false
             end
         end
@@ -108,8 +120,11 @@ function plot_serial_reference!(ax, params, results)
         # Don't have an UMFPACK result for these parameters, so skip.
         return nothing
     end
-    t = results[params][1][1]
-    hlines!(ax, t; linestyle=:dash, label="UMFPACK")
+    t = results[params][1][1][1]
+    # Not sure if we need to use 10^p[2] here because of a bug, or this is correct
+    # behaviour of hlines!()...
+    hlines!(ax, t; linestyle=:dash, label="UMFPACK",
+            inspector_label=(self,i,p) -> "UMFPACK, t=$(10^p[2])")
     return nothing
 end
 
@@ -117,12 +132,15 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
     setup_dict, lu_dict, solve_dict, sizes_dict =
         load_data(joinpath(results_directory, "benchmarks_MPIStaticCondensations_$(case).txt"))
     MUMPS_setup_dict, MUMPS_lu_dict, MUMPS_solve_dict, MUMPS_sizes_dict =
-        load_data(joinpath(results_directory, "benchmarks_MUMPS_$(case).txt"))
+        load_data(joinpath(results_directory, "benchmarks_MUMPS_$(case).txt");
+                  count_shared_blocks=false)
     UMFPACK_setup_dict, UMFPACK_lu_dict, UMFPACK_solve_dict, UMFPACK_sizes_dict =
         load_data(joinpath(results_directory, "benchmarks_UMFPACK_$(case).txt"))
 
+    merge!(sizes_dict, MUMPS_sizes_dict, UMFPACK_sizes_dict)
+
     if interactive_parameter === nothing
-        parameter_list = keys(solve_dict)
+        parameter_list = keys(merge(solve_dict, MUMPS_solve_dict, UMFPACK_solve_dict))
         interactive_plot = false
     else
         parameter_list = [interactive_parameter]
