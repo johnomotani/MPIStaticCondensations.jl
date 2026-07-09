@@ -786,3 +786,35 @@ function get_iranks(nrank_list, rank)
     end
     return irank_list
 end
+
+function get_flat_global_indices(dimensions_for_variables)
+    if isa(dimensions_for_variables, Vector{<:Dimension})
+        dimensions_for_variables = [dimensions_for_variables]
+    end
+
+    function getglob(dims, current_inds)
+        if isempty(dims)
+            return current_inds
+        end
+        new_inds = Int64[]
+        lastdim = dims[end]
+        n = lastdim.n
+        ginds = lastdim.global_inds
+        for i ∈ current_inds
+            i = (i - 1) * n
+            for g ∈ ginds
+                push!(new_inds, i + g)
+            end
+        end
+        return getglob(dims[1:end-1], new_inds)
+    end
+
+    offset = 0
+    globinds = Int64[]
+    for dimensions ∈ dimensions_for_variables
+        globinds = vcat(globinds, offset .+ getglob(dimensions, Int64[1]))
+        offset += prod(d.n for d ∈ dimensions)
+    end
+
+    return globinds
+end

@@ -1,5 +1,7 @@
+using BlockArrays
 using Combinatorics
 using Dates
+using SparseArrays: FixedSparseCSC
 using MPIStaticCondensations
 using Primes
 using TimerOutputs
@@ -62,22 +64,99 @@ const seed_3d = 333
 include("../test/utils.jl")
 include("../test/generate_finite_element_matrices.jl")
 
-function get_matrix(dimensions, sparse_stencils, rng, comm, distributed_comm, shared_comm,
-                    allocate_shared_float, allocate_shared_int)
+function get_matrix(block_dimensions, sparse_stencils, rng, comm, distributed_comm,
+                    shared_comm, allocate_shared_float, allocate_shared_int)
 
-    _, data, global_i, global_j, local_i, local_j =
-        assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
-                                           shared_comm, allocate_shared_float,
-                                           allocate_shared_int, rng, sparse_stencils;
-                                           return_sparse=true)
-    return data, global_i, global_j, local_i, local_j
+    matrix_parts = AbstractMatrix{Float64}[]
+    data = Float64[]
+    global_i = Int64[]
+    global_j = Int64[]
+    local_i = Int64[]
+    local_j = Int64[]
+    n_blocks = length(block_dimensions)
+
+    row_stencils = ("element", "empty", "point")
+    column_stencils = ("empty", "point", "element")
+    stencils = fill("element", n_blocks, n_blocks)
+    for irow ∈ 2:n_blocks
+        stencils[irow,1] = row_stencils[(irow-2)%3+1]
+    end
+    for icol ∈ 2:n_blocks
+        stencils[1,icol] = column_stencils[(icol-2)%3+1]
+    end
+
+    global_column_offset = 0
+    local_column_offset = 0
+    for (icol, column_dimensions) ∈ enumerate(block_dimensions)
+        global_row_offset = 0
+        local_row_offset = 0
+        n = prod(d.n for d ∈ column_dimensions)
+        n_local = prod(d.n_local for d ∈ column_dimensions)
+        for (irow, row_dimensions) ∈ enumerate(block_dimensions)
+            m = prod(d.n for d ∈ row_dimensions)
+            m_local = prod(d.n_local for d ∈ row_dimensions)
+            if length(row_dimensions) < length(column_dimensions)
+                dimensions = row_dimensions
+                extra_row_dimensions = []
+                extra_column_dimensions = column_dimensions[length(row_dimensions)+1:end]
+            else
+                dimensions = column_dimensions
+                extra_row_dimensions = row_dimensions[length(column_dimensions)+1:end]
+                extra_column_dimensions = []
+            end
+            _, block_data, block_global_i, block_global_j, block_local_i, block_local_j =
+                assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
+                                                   shared_comm, allocate_shared_float,
+                                                   allocate_shared_int, rng,
+                                                   sparse_stencils;
+                                                   return_sparse=true,
+                                                   extra_row_dimensions,
+                                                   extra_column_dimensions,
+                                                   stencil=stencils[irow,icol],
+                                                   transpose_result=(icol == 1 && irow > 1))
+
+            data = vcat(data, block_data)
+            global_i = vcat(global_i, block_global_i .+ global_row_offset)
+            global_j = vcat(global_j, block_global_j .+ global_column_offset)
+            local_i = vcat(local_i, block_local_i .+ local_row_offset)
+            local_j = vcat(local_j, block_local_j .+ local_column_offset)
+
+            if icol == 1 && irow > 1
+                # Use transposed matrices for 'C' blocks.
+                block_matrix = transpose(FixedSparseCSC(sparse(block_local_j,
+                                                               block_local_i, block_data,
+                                                               n_local, m_local)))
+            else
+                block_matrix = FixedSparseCSC(sparse(block_local_i, block_local_j,
+                                                     block_data, m_local, n_local))
+            end
+            push!(matrix_parts, block_matrix)
+
+            global_row_offset += m
+            local_row_offset += m_local
+        end
+        global_column_offset += n
+        local_column_offset += n_local
+    end
+
+    matrix = Tuple(Tuple(matrix_parts[(j-1)*n_blocks+i]
+                         for j ∈ 1:n_blocks)
+                   for i ∈ 1:n_blocks)
+
+    return matrix, data, global_i, global_j, local_i, local_j
 end
 
-function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
+function get_rhs(block_dimensions, rng, comm, distributed_comm, shared_comm,
                  allocate_shared_float)
-    rhs_global, rhs =
-        assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
-                                        allocate_shared_float, rng)
+    rhs_global = Float64[]
+    rhs = Float64[]
+    for dimensions ∈ block_dimensions
+        block_rhs_global, block_rhs =
+            assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm,
+                                            shared_comm, allocate_shared_float, rng)
+        rhs_global = vcat(rhs_global, block_rhs_global)
+        rhs = vcat(rhs, block_rhs)
+    end
     return rhs, rhs_global
 end
 
@@ -113,15 +192,19 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                                   nrank_list, params.periodic_list,
                                   params.remove_boundaries_list))]
 
+    block_dimensions = [dimensions, dimensions[end:end], dimensions[end:end],
+                        dimensions[end:end]]
+
     # First run ensures solver is compiled for these parameters. Do not save these timings
     # as we do not want to measure compilation time.
-    data, global_i, global_j, local_i, local_j =
-        get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
+    matrix, data, global_i, global_j, local_i, local_j =
+        get_matrix(block_dimensions, params.sparse_stencils, rng, comm, distributed_comm,
                    shared_comm, allocate_shared_float, allocate_shared_int)
-    rhs, rhs_global = get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
+    rhs, rhs_global = get_rhs(block_dimensions, rng, comm, distributed_comm, shared_comm,
                               allocate_shared_float)
+
     x_temp = allocate_shared_float(length(rhs))
-    run_solver(x_temp, nothing, data, global_i, global_j, local_i, local_j, rhs,
+    run_solver(x_temp, matrix, data, global_i, global_j, local_i, local_j, rhs,
                rhs_global, dimensions, level_multiplier, params.sparse_C_blocks, comm,
                distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
                1, 1, 1, 1, timer)
@@ -133,15 +216,16 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     t_lu = Float64[]
     t_solve = Float64[]
     for imat ∈ 1:nmat
-        data, global_i, global_j, local_i, local_j =
-            get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
-                       shared_comm, allocate_shared_float, allocate_shared_int)
+        matrix, data, global_i, global_j, local_i, local_j =
+            get_matrix(block_dimensions, params.sparse_stencils, rng, comm,
+                       distributed_comm, shared_comm, allocate_shared_float,
+                       allocate_shared_int)
         for irhs ∈ 1:nrhs
-            rhs, rhs_global = get_rhs(dimensions, rng, comm, distributed_comm,
+            rhs, rhs_global = get_rhs(block_dimensions, rng, comm, distributed_comm,
                                       shared_comm, allocate_shared_float)
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
-                run_solver(x, nothing, data, global_i, global_j, local_i, local_j, rhs,
+                run_solver(x, matrix, data, global_i, global_j, local_i, local_j, rhs,
                            rhs_global, dimensions, level_multiplier,
                            params.sparse_C_blocks, comm, distributed_comm, shared_comm,
                            allocate_shared_float, allocate_shared_int, nmat, nrhs,
@@ -176,7 +260,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     if distributed_rank == 0 && shared_rank == 0
         println("  setup = $mean_setup ms; LU = $mean_lu ms; solve = $mean_solve ms\n")
         if label !== nothing
-            run_dir = mkpath("results-benchmark")
+            run_dir = mkpath("results-multivariable-benchmark")
             total_size = prod(d.n for d ∈ dimensions)
             if use_shared
                 ns = n_shared
