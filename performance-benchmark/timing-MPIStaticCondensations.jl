@@ -15,6 +15,10 @@ function timing_run()
 
     BLAS.set_num_threads(1)
 
+    if MPI.Comm_rank(MPI.COMM_WORLD) == 0
+        print_git_info()
+    end
+
     comm_size = MPI.Comm_size(MPI.COMM_WORLD)
     comm_rank = MPI.Comm_rank(MPI.COMM_WORLD)
     n_shared = parse(Int64, ARGS[1])

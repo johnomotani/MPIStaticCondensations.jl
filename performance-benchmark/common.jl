@@ -4,10 +4,14 @@ using MPIStaticCondensations
 using Primes
 using TimerOutputs
 
+include("print_git_info.jl")
+
 const nmat = 1
 const nrhs = 1
 const matrix_repeats = 4
 const rhs_repeats = 100
+
+const results_directory = "results-benchmark"
 
 struct BenchmarkParams
     nelement_list::Vector{Int64}
@@ -174,7 +178,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     if distributed_rank == 0 && shared_rank == 0
         println("  setup = $mean_setup ms; LU = $mean_lu ms; solve = $mean_solve ms\n")
         if label !== nothing
-            run_dir = mkpath("results-benchmark")
+            run_dir = mkpath(results_directory)
             total_size = prod(d.n for d ∈ dimensions)
             if use_shared
                 ns = n_shared
@@ -196,6 +200,16 @@ end
 function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
     if !MPI.Initialized()
         MPI.Init()
+    end
+
+    if label !== nothing && MPI.Comm_rank(MPI.COMM_WORLD) == 0 && !isempty(params)
+        run_dir = mkpath(results_directory)
+        open(joinpath(run_dir, "provenance_$label.txt"), "a") do io
+            println(io, round(now(), Dates.Second))
+            print_git_info(io)
+            println(io, "="^100)
+            println(io)
+        end
     end
 
     comm_size = MPI.Comm_size(MPI.COMM_WORLD)
