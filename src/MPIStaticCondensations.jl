@@ -544,48 +544,50 @@ function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer
                                            float_type=Float64)
     # Initialize buffer with the same non-zero pattern as existing_buffer, but only for a
     # subset of rows given by row_range and columns given by col_range.
-    nrow = length(row_range)
-    ncol = length(col_range)
-    ind_type = eltype(row_range)
-    if nrow == 0 || ncol == 0
-        return FixedSparseCSC(nrow, ncol, ones(ind_type, ncol + 1), ind_type[],
-                              zeros(eltype(existing_buffer), 0))
-    end
+    @inbounds begin
+        nrow = length(row_range)
+        ncol = length(col_range)
+        ind_type = eltype(row_range)
+        if nrow == 0 || ncol == 0
+            return FixedSparseCSC(nrow, ncol, ones(ind_type, ncol + 1), ind_type[],
+                                  zeros(eltype(existing_buffer), 0))
+        end
 
-    colptr = ind_type[1]
-    rowval = ind_type[]
-    firstrow = first(row_range)
-    lastrow = last(row_range)
-    existing_colptr = existing_buffer.colptr
-    existing_rowval = existing_buffer.rowval
-    for j ∈ col_range
-        existing_col_start = existing_colptr[j]
-        existing_col_end = existing_colptr[j+1]-1
-        existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
-        n_existing = existing_col_end - existing_col_start + 1
-        if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
-            # Definitely no overlapping entries in this column, so skip.
+        colptr = ind_type[1]
+        rowval = ind_type[]
+        firstrow = first(row_range)
+        lastrow = last(row_range)
+        existing_colptr = existing_buffer.colptr
+        existing_rowval = existing_buffer.rowval
+        for j ∈ col_range
+            existing_col_start = existing_colptr[j]
+            existing_col_end = existing_colptr[j+1]-1
+            existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+            n_existing = existing_col_end - existing_col_start + 1
+            if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
+                # Definitely no overlapping entries in this column, so skip.
+                push!(colptr, length(rowval) + 1)
+                continue
+            end
+            count = max(searchsortedlast(existing_col_rowval, firstrow) - 1, 1)
+            for (i, i_global) ∈ enumerate(row_range)
+                while count ≤ n_existing && existing_col_rowval[count] < i_global
+                    count += 1
+                end
+                if count > n_existing
+                    break
+                end
+                if existing_col_rowval[count] == i_global
+                    push!(rowval, i)
+                end
+            end
             push!(colptr, length(rowval) + 1)
-            continue
         end
-        count = max(searchsortedlast(existing_col_rowval, firstrow) - 1, 1)
-        for (i, i_global) ∈ enumerate(row_range)
-            while count ≤ n_existing && existing_col_rowval[count] < i_global
-                count += 1
-            end
-            if count > n_existing
-                break
-            end
-            if existing_col_rowval[count] == i_global
-                push!(rowval, i)
-            end
-        end
-        push!(colptr, length(rowval) + 1)
-    end
-    nzval = zeros(float_type, length(rowval))
+        nzval = zeros(float_type, length(rowval))
 
-    buffer = FixedSparseCSC(nrow, ncol, colptr, rowval, nzval)
-    return buffer
+        buffer = FixedSparseCSC(nrow, ncol, colptr, rowval, nzval)
+        return buffer
+    end
 end
 
 struct Dimension{Ti<:Integer}
@@ -724,18 +726,20 @@ function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{
 end
 function get_global_indices(dimensions::Vector{<:Dimension},
                             local_inds::Vector{<:Integer}, n_local_tuple)
-    global_inds = similar(local_inds)
-    cartinds = CartesianIndices(n_local_tuple)
-    for (i, ind) ∈ enumerate(local_inds)
-        cart_i = cartinds[ind]
-        global_i = 0
-        for (d, di) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)))
-            global_i = global_i * d.n + d.global_inds[di] - 1
+    @inbounds begin
+        global_inds = similar(local_inds)
+        cartinds = CartesianIndices(n_local_tuple)
+        for (i, ind) ∈ enumerate(local_inds)
+            cart_i = cartinds[ind]
+            global_i = 0
+            for (d, di) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)))
+                global_i = global_i * d.n + d.global_inds[di] - 1
+            end
+            global_i += 1
+            global_inds[i] = global_i
         end
-        global_i += 1
-        global_inds[i] = global_i
+        return global_inds
     end
-    return global_inds
 end
 
 function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
@@ -745,35 +749,37 @@ function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
 end
 function apply_periodicity_to_indices(dimensions::Vector{<:Dimension},
                                       inds::Vector{Ti}, n_tuple) where Ti <: Integer
-    if !any(d.periodic for d ∈ dimensions)
-        # No periodic dimensions to account for.
-        return copy(inds)
-    end
-    periodic_inds = similar(inds)
-    periodic_pairs_first = Ti[]
-    periodic_pairs_second = Ti[]
-    cartinds = CartesianIndices(n_tuple)
-    for (i, ind) ∈ enumerate(inds)
-        cart_i = cartinds[ind]
-        global_i = 0
-        global_i_ignore_periodic = 0
-        for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
-            global_i_ignore_periodic = global_i_ignore_periodic * n + di - 1
-            if di == n && d.periodic
-                di = 1
+    @inbounds begin
+        if !any(d.periodic for d ∈ dimensions)
+            # No periodic dimensions to account for.
+            return copy(inds)
+        end
+        periodic_inds = similar(inds)
+        periodic_pairs_first = Ti[]
+        periodic_pairs_second = Ti[]
+        cartinds = CartesianIndices(n_tuple)
+        for (i, ind) ∈ enumerate(inds)
+            cart_i = cartinds[ind]
+            global_i = 0
+            global_i_ignore_periodic = 0
+            for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
+                global_i_ignore_periodic = global_i_ignore_periodic * n + di - 1
+                if di == n && d.periodic
+                    di = 1
+                end
+                global_i = global_i * n + di - 1
             end
-            global_i = global_i * n + di - 1
+            global_i += 1
+            global_i_ignore_periodic += 1
+            periodic_inds[i] = global_i
+            if global_i != global_i_ignore_periodic
+                push!(periodic_pairs_second, global_i_ignore_periodic)
+                push!(periodic_pairs_first, global_i)
+            end
         end
-        global_i += 1
-        global_i_ignore_periodic += 1
-        periodic_inds[i] = global_i
-        if global_i != global_i_ignore_periodic
-            push!(periodic_pairs_second, global_i_ignore_periodic)
-            push!(periodic_pairs_first, global_i)
-        end
+        periodic_pairs = transpose(hcat(periodic_pairs_first, periodic_pairs_second))
+        return periodic_inds, periodic_pairs
     end
-    periodic_pairs = transpose(hcat(periodic_pairs_first, periodic_pairs_second))
-    return periodic_inds, periodic_pairs
 end
 
 function get_non_repeated_indices_and_repeats(dimensions::Vector{<:Dimension},
@@ -783,149 +789,157 @@ function get_non_repeated_indices_and_repeats(dimensions::Vector{<:Dimension},
 end
 function get_non_repeated_indices_and_repeats(dimensions::Vector{<:Dimension},
                                               inds::Vector{Ti}, n_tuple) where Ti <: Integer
-    if !any(d.periodic for d ∈ dimensions)
-        # No periodic dimensions to account for.
-        return copy(inds)
-    end
-    unique_inds = Ti[]
-    repeat_inds = Ti[]
-    cartinds = CartesianIndices(n_tuple)
-    for (i, ind) ∈ enumerate(inds)
-        cart_i = cartinds[ind]
-        global_i = 0
-        global_i_ignore_periodic = 0
-        for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
-            global_i_ignore_periodic = global_i_ignore_periodic * n + di - 1
-            if di == n && d.periodic
-                di = 1
+    @inbounds begin
+        if !any(d.periodic for d ∈ dimensions)
+            # No periodic dimensions to account for.
+            return copy(inds)
+        end
+        unique_inds = Ti[]
+        repeat_inds = Ti[]
+        cartinds = CartesianIndices(n_tuple)
+        for (i, ind) ∈ enumerate(inds)
+            cart_i = cartinds[ind]
+            global_i = 0
+            global_i_ignore_periodic = 0
+            for (d, di, n) ∈ zip(reverse(dimensions), reverse(Tuple(cart_i)), reverse(n_tuple))
+                global_i_ignore_periodic = global_i_ignore_periodic * n + di - 1
+                if di == n && d.periodic
+                    di = 1
+                end
+                global_i = global_i * n + di - 1
             end
-            global_i = global_i * n + di - 1
+            global_i += 1
+            global_i_ignore_periodic += 1
+            if global_i == global_i_ignore_periodic
+                push!(unique_inds, global_i)
+            else
+                push!(repeat_inds, global_i_ignore_periodic)
+            end
         end
-        global_i += 1
-        global_i_ignore_periodic += 1
-        if global_i == global_i_ignore_periodic
-            push!(unique_inds, global_i)
-        else
-            push!(repeat_inds, global_i_ignore_periodic)
-        end
+        return unique_inds, repeat_inds
     end
-    return unique_inds, repeat_inds
 end
 
 function get_dim_indices!(dimensions, block_sizes, flat_i)
-    block_inds = zeros(Int64, length(dimensions))
-    inner_inds = zeros(Int64, length(dimensions))
-    for (i, d) ∈ enumerate(dimensions)
-        flat_i, dim_i = divrem(flat_i, d.n_local)
-        this_block_npoints = block_sizes[i] * (d.ngrid - 1)
-        block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+    @inbounds begin
+        block_inds = zeros(Int64, length(dimensions))
+        inner_inds = zeros(Int64, length(dimensions))
+        for (i, d) ∈ enumerate(dimensions)
+            flat_i, dim_i = divrem(flat_i, d.n_local)
+            this_block_npoints = block_sizes[i] * (d.ngrid - 1)
+            block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+        end
+        return block_inds, inner_inds
     end
-    return block_inds, inner_inds
 end
 
 function add_all_row_inds!(rv, idim, dimensions, row_indices, rowind, count, row_count)
-    if idim == 0
-        # rowind is constructed as a 0-based index for convenience. Convert to
-        # 1-based before adding to `rv`.
-        rowind += 1
-        # Only add row indices that are contained in row_indices. For each column,
-        # we iterate through the rows in order so we use row_count to avoid
-        # searching row_indices here.
-        while row_count[] ≤ length(row_indices) && rowind > row_indices[row_count[]]
-            row_count[] += 1
+    @inbounds begin
+        if idim == 0
+            # rowind is constructed as a 0-based index for convenience. Convert to
+            # 1-based before adding to `rv`.
+            rowind += 1
+            # Only add row indices that are contained in row_indices. For each column,
+            # we iterate through the rows in order so we use row_count to avoid
+            # searching row_indices here.
+            while row_count[] ≤ length(row_indices) && rowind > row_indices[row_count[]]
+                row_count[] += 1
+            end
+            if row_count[] ≤ length(row_indices) && rowind == row_indices[row_count[]]
+                push!(rv, row_count[])
+                count[] += 1
+                row_count[] += 1
+            end
+            return nothing
         end
-        if row_count[] ≤ length(row_indices) && rowind == row_indices[row_count[]]
-            push!(rv, row_count[])
-            count[] += 1
-            row_count[] += 1
+        d = dimensions[idim]
+        rowind *= d.n_local
+        for i ∈ 1:d.n_local
+            add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + i - 1, count,
+                              row_count)
         end
         return nothing
     end
-    d = dimensions[idim]
-    rowind *= d.n_local
-    for i ∈ 1:d.n_local
-        add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + i - 1, count,
-                          row_count)
-    end
-    return nothing
 end
 
 function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indices,
                        block_inds, inner_inds, rowind, count, row_count)
-    if idim == 0
-        # rowind is constructed as a 0-based index for convenience. Convert to
-        # 1-based before adding to `rv`.
-        rowind += 1
-        # Only add row indices that are contained in row_indices. For each column,
-        # we iterate through the rows in order so we use row_count to avoid
-        # searching row_indices here.
-        while row_count[] ≤ length(row_indices) && rowind > row_indices[row_count[]]
-            row_count[] += 1
+    @inbounds begin
+        if idim == 0
+            # rowind is constructed as a 0-based index for convenience. Convert to
+            # 1-based before adding to `rv`.
+            rowind += 1
+            # Only add row indices that are contained in row_indices. For each column,
+            # we iterate through the rows in order so we use row_count to avoid
+            # searching row_indices here.
+            while row_count[] ≤ length(row_indices) && rowind > row_indices[row_count[]]
+                row_count[] += 1
+            end
+            if row_count[] ≤ length(row_indices) && rowind == row_indices[row_count[]]
+                push!(rv, row_count[])
+                count[] += 1
+                row_count[] += 1
+            end
+            return nothing
         end
-        if row_count[] ≤ length(row_indices) && rowind == row_indices[row_count[]]
-            push!(rv, row_count[])
-            count[] += 1
-            row_count[] += 1
+        d = dimensions[idim]
+        dn = d.n_local
+        block_npoints = block_sizes[idim] * (d.ngrid - 1)
+        iblock = block_inds[idim]
+        iinner = inner_inds[idim]
+        rowind *= dn
+        is_first_point = (iinner == 1 && iblock == 1)
+        is_last_point = (((iblock - 1) * block_npoints + iinner) == dn)
+        if iinner == 1 && iblock > 1
+            # Is a block boundary, so include points from previous block.
+            row_offset = (iblock - 2) * block_npoints
+            for row_inner ∈ 1:block_npoints
+                add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list,
+                              row_indices, block_inds, inner_inds,
+                              rowind + row_offset + row_inner - 1, count, row_count)
+            end
+        end
+        row_offset = (iblock - 1) * block_npoints
+        if d.dense_boundaries && is_first_point
+            # This is the first or last point in a dimension that should have 'dense
+            # boundaries'.
+            block_start = 2
+            add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + row_offset,
+                              count, row_count)
+        else
+            block_start = 1
+        end
+        if d.dense_boundaries && is_last_point
+            row_end = dn - 1
+        else
+            row_end = dn
+        end
+        if iblock > nblock_list[idim] && d.dense_boundaries
+            # Have added all points already.
+        elseif iblock > nblock_list[idim]
+            # Creating entries for the last grid point, this is 'really'
+            # iel=nelement_local-1, col_igr=ngrid, so only need to add the row_igr=1
+            # point.
+            add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
+                          block_inds, inner_inds, rowind + row_offset, count, row_count)
+        else
+            for row_inner ∈ block_start:block_npoints+1
+                if row_offset + row_inner > row_end
+                    # Do not want to advance past the end of the dimension. The last block in
+                    # any dimension may not be full-sized.
+                    break
+                end
+                add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list,
+                              row_indices, block_inds, inner_inds,
+                              rowind + row_offset + row_inner - 1, count, row_count)
+            end
+        end
+        if d.dense_boundaries && is_last_point
+            add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + dn - 1,
+                              count, row_count)
         end
         return nothing
     end
-    d = dimensions[idim]
-    dn = d.n_local
-    block_npoints = block_sizes[idim] * (d.ngrid - 1)
-    iblock = block_inds[idim]
-    iinner = inner_inds[idim]
-    rowind *= dn
-    is_first_point = (iinner == 1 && iblock == 1)
-    is_last_point = (((iblock - 1) * block_npoints + iinner) == dn)
-    if iinner == 1 && iblock > 1
-        # Is a block boundary, so include points from previous block.
-        row_offset = (iblock - 2) * block_npoints
-        for row_inner ∈ 1:block_npoints
-            add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
-                          block_inds, inner_inds, rowind + row_offset + row_inner - 1,
-                          count, row_count)
-        end
-    end
-    row_offset = (iblock - 1) * block_npoints
-    if d.dense_boundaries && is_first_point
-        # This is the first or last point in a dimension that should have 'dense
-        # boundaries'.
-        block_start = 2
-        add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + row_offset,
-                          count, row_count)
-    else
-        block_start = 1
-    end
-    if d.dense_boundaries && is_last_point
-        row_end = dn - 1
-    else
-        row_end = dn
-    end
-    if iblock > nblock_list[idim] && d.dense_boundaries
-        # Have added all points already.
-    elseif iblock > nblock_list[idim]
-        # Creating entries for the last grid point, this is 'really'
-        # iel=nelement_local-1, col_igr=ngrid, so only need to add the row_igr=1
-        # point.
-        add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
-                      block_inds, inner_inds, rowind + row_offset, count, row_count)
-    else
-        for row_inner ∈ block_start:block_npoints+1
-            if row_offset + row_inner > row_end
-                # Do not want to advance past the end of the dimension. The last block in
-                # any dimension may not be full-sized.
-                break
-            end
-            add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
-                          block_inds, inner_inds, rowind + row_offset + row_inner - 1,
-                          count, row_count)
-        end
-    end
-    if d.dense_boundaries && is_last_point
-        add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + dn - 1,
-                          count, row_count)
-    end
-    return nothing
 end
 function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                                              shared_comm, allocate_shared_float::F1,
@@ -934,80 +948,85 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                                              row_indices::Union{Vector{<:Integer},Nothing}=nothing,
                                              column_indices::Union{Vector{<:Integer},Nothing}=nothing;
                                              ind_type::Type=Int64) where {F1, F2}
-    n_local_list = [d.n_local for d ∈ dimensions]
-    n_total = prod(n_local_list; init=1)
-    if block_sizes === nothing
-        block_sizes = ones(ind_type, length(dimensions))
-    end
-    if row_indices === nothing
-        row_indices = 1:n_total
-    end
-    if column_indices === nothing
-        column_indices = 1:n_total
-    end
-    nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
-    nblock_list = [(nel + bs - 1) ÷ bs for (nel, bs) ∈ zip(nelement_local_list, block_sizes)]
-    m = length(row_indices)
-    n = length(column_indices)
-    if m == 0 || n == 0
-        # FixedSparseCSC constructor errors when one of the matrix sizes is zero, and
-        # there are no entries anyway so do not need shared-memory allocation.
-        return spzeros(m, n)
-    end
-
-    for (idim, d) ∈ enumerate(dimensions)
-        if d.dense_boundaries && any(x.nrank > 1 for x ∈ dimensions[1:idim-1])
-            error("Dimensions to the left of a dimension with dense_boundaries=true "
-                  * "(dimension $idim) cannot be distributed across multiple MPI "
-                  * "shared-memory blocks")
+    @inbounds begin
+        n_local_list = [d.n_local for d ∈ dimensions]
+        n_total = prod(n_local_list; init=1)
+        if block_sizes === nothing
+            block_sizes = ones(ind_type, length(dimensions))
         end
-    end
+        if row_indices === nothing
+            row_indices = 1:n_total
+        end
+        if column_indices === nothing
+            column_indices = 1:n_total
+        end
+        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+        nblock_list = [(nel + bs - 1) ÷ bs for (nel, bs) ∈ zip(nelement_local_list,
+                                                               block_sizes)]
+        m = length(row_indices)
+        n = length(column_indices)
+        if m == 0 || n == 0
+            # FixedSparseCSC constructor errors when one of the matrix sizes is zero, and
+            # there are no entries anyway so do not need shared-memory allocation.
+            return spzeros(m, n)
+        end
 
-    shared_comm_rank = MPI.Comm_rank(shared_comm)
-    n_colptr = Ref(-1)
-    n_rowval = Ref(-1)
-    if shared_comm_rank == 0
-        cp = Int64[]
-        rv = Int64[]
-        count = Ref(1)
-        row_count = Ref(1)
+        for (idim, d) ∈ enumerate(dimensions)
+            if d.dense_boundaries && any(x.nrank > 1 for x ∈ dimensions[1:idim-1])
+                error("Dimensions to the left of a dimension with dense_boundaries=true "
+                      * "(dimension $idim) cannot be distributed across multiple MPI "
+                      * "shared-memory blocks")
+            end
+        end
 
-        for col ∈ column_indices
+        shared_comm_rank = MPI.Comm_rank(shared_comm)
+        n_colptr = Ref(-1)
+        n_rowval = Ref(-1)
+        if shared_comm_rank == 0
+            cp = Int64[]
+            rv = Int64[]
+            count = Ref(1)
+            row_count = Ref(1)
+
+            for col ∈ column_indices
+                push!(cp, count[])
+                block_inds, inner_inds = get_dim_indices!(dimensions, block_sizes,
+                                                          col - 1)
+                row_count[] = 1
+                add_row_inds!(rv, length(dimensions), dimensions, block_sizes,
+                              nblock_list, row_indices, block_inds, inner_inds, 0, count,
+                              row_count)
+            end
             push!(cp, count[])
-            block_inds, inner_inds = get_dim_indices!(dimensions, block_sizes, col - 1)
-            row_count[] = 1
-            add_row_inds!(rv, length(dimensions), dimensions, block_sizes, nblock_list,
-                          row_indices, block_inds, inner_inds, 0, count, row_count)
+
+            n_colptr[] = length(cp)
+            n_rowval[] = length(rv)
+
+            MPI.Bcast!(n_colptr, shared_comm; root=0)
+            MPI.Bcast!(n_rowval, shared_comm; root=0)
+
+            colptr = allocate_shared_int(n_colptr[])
+            rowval = allocate_shared_int(n_rowval[])
+            nzval = allocate_shared_float(n_rowval[])
+
+            colptr .= cp
+            rowval .= rv
+            nzval .= 0.0
+        else
+            MPI.Bcast!(n_colptr, shared_comm; root=0)
+            MPI.Bcast!(n_rowval, shared_comm; root=0)
+
+            colptr = allocate_shared_int(n_colptr[])
+            rowval = allocate_shared_int(n_rowval[])
+            nzval = allocate_shared_float(n_rowval[])
         end
-        push!(cp, count[])
 
-        n_colptr[] = length(cp)
-        n_rowval[] = length(rv)
+        MPI.Barrier(shared_comm)
 
-        MPI.Bcast!(n_colptr, shared_comm; root=0)
-        MPI.Bcast!(n_rowval, shared_comm; root=0)
-
-        colptr = allocate_shared_int(n_colptr[])
-        rowval = allocate_shared_int(n_rowval[])
-        nzval = allocate_shared_float(n_rowval[])
-
-        colptr .= cp
-        rowval .= rv
-        nzval .= 0.0
-    else
-        MPI.Bcast!(n_colptr, shared_comm; root=0)
-        MPI.Bcast!(n_rowval, shared_comm; root=0)
-
-        colptr = allocate_shared_int(n_colptr[])
-        rowval = allocate_shared_int(n_rowval[])
-        nzval = allocate_shared_float(n_rowval[])
+        # Use the 'experimental' FixedSparseCSC instead of SparseMatrixCSC to ensure that
+        # the Vectors are not resized, reallocated, etc.
+        return FixedSparseCSC(m, n, colptr, rowval, nzval)
     end
-
-    MPI.Barrier(shared_comm)
-
-    # Use the 'experimental' FixedSparseCSC instead of SparseMatrixCSC to ensure that the
-    # Vectors are not resized, reallocated, etc.
-    return FixedSparseCSC(m, n, colptr, rowval, nzval)
 end
 
 struct FakeComm
@@ -1058,506 +1077,508 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                       is_bottom_level::Bool,
                       distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
                       shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
-    if length(dimensions) != length(block_sizes)
-        error("dimensions and block_sizes should be the same length")
-    end
-
-    has_periodic = any(d.periodic for d ∈ dimensions)
-
-    if shared_comm == MPI.COMM_NULL
-        # This processor does no work on this level, so just fill level_info with dummy
-        # values.
-        return LevelInfo(; has_periodic, block_sizes, global_size=0,
-                         global_bottom_vector_size=0, top_vector_indices=Ti[],
-                         local_top_vector_indices=Ti[],
-                         all_local_top_vector_a_block_indices=Ti[],
-                         local_top_vector_a_block_indices=Vector{Ti}[],
-                         iblock_list=zeros(Ti, 2, 0),
-                         all_a_block_sub_selection_indices=Ti[],
-                         a_block_sub_selection_indices=Vector{Ti}[],
-                         a_block_lu_selection_indices=Vector{Ti}[],
-                         a_block_B_column_indices=Vector{Ti}[], n_subgroups=0,
-                         subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
-                         bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
-                         local_bottom_vector_no_overlap_indices=Ti[],
-                         local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
-                         local_bottom_vector_repeat_indices=Ti[],
-                         local_bottom_vector_periodic_pairs=zeros(Ti,2,0),
-                         level_shared_comm=shared_comm)
-    end
-
-    # Divide the grid into blocks where the number of elements in a block in each
-    # dimension is given by `block_sizes`.
-    boundary_indices = Ti[]
-    function get_boundary_indices!(idim, this_dim, flat_i)
-        if this_dim ≤ 0
-            push!(boundary_indices, flat_i + 1)
-            return nothing
+    @inbounds begin
+        if length(dimensions) != length(block_sizes)
+            error("dimensions and block_sizes should be the same length")
         end
 
-        next_dim = this_dim - 1
-        d = dimensions[this_dim]
-        n = d.n
-        n_local = d.n_local
-        flat_i *= n
+        has_periodic = any(d.periodic for d ∈ dimensions)
 
-        # Add offset for distributed blocks.
-        flat_i += d.irank * (n_local - 1)
+        if shared_comm == MPI.COMM_NULL
+            # This processor does no work on this level, so just fill level_info with dummy
+            # values.
+            return LevelInfo(; has_periodic, block_sizes, global_size=0,
+                             global_bottom_vector_size=0, top_vector_indices=Ti[],
+                             local_top_vector_indices=Ti[],
+                             all_local_top_vector_a_block_indices=Ti[],
+                             local_top_vector_a_block_indices=Vector{Ti}[],
+                             iblock_list=zeros(Ti, 2, 0),
+                             all_a_block_sub_selection_indices=Ti[],
+                             a_block_sub_selection_indices=Vector{Ti}[],
+                             a_block_lu_selection_indices=Vector{Ti}[],
+                             a_block_B_column_indices=Vector{Ti}[], n_subgroups=0,
+                             subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
+                             bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
+                             local_bottom_vector_no_overlap_indices=Ti[],
+                             local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
+                             local_bottom_vector_repeat_indices=Ti[],
+                             local_bottom_vector_periodic_pairs=zeros(Ti,2,0),
+                             level_shared_comm=shared_comm)
+        end
 
-        if idim == this_dim
-            bs = block_sizes[idim]
-            nelement_local = d.nelement ÷ d.nrank
-            ngrid = d.ngrid
+        # Divide the grid into blocks where the number of elements in a block in each
+        # dimension is given by `block_sizes`.
+        boundary_indices = Ti[]
+        function get_boundary_indices!(idim, this_dim, flat_i)
+            if this_dim ≤ 0
+                push!(boundary_indices, flat_i + 1)
+                return nothing
+            end
 
-            if d.remove_boundaries || d.periodic
-                # Always add first and last points to 'boundary points'.
-                get_boundary_indices!(idim, next_dim, flat_i)
-                get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
-            else
-                # Keep boundary points on first/last shared-memory blocks of processes.
-                if d.irank > 0
+            next_dim = this_dim - 1
+            d = dimensions[this_dim]
+            n = d.n
+            n_local = d.n_local
+            flat_i *= n
+
+            # Add offset for distributed blocks.
+            flat_i += d.irank * (n_local - 1)
+
+            if idim == this_dim
+                bs = block_sizes[idim]
+                nelement_local = d.nelement ÷ d.nrank
+                ngrid = d.ngrid
+
+                if d.remove_boundaries || d.periodic
+                    # Always add first and last points to 'boundary points'.
                     get_boundary_indices!(idim, next_dim, flat_i)
-                end
-                if d.irank < d.nrank - 1
                     get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
+                else
+                    # Keep boundary points on first/last shared-memory blocks of processes.
+                    if d.irank > 0
+                        get_boundary_indices!(idim, next_dim, flat_i)
+                    end
+                    if d.irank < d.nrank - 1
+                        get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
+                    end
+                end
+
+                # Add the interior boundary points
+                nblocks = (nelement_local + bs - 1) ÷ bs
+                for b ∈ 1:nblocks-1
+                    # Note we do not `+1` to boundary here because it is more convenient to
+                    # construct `flat_i` as a 0-based index, and only convert to 1-based just
+                    # before pushing into `boundary_indices`.
+                    boundary = b * bs * (ngrid - 1)
+                    if boundary < n_local
+                        get_boundary_indices!(idim, next_dim, flat_i + boundary)
+                    end
+                end
+            else
+                # Add all points from `d`.
+                for i ∈ 0:n_local-1
+                    get_boundary_indices!(idim, next_dim, flat_i + i)
                 end
             end
 
-            # Add the interior boundary points
-            nblocks = (nelement_local + bs - 1) ÷ bs
-            for b ∈ 1:nblocks-1
-                # Note we do not `+1` to boundary here because it is more convenient to
-                # construct `flat_i` as a 0-based index, and only convert to 1-based just
-                # before pushing into `boundary_indices`.
-                boundary = b * bs * (ngrid - 1)
-                if boundary < n_local
-                    get_boundary_indices!(idim, next_dim, flat_i + boundary)
-                end
-            end
+            return nothing
+        end
+        for idim ∈ 1:length(dimensions)
+            get_boundary_indices!(idim, length(dimensions), 0)
+        end
+        # There will be duplicated points in block_boundary_indices. Sort the list and remove
+        # the duplicates.
+        sort!(boundary_indices)
+        unique!(boundary_indices)
+
+        # Interior indices are all the indices in level_indices that are not boundary indices.
+        interior_indices = setdiff(level_indices, boundary_indices)
+
+        # Get interior indices of the blocks that should be inverted by this processor.
+        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+        nblocks_list = [(nelement + bs - 1) ÷ bs
+                        for (nelement, bs) ∈ zip(nelement_local_list, block_sizes)]
+        total_nblocks = prod(nblocks_list)
+        shared_comm_rank = MPI.Comm_rank(shared_comm)
+        shared_comm_size = MPI.Comm_size(shared_comm)
+        if is_top_level
+            # At the top level we might use sparse blocks, which are not supported by
+            # shared-memory parallelised blocks. Usually the top level should have more blocks
+            # than processes, so lack of parallelisation should not matter.
+            subgroup_size = 1
         else
-            # Add all points from `d`.
-            for i ∈ 0:n_local-1
-                get_boundary_indices!(idim, next_dim, flat_i + i)
+            subgroup_size = max(shared_comm_size ÷ total_nblocks, 1)
+        end
+        if shared_comm_rank ≥ total_nblocks * subgroup_size
+            subgroup_i = -1
+        else
+            subgroup_i = shared_comm_rank ÷ subgroup_size
+        end
+        n_subgroups = min(shared_comm_size ÷ subgroup_size, total_nblocks)
+        block_comm = MPI.Comm_split(shared_comm, subgroup_i < 0 ? nothing : subgroup_i, 0)
+        blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
+        if subgroup_i < 0
+            this_proc_blocks = 1:0
+        else
+            this_proc_blocks = subgroup_i*blocks_per_proc+1:min((subgroup_i+1)*blocks_per_proc,total_nblocks)
+        end
+        block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
+        block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
+        iblock_list = Matrix{Ti}(undef, length(nblocks_list), length(this_proc_blocks))
+        function get_block_points!(bi, b)
+            iblock = zeros(Ti, length(dimensions))
+            temp = b - 1
+            for (idim, nb) ∈ enumerate(nblocks_list)
+                temp, iblock[idim] = divrem(temp, nb)
             end
-        end
+            iblock .+= 1
+            iblock_list[:,bi] .= iblock
+            this_bii = Ti[]
+            block_interior_indices[bi] = this_bii
+            function get_block_interior_indices_from_dim!(this_dim, flat_i)
+                if this_dim ≤ 0
+                    push!(this_bii, flat_i + 1)
+                    return nothing
+                end
+                next_dim = this_dim - 1
+                d = dimensions[this_dim]
+                n = d.n
+                ngrid = d.ngrid
+                nelement_local = d.nelement ÷ d.nrank
+                flat_i *= n
 
-        return nothing
-    end
-    for idim ∈ 1:length(dimensions)
-        get_boundary_indices!(idim, length(dimensions), 0)
-    end
-    # There will be duplicated points in block_boundary_indices. Sort the list and remove
-    # the duplicates.
-    sort!(boundary_indices)
-    unique!(boundary_indices)
+                # Add offset for distributed blocks.
+                flat_i += d.irank * (d.n_local - 1)
 
-    # Interior indices are all the indices in level_indices that are not boundary indices.
-    interior_indices = setdiff(level_indices, boundary_indices)
-
-    # Get interior indices of the blocks that should be inverted by this processor.
-    nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
-    nblocks_list = [(nelement + bs - 1) ÷ bs
-                    for (nelement, bs) ∈ zip(nelement_local_list, block_sizes)]
-    total_nblocks = prod(nblocks_list)
-    shared_comm_rank = MPI.Comm_rank(shared_comm)
-    shared_comm_size = MPI.Comm_size(shared_comm)
-    if is_top_level
-        # At the top level we might use sparse blocks, which are not supported by
-        # shared-memory parallelised blocks. Usually the top level should have more blocks
-        # than processes, so lack of parallelisation should not matter.
-        subgroup_size = 1
-    else
-        subgroup_size = max(shared_comm_size ÷ total_nblocks, 1)
-    end
-    if shared_comm_rank ≥ total_nblocks * subgroup_size
-        subgroup_i = -1
-    else
-        subgroup_i = shared_comm_rank ÷ subgroup_size
-    end
-    n_subgroups = min(shared_comm_size ÷ subgroup_size, total_nblocks)
-    block_comm = MPI.Comm_split(shared_comm, subgroup_i < 0 ? nothing : subgroup_i, 0)
-    blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
-    if subgroup_i < 0
-        this_proc_blocks = 1:0
-    else
-        this_proc_blocks = subgroup_i*blocks_per_proc+1:min((subgroup_i+1)*blocks_per_proc,total_nblocks)
-    end
-    block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
-    block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
-    iblock_list = Matrix{Ti}(undef, length(nblocks_list), length(this_proc_blocks))
-    function get_block_points!(bi, b)
-        iblock = zeros(Ti, length(dimensions))
-        temp = b - 1
-        for (idim, nb) ∈ enumerate(nblocks_list)
-            temp, iblock[idim] = divrem(temp, nb)
-        end
-        iblock .+= 1
-        iblock_list[:,bi] .= iblock
-        this_bii = Ti[]
-        block_interior_indices[bi] = this_bii
-        function get_block_interior_indices_from_dim!(this_dim, flat_i)
-            if this_dim ≤ 0
-                push!(this_bii, flat_i + 1)
+                this_block = iblock[this_dim]
+                bs = block_sizes[this_dim]
+                first_element = (this_block - 1) * bs + 1
+                last_element = min(this_block * bs, nelement_local)
+                if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
+                    first_interior_point = 1
+                else
+                    first_interior_point = (first_element - 1) * (ngrid - 1) + 2
+                end
+                if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
+                    last_interior_point = n
+                else
+                    last_interior_point = last_element * (ngrid - 1)
+                end
+                for i ∈ first_interior_point:last_interior_point
+                    get_block_interior_indices_from_dim!(next_dim, flat_i + i - 1)
+                end
                 return nothing
             end
-            next_dim = this_dim - 1
-            d = dimensions[this_dim]
-            n = d.n
-            ngrid = d.ngrid
-            nelement_local = d.nelement ÷ d.nrank
-            flat_i *= n
+            get_block_interior_indices_from_dim!(length(dimensions), 0)
 
-            # Add offset for distributed blocks.
-            flat_i += d.irank * (d.n_local - 1)
+            this_bbi = Ti[]
+            block_boundary_indices[bi] = this_bbi
+            function get_block_boundary_indices_from_dim!(this_dim, flat_i, boundary_dim)
+                if this_dim ≤ 0
+                    push!(this_bbi, flat_i + 1)
+                    return nothing
+                end
+                next_dim = this_dim - 1
+                d = dimensions[this_dim]
+                n = d.n
+                ngrid = d.ngrid
+                nelement_local = d.nelement ÷ d.nrank
+                flat_i *= n
 
-            this_block = iblock[this_dim]
-            bs = block_sizes[this_dim]
-            first_element = (this_block - 1) * bs + 1
-            last_element = min(this_block * bs, nelement_local)
-            if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
-                first_interior_point = 1
-            else
-                first_interior_point = (first_element - 1) * (ngrid - 1) + 2
+                # Add offset for distributed blocks.
+                flat_i += d.irank * (d.n_local - 1)
+
+                this_block = iblock[this_dim]
+                bs = block_sizes[this_dim]
+                first_element = (this_block - 1) * bs + 1
+                last_element = min(this_block * bs, nelement_local)
+                if this_dim == boundary_dim
+                    if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
+                        # No first boundary point.
+                    else
+                        first_boundary_point = (first_element - 1) * (ngrid - 1) + 1
+                        get_block_boundary_indices_from_dim!(next_dim, flat_i + first_boundary_point - 1,
+                                                    boundary_dim)
+                    end
+                    if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
+                        # No last boundary point.
+                    else
+                        last_boundary_point = last_element * (ngrid - 1) + 1
+                        get_block_boundary_indices_from_dim!(next_dim, flat_i + last_boundary_point - 1,
+                                                    boundary_dim)
+                    end
+                else
+                    if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
+                        first_point = 1
+                    else
+                        first_point = (first_element - 1) * (ngrid - 1) + 1
+                    end
+                    if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
+                        last_point = n
+                    else
+                        last_point = last_element * (ngrid - 1) + 1
+                    end
+                    for i ∈ first_point:last_point
+                        get_block_boundary_indices_from_dim!(next_dim, flat_i + i - 1,
+                                                             boundary_dim)
+                    end
+                end
+                return nothing
             end
-            if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
-                last_interior_point = n
-            else
-                last_interior_point = last_element * (ngrid - 1)
-            end
-            for i ∈ first_interior_point:last_interior_point
-                get_block_interior_indices_from_dim!(next_dim, flat_i + i - 1)
+            for boundary_dim ∈ 1:length(dimensions)
+                get_block_boundary_indices_from_dim!(length(dimensions), 0, boundary_dim)
             end
             return nothing
         end
-        get_block_interior_indices_from_dim!(length(dimensions), 0)
-
-        this_bbi = Ti[]
-        block_boundary_indices[bi] = this_bbi
-        function get_block_boundary_indices_from_dim!(this_dim, flat_i, boundary_dim)
-            if this_dim ≤ 0
-                push!(this_bbi, flat_i + 1)
-                return nothing
-            end
-            next_dim = this_dim - 1
-            d = dimensions[this_dim]
-            n = d.n
-            ngrid = d.ngrid
-            nelement_local = d.nelement ÷ d.nrank
-            flat_i *= n
-
-            # Add offset for distributed blocks.
-            flat_i += d.irank * (d.n_local - 1)
-
-            this_block = iblock[this_dim]
-            bs = block_sizes[this_dim]
-            first_element = (this_block - 1) * bs + 1
-            last_element = min(this_block * bs, nelement_local)
-            if this_dim == boundary_dim
-                if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
-                    # No first boundary point.
+        for (bi, b) ∈ enumerate(this_proc_blocks)
+            get_block_points!(bi, b)
+        end
+        for bii ∈ block_interior_indices
+            sort!(bii)
+            unique!(bii)
+        end
+        for bbi ∈ block_boundary_indices
+            sort!(bbi)
+            unique!(bbi)
+        end
+        all_block_interior_indices = sort!(vcat(block_interior_indices))
+        # Find the points from interior_indices that are part of block_interior_indices.
+        # Generally this will not be all the points in block_interior_indices.
+        all_local_top_vector_a_block_indices = Ti[]
+        local_top_vector_a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
+        all_a_block_sub_selection_indices = Ti[]
+        a_block_sub_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
+        # The following search relies on both `interior_indices` and `block_interior_indices`
+        # being sorted.
+        for (this_block_interior_indices, this_local_top_vector_a_block_indices, this_a_block_sub_selection_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices, a_block_sub_selection_indices)
+            i_count = 1
+            bi_count = 1
+            while (i_count ≤ length(interior_indices)
+                   && bi_count ≤ length(this_block_interior_indices))
+                i = interior_indices[i_count]
+                bi = this_block_interior_indices[bi_count]
+                if i == bi
+                    push!(all_local_top_vector_a_block_indices, i)
+                    push!(this_local_top_vector_a_block_indices, i)
+                    push!(all_a_block_sub_selection_indices, i_count)
+                    push!(this_a_block_sub_selection_indices, i_count)
+                    i_count += 1
+                    bi_count += 1
+                elseif i < bi
+                    i_count += 1
                 else
-                    first_boundary_point = (first_element - 1) * (ngrid - 1) + 1
-                    get_block_boundary_indices_from_dim!(next_dim, flat_i + first_boundary_point - 1,
-                                                boundary_dim)
+                    bi_count += 1
                 end
-                if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
-                    # No last boundary point.
+            end
+        end
+        sort!(all_local_top_vector_a_block_indices)
+        sort!(all_a_block_sub_selection_indices)
+
+        a_block_lu_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
+        # The following search relies on both `all_a_block_sub_selection_indices` and
+        # `a_block_sub_selection_indices` being sorted.
+        for (this_a_block_sub_selection_indices, this_a_block_lu_selection_indices) ∈ zip(a_block_sub_selection_indices, a_block_lu_selection_indices)
+            i_count = 1
+            bi_count = 1
+            while (i_count ≤ length(all_a_block_sub_selection_indices)
+                   && bi_count ≤ length(this_a_block_sub_selection_indices))
+                i = all_a_block_sub_selection_indices[i_count]
+                bi = this_a_block_sub_selection_indices[bi_count]
+                if i == bi
+                    push!(this_a_block_lu_selection_indices, i_count)
+                    i_count += 1
+                    bi_count += 1
+                elseif i < bi
+                    i_count += 1
                 else
-                    last_boundary_point = last_element * (ngrid - 1) + 1
-                    get_block_boundary_indices_from_dim!(next_dim, flat_i + last_boundary_point - 1,
-                                                boundary_dim)
+                    bi_count += 1
                 end
-            else
-                if d.irank == 0 && first_element == 1 && !(d.remove_boundaries || d.periodic)
-                    first_point = 1
+            end
+        end
+
+        if is_bottom_level && has_periodic
+            block_boundary_indices = [get_non_repeated_indices_and_repeats(dimensions, bbi)[1]
+                                      for bbi ∈ block_boundary_indices]
+        end
+
+        # Simplest way to get the global_bottom_vector_size is to first calculate the size of
+        # the 'top vector' then subtract it from `global_size`. This is simplest because the
+        # 'top vector' does not have any points that are duplicated between different
+        # shared-memory blocks of processes, so we don't have to worry about double-counting.
+        top_vector_size = Ref(length(interior_indices))
+        if shared_comm_rank == 0
+            MPI.Allreduce!(top_vector_size, +, distributed_comm)
+        end
+        MPI.Bcast!(top_vector_size, shared_comm; root=0)
+        global_bottom_vector_size = global_size - top_vector_size[]
+
+        #global_top_vector_indices, _, _ = apply_periodicity_to_indices(dimensions, interior_indices)
+        # Top vector indices can never be on periodic boundaries, so no need to apply
+        # periodicity.
+        global_top_vector_indices = interior_indices
+        if is_top_level && is_bottom_level && has_periodic
+            # need to handle periodicity
+            global_bottom_vector_indices, _ =
+                apply_periodicity_to_indices(dimensions, boundary_indices)
+            global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
+                get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+            global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
+        elseif is_bottom_level && has_periodic
+            # need to handle periodicity
+            global_bottom_vector_indices, global_bottom_vector_periodic_pairs =
+                apply_periodicity_to_indices(dimensions, boundary_indices)
+            global_bottom_vector_no_overlap_indices, _ =
+                get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+            global_bottom_vector_repeat_inds = Ti[]
+        elseif is_top_level && has_periodic
+            # need to handle periodicity
+            global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
+                get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+            global_bottom_vector_indices = boundary_indices
+            global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
+        else
+            global_bottom_vector_indices = boundary_indices
+            global_bottom_vector_no_overlap_indices = boundary_indices
+            global_bottom_vector_repeat_inds = Ti[]
+            global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
+        end
+
+        # Get the index within boundary_indices of the entries in block_boundary_indices.
+        # The following search relies on both `a_block_B_column_indices` and
+        # `block_boundary_indices` being sorted.
+        a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+        if is_bottom_level && has_periodic
+            B_column_boundary_indices = get_non_repeated_indices_and_repeats(dimensions, boundary_indices)[1]
+        else
+            B_column_boundary_indices = boundary_indices
+        end
+        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
+            nbbi = length(this_block_boundary_indices)
+            if nbbi == 0
+                continue
+            end
+            b_count = max(searchsortedlast(B_column_boundary_indices, first(this_block_boundary_indices)) - 1, 1)
+            bb_count = 1
+            while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ nbbi
+                i = B_column_boundary_indices[b_count]
+                bi = this_block_boundary_indices[bb_count]
+                if i == bi
+                    push!(this_a_block_B_column_indices, b_count)
+                    b_count += 1
+                    bb_count += 1
+                elseif i < bi
+                    b_count += 1
                 else
-                    first_point = (first_element - 1) * (ngrid - 1) + 1
-                end
-                if d.irank == d.nrank - 1 && last_element == nelement_local && !(d.remove_boundaries || d.periodic)
-                    last_point = n
-                else
-                    last_point = last_element * (ngrid - 1) + 1
-                end
-                for i ∈ first_point:last_point
-                    get_block_boundary_indices_from_dim!(next_dim, flat_i + i - 1,
-                                                         boundary_dim)
+                    bb_count += 1
                 end
             end
-            return nothing
         end
-        for boundary_dim ∈ 1:length(dimensions)
-            get_block_boundary_indices_from_dim!(length(dimensions), 0, boundary_dim)
-        end
-        return nothing
-    end
-    for (bi, b) ∈ enumerate(this_proc_blocks)
-        get_block_points!(bi, b)
-    end
-    for bii ∈ block_interior_indices
-        sort!(bii)
-        unique!(bii)
-    end
-    for bbi ∈ block_boundary_indices
-        sort!(bbi)
-        unique!(bbi)
-    end
-    all_block_interior_indices = sort!(vcat(block_interior_indices))
-    # Find the points from interior_indices that are part of block_interior_indices.
-    # Generally this will not be all the points in block_interior_indices.
-    all_local_top_vector_a_block_indices = Ti[]
-    local_top_vector_a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-    all_a_block_sub_selection_indices = Ti[]
-    a_block_sub_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-    # The following search relies on both `interior_indices` and `block_interior_indices`
-    # being sorted.
-    for (this_block_interior_indices, this_local_top_vector_a_block_indices, this_a_block_sub_selection_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices, a_block_sub_selection_indices)
-        i_count = 1
-        bi_count = 1
-        while (i_count ≤ length(interior_indices)
-               && bi_count ≤ length(this_block_interior_indices))
-            i = interior_indices[i_count]
-            bi = this_block_interior_indices[bi_count]
-            if i == bi
-                push!(all_local_top_vector_a_block_indices, i)
-                push!(this_local_top_vector_a_block_indices, i)
-                push!(all_a_block_sub_selection_indices, i_count)
-                push!(this_a_block_sub_selection_indices, i_count)
-                i_count += 1
-                bi_count += 1
-            elseif i < bi
-                i_count += 1
-            else
-                bi_count += 1
-            end
-        end
-    end
-    sort!(all_local_top_vector_a_block_indices)
-    sort!(all_a_block_sub_selection_indices)
 
-    a_block_lu_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-    # The following search relies on both `all_a_block_sub_selection_indices` and
-    # `a_block_sub_selection_indices` being sorted.
-    for (this_a_block_sub_selection_indices, this_a_block_lu_selection_indices) ∈ zip(a_block_sub_selection_indices, a_block_lu_selection_indices)
-        i_count = 1
-        bi_count = 1
-        while (i_count ≤ length(all_a_block_sub_selection_indices)
-               && bi_count ≤ length(this_a_block_sub_selection_indices))
-            i = all_a_block_sub_selection_indices[i_count]
-            bi = this_a_block_sub_selection_indices[bi_count]
-            if i == bi
-                push!(this_a_block_lu_selection_indices, i_count)
-                i_count += 1
-                bi_count += 1
-            elseif i < bi
-                i_count += 1
-            else
-                bi_count += 1
-            end
-        end
-    end
+        # Sort the periodic pairs by the 'destination' indices. This turns out to be
+        # convenient in a couple of places.
+        local_bottom_vector_periodic_pairs = sortslices(global_bottom_vector_periodic_pairs;
+                                                        dims=2, lt=(x,y)->(x[1]<y[1]))
 
-    if is_bottom_level && has_periodic
-        block_boundary_indices = [get_non_repeated_indices_and_repeats(dimensions, bbi)[1]
-                                  for bbi ∈ block_boundary_indices]
-    end
-
-    # Simplest way to get the global_bottom_vector_size is to first calculate the size of
-    # the 'top vector' then subtract it from `global_size`. This is simplest because the
-    # 'top vector' does not have any points that are duplicated between different
-    # shared-memory blocks of processes, so we don't have to worry about double-counting.
-    top_vector_size = Ref(length(interior_indices))
-    if shared_comm_rank == 0
-        MPI.Allreduce!(top_vector_size, +, distributed_comm)
-    end
-    MPI.Bcast!(top_vector_size, shared_comm; root=0)
-    global_bottom_vector_size = global_size - top_vector_size[]
-
-    #global_top_vector_indices, _, _ = apply_periodicity_to_indices(dimensions, interior_indices)
-    # Top vector indices can never be on periodic boundaries, so no need to apply
-    # periodicity.
-    global_top_vector_indices = interior_indices
-    if is_top_level && is_bottom_level && has_periodic
-        # need to handle periodicity
-        global_bottom_vector_indices, _ =
-            apply_periodicity_to_indices(dimensions, boundary_indices)
-        global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
-            get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
-        global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
-    elseif is_bottom_level && has_periodic
-        # need to handle periodicity
-        global_bottom_vector_indices, global_bottom_vector_periodic_pairs =
-            apply_periodicity_to_indices(dimensions, boundary_indices)
-        global_bottom_vector_no_overlap_indices, _ =
-            get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
-        global_bottom_vector_repeat_inds = Ti[]
-    elseif is_top_level && has_periodic
-        # need to handle periodicity
-        global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
-            get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
-        global_bottom_vector_indices = boundary_indices
-        global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
-    else
-        global_bottom_vector_indices = boundary_indices
-        global_bottom_vector_no_overlap_indices = boundary_indices
-        global_bottom_vector_repeat_inds = Ti[]
-        global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
-    end
-
-    # Get the index within boundary_indices of the entries in block_boundary_indices.
-    # The following search relies on both `a_block_B_column_indices` and
-    # `block_boundary_indices` being sorted.
-    a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
-    if is_bottom_level && has_periodic
-        B_column_boundary_indices = get_non_repeated_indices_and_repeats(dimensions, boundary_indices)[1]
-    else
-        B_column_boundary_indices = boundary_indices
-    end
-    for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
-        nbbi = length(this_block_boundary_indices)
-        if nbbi == 0
-            continue
-        end
-        b_count = max(searchsortedlast(B_column_boundary_indices, first(this_block_boundary_indices)) - 1, 1)
-        bb_count = 1
-        while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ nbbi
-            i = B_column_boundary_indices[b_count]
-            bi = this_block_boundary_indices[bb_count]
-            if i == bi
-                push!(this_a_block_B_column_indices, b_count)
-                b_count += 1
-                bb_count += 1
-            elseif i < bi
-                b_count += 1
-            else
-                bb_count += 1
-            end
-        end
-    end
-
-    # Sort the periodic pairs by the 'destination' indices. This turns out to be
-    # convenient in a couple of places.
-    local_bottom_vector_periodic_pairs = sortslices(global_bottom_vector_periodic_pairs;
-                                                    dims=2, lt=(x,y)->(x[1]<y[1]))
-
-    # The level local indices need to be actually the indices of those entries within
-    # level_indices.
-    local_top_vector_indices = Ti[]
-    t_count = 1
-    nt = length(interior_indices)
-    all_a_block_indices = Ti[]
-    a_count = 1
-    na = length(all_local_top_vector_a_block_indices)
-    local_bottom_vector_indices = Ti[]
-    b_count = 1
-    nb = length(boundary_indices)
-    local_bottom_vector_no_overlap_indices = Ti[]
-    local_bottom_vector_no_overlap_sub_selection_indices = Ti[]
-    bno_count = 1
-    nbno = length(global_bottom_vector_no_overlap_indices)
-    local_bottom_vector_repeat_indices = Ti[]
-    r_count = 1
-    nr = length(global_bottom_vector_repeat_inds)
-    p_count = 1
-    np = size(local_bottom_vector_periodic_pairs, 2)
-    count = 1
-    n = length(level_indices)
-    while (t_count ≤ nt || a_count ≤ na || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
-        if t_count ≤ nt && b_count ≤ nb && interior_indices[t_count] == boundary_indices[b_count]
-            error("interior_indices and boundary_indices should not overlap, got "
-                  * "interior_indices[$t_count]=$(interior_indices[t_count]) and "
-                  * "boundary_indices[$b_count]=$(boundary_indices[b_count]).")
-        end
-        if t_count ≤ nt && interior_indices[t_count] == level_indices[count]
-            push!(local_top_vector_indices, count)
-            t_count += 1
-        end
-        if a_count ≤ na && all_local_top_vector_a_block_indices[a_count] == level_indices[count]
-            push!(all_a_block_indices, count)
-            a_count += 1
-        end
-        if r_count ≤ nr && global_bottom_vector_repeat_inds[r_count] == boundary_indices[b_count]
-            push!(local_bottom_vector_repeat_indices, b_count)
-            r_count += 1
-        end
-        # Need to loop for p_count as there may be repeated entries in local_bottom_vector_periodic_pairs[1,:].
-        while p_count ≤ np && local_bottom_vector_periodic_pairs[1,p_count] ≤ level_indices[count]
-            if local_bottom_vector_periodic_pairs[1,p_count] == level_indices[count]
-                local_bottom_vector_periodic_pairs[1,p_count] = b_count
-            end
-            p_count += 1
-        end
-        if bno_count ≤ nbno && global_bottom_vector_no_overlap_indices[bno_count] == level_indices[count]
-            push!(local_bottom_vector_no_overlap_indices, count)
-            push!(local_bottom_vector_no_overlap_sub_selection_indices, b_count)
-            bno_count += 1
-        end
-        if b_count ≤ nb && boundary_indices[b_count] == level_indices[count]
-            push!(local_bottom_vector_indices, count)
-            b_count += 1
-        end
-        count += 1
-    end
-    if t_count != nt + 1 || a_count != na + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
-        error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1). "
-              * "t_count=$a_count while nt+1=$(nt+1), "
-              * "a_count=$a_count while na+1=$(na+1), "
-              * "b_count=$b_count while nb+1=$(nb+1), "
-              * "r_count=$a_count while nr+1=$(nr+1), "
-              * "p_count=$p_count while np+1=$(np+1).")
-    end
-
-    # The second row of entries (the 'source' points of the repeated pairs) are not
-    # sorted, so cannot be found in the loop above. Need to search the whole of
-    # `level_indices` for each second-row entry.
-    for i ∈ 1:size(local_bottom_vector_periodic_pairs, 2)
-        local_bottom_vector_periodic_pairs[2,i] = searchsortedfirst(level_indices, local_bottom_vector_periodic_pairs[2,i])
-    end
-
-    if is_bottom_level && any(d.periodic && d.nrank > 1 for d ∈ dimensions)
-        println("Error: periodicity not properly supported for MPI-distributed "
-                * "dimensions yet.")
-        local_bottom_vector_periodic_pairs = fill(Ti(-1), 2, 1)
-    end
-
-    a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-    for (abi, lti) ∈ zip(a_block_indices, local_top_vector_a_block_indices)
-        na = length(lti)
-        if na == 0
-            continue
-        end
-        count = max(searchsortedlast(level_indices, first(lti)) - 1, 1)
+        # The level local indices need to be actually the indices of those entries within
+        # level_indices.
+        local_top_vector_indices = Ti[]
+        t_count = 1
+        nt = length(interior_indices)
+        all_a_block_indices = Ti[]
         a_count = 1
-        while a_count ≤ na && count ≤ n
-            if a_count ≤ na && lti[a_count] == level_indices[count]
-                push!(abi, count)
+        na = length(all_local_top_vector_a_block_indices)
+        local_bottom_vector_indices = Ti[]
+        b_count = 1
+        nb = length(boundary_indices)
+        local_bottom_vector_no_overlap_indices = Ti[]
+        local_bottom_vector_no_overlap_sub_selection_indices = Ti[]
+        bno_count = 1
+        nbno = length(global_bottom_vector_no_overlap_indices)
+        local_bottom_vector_repeat_indices = Ti[]
+        r_count = 1
+        nr = length(global_bottom_vector_repeat_inds)
+        p_count = 1
+        np = size(local_bottom_vector_periodic_pairs, 2)
+        count = 1
+        n = length(level_indices)
+        while (t_count ≤ nt || a_count ≤ na || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
+            if t_count ≤ nt && b_count ≤ nb && interior_indices[t_count] == boundary_indices[b_count]
+                error("interior_indices and boundary_indices should not overlap, got "
+                      * "interior_indices[$t_count]=$(interior_indices[t_count]) and "
+                      * "boundary_indices[$b_count]=$(boundary_indices[b_count]).")
+            end
+            if t_count ≤ nt && interior_indices[t_count] == level_indices[count]
+                push!(local_top_vector_indices, count)
+                t_count += 1
+            end
+            if a_count ≤ na && all_local_top_vector_a_block_indices[a_count] == level_indices[count]
+                push!(all_a_block_indices, count)
                 a_count += 1
+            end
+            if r_count ≤ nr && global_bottom_vector_repeat_inds[r_count] == boundary_indices[b_count]
+                push!(local_bottom_vector_repeat_indices, b_count)
+                r_count += 1
+            end
+            # Need to loop for p_count as there may be repeated entries in local_bottom_vector_periodic_pairs[1,:].
+            while p_count ≤ np && local_bottom_vector_periodic_pairs[1,p_count] ≤ level_indices[count]
+                if local_bottom_vector_periodic_pairs[1,p_count] == level_indices[count]
+                    local_bottom_vector_periodic_pairs[1,p_count] = b_count
+                end
+                p_count += 1
+            end
+            if bno_count ≤ nbno && global_bottom_vector_no_overlap_indices[bno_count] == level_indices[count]
+                push!(local_bottom_vector_no_overlap_indices, count)
+                push!(local_bottom_vector_no_overlap_sub_selection_indices, b_count)
+                bno_count += 1
+            end
+            if b_count ≤ nb && boundary_indices[b_count] == level_indices[count]
+                push!(local_bottom_vector_indices, count)
+                b_count += 1
             end
             count += 1
         end
-        if a_count != na + 1
-            error("Did not find all indices in search. a_count=$a_count while na+1=$(na+1).")
+        if t_count != nt + 1 || a_count != na + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
+            error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1). "
+                  * "t_count=$a_count while nt+1=$(nt+1), "
+                  * "a_count=$a_count while na+1=$(na+1), "
+                  * "b_count=$b_count while nb+1=$(nb+1), "
+                  * "r_count=$a_count while nr+1=$(nr+1), "
+                  * "p_count=$p_count while np+1=$(np+1).")
         end
-    end
 
-    return LevelInfo(; has_periodic, block_sizes, global_size, global_bottom_vector_size,
-                     top_vector_indices=global_top_vector_indices,
-                     local_top_vector_indices=local_top_vector_indices,
-                     iblock_list=iblock_list,
-                     all_local_top_vector_a_block_indices=all_a_block_indices,
-                     local_top_vector_a_block_indices=a_block_indices,
-                     all_a_block_sub_selection_indices=all_a_block_sub_selection_indices,
-                     a_block_sub_selection_indices=a_block_sub_selection_indices,
-                     a_block_lu_selection_indices=a_block_lu_selection_indices,
-                     a_block_B_column_indices=a_block_B_column_indices,
-                     n_subgroups=n_subgroups, subgroup_i=subgroup_i,
-                     subgroup_size=subgroup_size, block_comm=block_comm,
-                     bottom_vector_indices=global_bottom_vector_indices,
-                     local_bottom_vector_indices=local_bottom_vector_indices,
-                     local_bottom_vector_no_overlap_indices=local_bottom_vector_no_overlap_indices,
-                     local_bottom_vector_no_overlap_sub_selection_indices=local_bottom_vector_no_overlap_sub_selection_indices,
-                     local_bottom_vector_repeat_indices=local_bottom_vector_repeat_indices,
-                     local_bottom_vector_periodic_pairs=local_bottom_vector_periodic_pairs,
-                     level_shared_comm=shared_comm)
+        # The second row of entries (the 'source' points of the repeated pairs) are not
+        # sorted, so cannot be found in the loop above. Need to search the whole of
+        # `level_indices` for each second-row entry.
+        for i ∈ 1:size(local_bottom_vector_periodic_pairs, 2)
+            local_bottom_vector_periodic_pairs[2,i] = searchsortedfirst(level_indices, local_bottom_vector_periodic_pairs[2,i])
+        end
+
+        if is_bottom_level && any(d.periodic && d.nrank > 1 for d ∈ dimensions)
+            println("Error: periodicity not properly supported for MPI-distributed "
+                    * "dimensions yet.")
+            local_bottom_vector_periodic_pairs = fill(Ti(-1), 2, 1)
+        end
+
+        a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
+        for (abi, lti) ∈ zip(a_block_indices, local_top_vector_a_block_indices)
+            na = length(lti)
+            if na == 0
+                continue
+            end
+            count = max(searchsortedlast(level_indices, first(lti)) - 1, 1)
+            a_count = 1
+            while a_count ≤ na && count ≤ n
+                if a_count ≤ na && lti[a_count] == level_indices[count]
+                    push!(abi, count)
+                    a_count += 1
+                end
+                count += 1
+            end
+            if a_count != na + 1
+                error("Did not find all indices in search. a_count=$a_count while na+1=$(na+1).")
+            end
+        end
+
+        return LevelInfo(; has_periodic, block_sizes, global_size, global_bottom_vector_size,
+                         top_vector_indices=global_top_vector_indices,
+                         local_top_vector_indices=local_top_vector_indices,
+                         iblock_list=iblock_list,
+                         all_local_top_vector_a_block_indices=all_a_block_indices,
+                         local_top_vector_a_block_indices=a_block_indices,
+                         all_a_block_sub_selection_indices=all_a_block_sub_selection_indices,
+                         a_block_sub_selection_indices=a_block_sub_selection_indices,
+                         a_block_lu_selection_indices=a_block_lu_selection_indices,
+                         a_block_B_column_indices=a_block_B_column_indices,
+                         n_subgroups=n_subgroups, subgroup_i=subgroup_i,
+                         subgroup_size=subgroup_size, block_comm=block_comm,
+                         bottom_vector_indices=global_bottom_vector_indices,
+                         local_bottom_vector_indices=local_bottom_vector_indices,
+                         local_bottom_vector_no_overlap_indices=local_bottom_vector_no_overlap_indices,
+                         local_bottom_vector_no_overlap_sub_selection_indices=local_bottom_vector_no_overlap_sub_selection_indices,
+                         local_bottom_vector_repeat_indices=local_bottom_vector_repeat_indices,
+                         local_bottom_vector_periodic_pairs=local_bottom_vector_periodic_pairs,
+                         level_shared_comm=shared_comm)
+    end
 end
 
 function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_level,
@@ -2125,184 +2146,198 @@ update_sparse_matrix!
 function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti},
                                new_A::AbstractSparseMatrixCSC{Tf,Ti}, rowinds,
                                colinds) where {Tf,Ti}
-    colptr = A.colptr
-    rowval = A.rowval
-    nzval = A.nzval
-    new_colptr = new_A.colptr
-    new_rowval = new_A.rowval
-    new_nzval = new_A.nzval
-    resize!(colptr, 1)
-    resize!(rowval, 0)
-    resize!(nzval, 0)
-    count = 1
-    n_rowinds = length(rowinds)
-    for col ∈ colinds
-        colstart = new_colptr[col]
-        colend = new_colptr[col+1] - 1
-        if colend < colstart
-            continue
-        end
-        row_count = max(searchsortedlast(rowinds, new_rowval[colstart]) - 1, 1)
-        for new_i ∈ colstart:colend
-            rv = new_rowval[new_i]
-            while row_count ≤ n_rowinds && rowinds[row_count] < rv
-                row_count += 1
+    @inbounds begin
+        colptr = A.colptr
+        rowval = A.rowval
+        nzval = A.nzval
+        new_colptr = new_A.colptr
+        new_rowval = new_A.rowval
+        new_nzval = new_A.nzval
+        resize!(colptr, 1)
+        resize!(rowval, 0)
+        resize!(nzval, 0)
+        count = 1
+        n_rowinds = length(rowinds)
+        for col ∈ colinds
+            colstart = new_colptr[col]
+            colend = new_colptr[col+1] - 1
+            if colend < colstart
+                continue
             end
-            if row_count > n_rowinds
-                break
-            end
-            if rowinds[row_count] == rv
-                newval = new_nzval[new_i]
-                if !iszero(newval)
-                    push!(rowval, row_count)
-                    push!(nzval, newval)
-                    count += 1
+            row_count = max(searchsortedlast(rowinds, new_rowval[colstart]) - 1, 1)
+            for new_i ∈ colstart:colend
+                rv = new_rowval[new_i]
+                while row_count ≤ n_rowinds && rowinds[row_count] < rv
                     row_count += 1
                 end
+                if row_count > n_rowinds
+                    break
+                end
+                if rowinds[row_count] == rv
+                    newval = new_nzval[new_i]
+                    if !iszero(newval)
+                        push!(rowval, row_count)
+                        push!(nzval, newval)
+                        count += 1
+                        row_count += 1
+                    end
+                end
             end
+            push!(colptr, count)
         end
-        push!(colptr, count)
-    end
 
-    return nothing
+        return nothing
+    end
 end
 function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{Tf},
                                rowinds, colinds) where {Tf,Ti}
-    colptr = A.colptr
-    rowval = A.rowval
-    nzval = A.nzval
-    resize!(colptr, 1)
-    resize!(rowval, 0)
-    resize!(nzval, 0)
-    count = 1
+    @inbounds begin
+        colptr = A.colptr
+        rowval = A.rowval
+        nzval = A.nzval
+        resize!(colptr, 1)
+        resize!(rowval, 0)
+        resize!(nzval, 0)
+        count = 1
 
-    for (j1, j2) ∈ enumerate(colinds)
-        for (i1, i2) ∈ enumerate(rowinds)
-            val = new_A[i2,j2]
-            if val != zero(Tf)
-                push!(rowval, i1)
-                push!(nzval, val)
+        for (j1, j2) ∈ enumerate(colinds)
+            for (i1, i2) ∈ enumerate(rowinds)
+                val = new_A[i2,j2]
+                if val != zero(Tf)
+                    push!(rowval, i1)
+                    push!(nzval, val)
+                end
             end
+            push!(colptr, count)
         end
-        push!(colptr, count)
-    end
 
-    return nothing
+        return nothing
+    end
 end
 @inline function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
                                rowinds, colinds) where {Tf,Ti}
-    full_rowinds, full_colinds = new_A.indices
-    return @views update_sparse_matrix!(A, parent(new_A), full_rowinds[rowinds],
-                                        full_colinds[colinds])
+    @inbounds begin
+        full_rowinds, full_colinds = new_A.indices
+        return @views update_sparse_matrix!(A, parent(new_A), full_rowinds[rowinds],
+                                            full_colinds[colinds])
+    end
 end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, A::AbstractMatrix)
-    solver = block_diagonal_solver.local_block_solver
-    check_lu = block_diagonal_solver.check_lu
-    if solver != [nothing]
-        for (s, inds, buffer) ∈ zip(solver, block_diagonal_solver.lu_selection_indices,
-                                    block_diagonal_solver.sparse_buffers)
-            if isa(s, UmfpackLU)
-                update_sparse_matrix!(buffer, A, inds, inds)
-                lu!(s, buffer; reuse_symbolic=false, check=check_lu)
-            else
-                factors = s.factors
-                for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
-                    factors[i1,j1] = A[i2,j2]
+    @inbounds begin
+        solver = block_diagonal_solver.local_block_solver
+        check_lu = block_diagonal_solver.check_lu
+        if solver != [nothing]
+            for (s, inds, buffer) ∈ zip(solver, block_diagonal_solver.lu_selection_indices,
+                                        block_diagonal_solver.sparse_buffers)
+                if isa(s, UmfpackLU)
+                    update_sparse_matrix!(buffer, A, inds, inds)
+                    lu!(s, buffer; reuse_symbolic=false, check=check_lu)
+                else
+                    factors = s.factors
+                    for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
+                        factors[i1,j1] = A[i2,j2]
+                    end
+                    getrf!(factors, s.ipiv; check=check_lu)
                 end
-                getrf!(factors, s.ipiv; check=check_lu)
             end
         end
+        return nothing
     end
-    return nothing
 end
 function lu!(block_diagonal_solver::BlockDiagonalSolverShared, A::AbstractMatrix)
-    solver = block_diagonal_solver.local_block_solver
-    factors = block_diagonal_solver.factors
-    lu_selection_indices = block_diagonal_solver.lu_selection_indices
-    partial_lu_selection_indices = block_diagonal_solver.partial_lu_selection_indices
-    partial_col_range = block_diagonal_solver.partial_col_range
-    synchronize_shared = block_diagonal_solver.synchronize_shared
+    @inbounds begin
+        solver = block_diagonal_solver.local_block_solver
+        factors = block_diagonal_solver.factors
+        lu_selection_indices = block_diagonal_solver.lu_selection_indices
+        partial_lu_selection_indices = block_diagonal_solver.partial_lu_selection_indices
+        partial_col_range = block_diagonal_solver.partial_col_range
+        synchronize_shared = block_diagonal_solver.synchronize_shared
 
-# Could make this branch more efficient when A is a (view of a) sparse matrix?
-    for (j1, j2) ∈ zip(partial_col_range, partial_lu_selection_indices), (i1, i2) ∈ enumerate(lu_selection_indices)
-        factors[i1,j1] = A[i2,j2]
+        for (j1, j2) ∈ zip(partial_col_range, partial_lu_selection_indices), (i1, i2) ∈ enumerate(lu_selection_indices)
+            factors[i1,j1] = A[i2,j2]
+        end
+
+        synchronize_shared()
+
+        if isa(solver, MPIDenseLU)
+            # Note that this would not work if we were using distributed MPI in the
+            # MPIDenseLU `solver`, as in the distributed-MPI case, `factors` is not
+            # factorised directly, and we require that it is for
+            # `local_block_serial_solver` to work.
+            lu!(solver, factors)
+        elseif isa(solver, LU)
+            getrf!(factors, solver.ipiv; check=block_diagonal_solver.check_lu)
+        end
+        return nothing
     end
-
-    synchronize_shared()
-
-    if isa(solver, MPIDenseLU)
-        # Note that this would not work if we were using distributed MPI in the MPIDenseLU
-        # `solver`, as in the distributed-MPI case, `factors` is not factorised directly,
-        # and we require that it is for `local_block_serial_solver` to work.
-        lu!(solver, factors)
-    elseif isa(solver, LU)
-        getrf!(factors, solver.ipiv; check=block_diagonal_solver.check_lu)
-    end
-    return nothing
 end
 
 function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::AbstractVector{T}) where T
-    solvers = block_diagonal_solver.local_block_solver
-    if solvers != [nothing]
-        x_buffer = block_diagonal_solver.x_buffer
-        u_buffer = block_diagonal_solver.u_buffer
-        for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
-            n = length(bi)
-            this_u_buffer = @view u_buffer[1:n]
-            this_x_buffer = @view x_buffer[1:n]
-            for (i1, i2) ∈ enumerate(bi)
-                this_u_buffer[i1] = u[i2]
-            end
-            ldiv!(this_x_buffer, s, this_u_buffer)
-            for (i2, i1) ∈ enumerate(bi)
-                x[i1] = this_x_buffer[i2]
+    @inbounds begin
+        solvers = block_diagonal_solver.local_block_solver
+        if solvers != [nothing]
+            x_buffer = block_diagonal_solver.x_buffer
+            u_buffer = block_diagonal_solver.u_buffer
+            for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
+                n = length(bi)
+                this_u_buffer = @view u_buffer[1:n]
+                this_x_buffer = @view x_buffer[1:n]
+                for (i1, i2) ∈ enumerate(bi)
+                    this_u_buffer[i1] = u[i2]
+                end
+                ldiv!(this_x_buffer, s, this_u_buffer)
+                for (i2, i1) ∈ enumerate(bi)
+                    x[i1] = this_x_buffer[i2]
+                end
             end
         end
+        return nothing
     end
-    return nothing
 end
 function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
                u::AbstractVector{T}) where T
-    solver = block_diagonal_solver.local_block_solver
-    x_buffer = block_diagonal_solver.x_buffer
-    block_comm_rank = block_diagonal_solver.block_comm_rank
-    block_indices = block_diagonal_solver.block_indices
-    synchronize_shared = block_diagonal_solver.synchronize_shared
+    @inbounds begin
+        solver = block_diagonal_solver.local_block_solver
+        x_buffer = block_diagonal_solver.x_buffer
+        block_comm_rank = block_diagonal_solver.block_comm_rank
+        block_indices = block_diagonal_solver.block_indices
+        synchronize_shared = block_diagonal_solver.synchronize_shared
 
-    # Need to synchronize here as `u_buffer` is filled only on block_comm_rank==0, but `u`
-    # was filled in parallel. Maybe it would be worth filling `u_buffer` in parallel? Then
-    # would need to synchronize before `ldiv!()` call.
-    synchronize_shared()
+        # Need to synchronize here as `u_buffer` is filled only on block_comm_rank==0, but
+        # `u` was filled in parallel. Maybe it would be worth filling `u_buffer` in
+        # parallel? Then would need to synchronize before `ldiv!()` call.
+        synchronize_shared()
 
-    if solver === nothing
-        # Nothing to do.
-    elseif isa(solver, MPIDenseLU)
-        u_buffer = block_diagonal_solver.u_buffer
-        if block_comm_rank == 0
-            for (i1, i2) ∈ enumerate(block_indices)
-                u_buffer[i1] = u[i2]
+        if solver === nothing
+            # Nothing to do.
+        elseif isa(solver, MPIDenseLU)
+            u_buffer = block_diagonal_solver.u_buffer
+            if block_comm_rank == 0
+                for (i1, i2) ∈ enumerate(block_indices)
+                    u_buffer[i1] = u[i2]
+                end
+            end
+            ldiv!(x_buffer, solver, u_buffer)
+            if block_comm_rank == 0
+                for (i2, i1) ∈ enumerate(block_indices)
+                    x[i1] = x_buffer[i2]
+                end
+            end
+        else
+            if block_comm_rank == 0
+                for (i1, i2) ∈ enumerate(block_indices)
+                    x_buffer[i1] = u[i2]
+                end
+                ldiv!(solver, x_buffer)
+                for (i2, i1) ∈ enumerate(block_indices)
+                    x[i1] = x_buffer[i2]
+                end
             end
         end
-        ldiv!(x_buffer, solver, u_buffer)
-        if block_comm_rank == 0
-            for (i2, i1) ∈ enumerate(block_indices)
-                x[i1] = x_buffer[i2]
-            end
-        end
-    else
-        if block_comm_rank == 0
-            for (i1, i2) ∈ enumerate(block_indices)
-                x_buffer[i1] = u[i2]
-            end
-            ldiv!(solver, x_buffer)
-            for (i2, i1) ∈ enumerate(block_indices)
-                x[i1] = x_buffer[i2]
-            end
-        end
+        return nothing
     end
-    return nothing
 end
 function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
                u::AbstractVector{T}) where T
@@ -2320,14 +2355,16 @@ function ldiv!(x::AbstractMatrix{T},
 end
 function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::Matrix{T}) where T
-    solvers = block_diagonal_solver.local_block_solver
-    if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
-        # There is only one block, so do not need to select range out of x/u.
-        ldiv!(x, solvers[1], u)
-    else
-        if block_diagonal_solver.local_block_solver !== nothing
-            for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
-                ldiv!(this_x, block_diagonal_solver, this_u)
+    @inbounds begin
+        solvers = block_diagonal_solver.local_block_solver
+        if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
+            # There is only one block, so do not need to select range out of x/u.
+            ldiv!(x, solvers[1], u)
+        else
+            if block_diagonal_solver.local_block_solver !== nothing
+                for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
+                    ldiv!(this_x, block_diagonal_solver, this_u)
+                end
             end
         end
     end
@@ -2345,234 +2382,245 @@ function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDi
     return ldiv!(u, block_diagonal_solver, u)
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{T}, u::Matrix{T}) where T
-    solvers = block_diagonal_solver.local_block_solver
-    if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
-        # There is only one block, so do not need to select range out of u.
-        ldiv!(solvers[1], u)
-        return nothing
-    else
-        return ldiv!(u, block_diagonal_solver, u)
+    @inbounds begin
+        solvers = block_diagonal_solver.local_block_solver
+        if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
+            # There is only one block, so do not need to select range out of u.
+            ldiv!(solvers[1], u)
+            return nothing
+        else
+            return ldiv!(u, block_diagonal_solver, u)
+        end
     end
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolverShared{T}, u::Matrix{T}) where T
     return ldiv!(u, block_diagonal_solver, u)
 end
 function sparse_column_has_overlap(rowval, bi)
-    r_count = 1
-    b_count = 1
-    while r_count ≤ length(rowval) && b_count ≤ length(bi)
-        if rowval[r_count] == bi[b_count]
-            return true
-        elseif rowval[r_count] < bi[b_count]
-            r_count += 1
-        else
-            b_count += 1
+    @inbounds begin
+        r_count = 1
+        b_count = 1
+        while r_count ≤ length(rowval) && b_count ≤ length(bi)
+            if rowval[r_count] == bi[b_count]
+                return true
+            elseif rowval[r_count] < bi[b_count]
+                r_count += 1
+            else
+                b_count += 1
+            end
         end
+        return false
     end
-    return false
 end
 function ldiv!(x::AbstractSparseMatrixCSC{T},
                block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::AbstractSparseMatrixCSC{T}) where T
-    solvers = block_diagonal_solver.local_block_solver
-    if solvers != [nothing]
-        m = size(u, 2)
-        u_colptr = u.colptr
-        u_rowval = u.rowval
-        x_colptr = x.colptr
-        x_rowval = x.rowval
-        x_nzval = x.nzval
-        u_buffer = block_diagonal_solver.u_buffer
-        x_buffer = block_diagonal_solver.x_buffer
-        for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
-            block_start = first(bi)
-            block_end = last(bi)
-            block_size = length(bi)
-            this_u_buffer = @view u_buffer[1:block_size]
-            if eltype(solvers) <: LU
-                this_x_buffer = this_u_buffer
-            else
-                this_x_buffer = @view x_buffer[1:block_size]
-            end
-            for col ∈ 1:m
-                u_flat_start = u_colptr[col]
-                u_flat_end = u_colptr[col+1] - 1
-                if u_flat_end < u_flat_start
-                    # Column is empty.
-                    continue
+    @inbounds begin
+        solvers = block_diagonal_solver.local_block_solver
+        if solvers != [nothing]
+            m = size(u, 2)
+            u_colptr = u.colptr
+            u_rowval = u.rowval
+            x_colptr = x.colptr
+            x_rowval = x.rowval
+            x_nzval = x.nzval
+            u_buffer = block_diagonal_solver.u_buffer
+            x_buffer = block_diagonal_solver.x_buffer
+            for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
+                block_start = first(bi)
+                block_end = last(bi)
+                block_size = length(bi)
+                this_u_buffer = @view u_buffer[1:block_size]
+                if eltype(solvers) <: LU
+                    this_x_buffer = this_u_buffer
+                else
+                    this_x_buffer = @view x_buffer[1:block_size]
                 end
-                if sparse_column_has_overlap(@view(u_rowval[u_flat_start:u_flat_end]), bi)
-                    # Column has non-zero row entries for this block.
-                    u_column = @view u[:,col]
-                    for (i1, i2) ∈ enumerate(bi)
-                        this_u_buffer[i1] = u_column[i2]
+                for col ∈ 1:m
+                    u_flat_start = u_colptr[col]
+                    u_flat_end = u_colptr[col+1] - 1
+                    if u_flat_end < u_flat_start
+                        # Column is empty.
+                        continue
                     end
-                    if eltype(solvers) <: LU
-                        # Dense-matrix LU solver, most efficient to solve in-place
-                        ldiv!(s, this_u_buffer)
-                    else
-                        ldiv!(this_x_buffer, s, this_u_buffer)
-                    end
-                    x_flat_start = x_colptr[col]
-                    x_flat_end = x_colptr[col+1] - 1
-                    x_col_rowval = @view x_rowval[x_flat_start:x_flat_end]
-                    nxr = x_flat_end - x_flat_start + 1
-                    count = max(searchsortedlast(x_col_rowval, first(bi)) - 1, 1)
-                    for (i2, i1) ∈ enumerate(bi)
-                        # Assume that the structural non-zero entries of `x` are enough to
-                        # contain all the non-zero entries of the solve. Note that the
-                        # entries in this_x_buffer that should be structurally zero might
-                        # only be zero up to floating-point precision.
-                        while count ≤ nxr && x_col_rowval[count] < i1
-                            count += 1
+                    if sparse_column_has_overlap(@view(u_rowval[u_flat_start:u_flat_end]), bi)
+                        # Column has non-zero row entries for this block.
+                        u_column = @view u[:,col]
+                        for (i1, i2) ∈ enumerate(bi)
+                            this_u_buffer[i1] = u_column[i2]
                         end
-                        if count > nxr
-                            break
+                        if eltype(solvers) <: LU
+                            # Dense-matrix LU solver, most efficient to solve in-place
+                            ldiv!(s, this_u_buffer)
+                        else
+                            ldiv!(this_x_buffer, s, this_u_buffer)
                         end
-                        if i1 == x_col_rowval[count]
-                            x_nzval[x_flat_start+count-1] = this_x_buffer[i2]
-                            count += 1
+                        x_flat_start = x_colptr[col]
+                        x_flat_end = x_colptr[col+1] - 1
+                        x_col_rowval = @view x_rowval[x_flat_start:x_flat_end]
+                        nxr = x_flat_end - x_flat_start + 1
+                        count = max(searchsortedlast(x_col_rowval, first(bi)) - 1, 1)
+                        for (i2, i1) ∈ enumerate(bi)
+                            # Assume that the structural non-zero entries of `x` are
+                            # enough to contain all the non-zero entries of the solve.
+                            # Note that the entries in this_x_buffer that should be
+                            # structurally zero might only be zero up to floating-point
+                            # precision.
+                            while count ≤ nxr && x_col_rowval[count] < i1
+                                count += 1
+                            end
+                            if count > nxr
+                                break
+                            end
+                            if i1 == x_col_rowval[count]
+                                x_nzval[x_flat_start+count-1] = this_x_buffer[i2]
+                                count += 1
+                            end
                         end
                     end
                 end
             end
         end
+        return nothing
     end
-    return nothing
 end
 
 # Specialized implementations to be used for A^{-1}.B
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::AbstractMatrix{T}) where T
-    solvers = block_diagonal_solver.local_block_solver
-    if solvers != [nothing]
-        if eltype(solvers) <: LU
-            for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
-                                            block_diagonal_solver.B_buffers_out,
-                                            block_diagonal_solver.B_column_indices)
-                for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
-                    Bbuff[i1,j1] = B[i2,j2]
+    @inbounds begin
+        solvers = block_diagonal_solver.local_block_solver
+        if solvers != [nothing]
+            if eltype(solvers) <: LU
+                for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
+                                                block_diagonal_solver.B_buffers_out,
+                                                block_diagonal_solver.B_column_indices)
+                    for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
+                        Bbuff[i1,j1] = B[i2,j2]
+                    end
+                    ldiv!(s, Bbuff)
+                    for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
+                        B[i1,j1] = Bbuff[i2,j2]
+                    end
                 end
-                ldiv!(s, Bbuff)
-                for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
-                    B[i1,j1] = Bbuff[i2,j2]
-                end
-            end
-        else
-            for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
-                    zip(block_diagonal_solver.block_indices, solvers,
-                        block_diagonal_solver.B_buffers_out,
-                        block_diagonal_solver.B_buffers_in,
-                        block_diagonal_solver.B_column_indices)
-                for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
-                    Bbuff_in[i1,j1] = B[i2,j2]
-                end
-                ldiv!(Bbuff_out, s, Bbuff_in)
-                for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
-                    B[i1,j1] = Bbuff_out[i2,j2]
+            else
+                for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
+                        zip(block_diagonal_solver.block_indices, solvers,
+                            block_diagonal_solver.B_buffers_out,
+                            block_diagonal_solver.B_buffers_in,
+                            block_diagonal_solver.B_column_indices)
+                    for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
+                        Bbuff_in[i1,j1] = B[i2,j2]
+                    end
+                    ldiv!(Bbuff_out, s, Bbuff_in)
+                    for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
+                        B[i1,j1] = Bbuff_out[i2,j2]
+                    end
                 end
             end
         end
+        return nothing
     end
-    return nothing
 end
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::AbstractSparseMatrixCSC{T}) where T
-    solvers = block_diagonal_solver.local_block_solver
-    if solvers != [nothing]
-        if eltype(solvers) <: LU
-            for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
-                                            block_diagonal_solver.B_buffers_out,
-                                            block_diagonal_solver.B_column_indices)
-                B_colptr = B.colptr
-                B_rowval = B.rowval
-                B_nzval = B.nzval
-                firstrow = first(bi)
-                for (j1, j2) ∈ enumerate(Bcols)
-                    first_i = B_colptr[j2]
-                    last_i = B_colptr[j2+1] - 1
-                    col_rv = @view B_rowval[first_i:last_i]
-                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                    for (i1, i2) ∈ enumerate(bi)
-                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                            flat_i += 1
+    @inbounds begin
+        solvers = block_diagonal_solver.local_block_solver
+        if solvers != [nothing]
+            if eltype(solvers) <: LU
+                for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
+                                                block_diagonal_solver.B_buffers_out,
+                                                block_diagonal_solver.B_column_indices)
+                    B_colptr = B.colptr
+                    B_rowval = B.rowval
+                    B_nzval = B.nzval
+                    firstrow = first(bi)
+                    for (j1, j2) ∈ enumerate(Bcols)
+                        first_i = B_colptr[j2]
+                        last_i = B_colptr[j2+1] - 1
+                        col_rv = @view B_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                        for (i1, i2) ∈ enumerate(bi)
+                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
+                            if B_rowval[flat_i] == i2
+                                Bbuff[i1,j1] = B_nzval[flat_i]
+                            end
                         end
-                        if flat_i > last_i
-                            break
-                        end
-                        if B_rowval[flat_i] == i2
-                            Bbuff[i1,j1] = B_nzval[flat_i]
+                    end
+                    ldiv!(s, Bbuff)
+                    for (j1, j2) ∈ enumerate(Bcols)
+                        first_i = B_colptr[j2]
+                        last_i = B_colptr[j2+1] - 1
+                        col_rv = @view B_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                        for (i1, i2) ∈ enumerate(bi)
+                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
+                            if B_rowval[flat_i] == i2
+                                B_nzval[flat_i] = Bbuff[i1,j1]
+                            end
                         end
                     end
                 end
-                ldiv!(s, Bbuff)
-                for (j1, j2) ∈ enumerate(Bcols)
-                    first_i = B_colptr[j2]
-                    last_i = B_colptr[j2+1] - 1
-                    col_rv = @view B_rowval[first_i:last_i]
-                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                    for (i1, i2) ∈ enumerate(bi)
-                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                            flat_i += 1
-                        end
-                        if flat_i > last_i
-                            break
-                        end
-                        if B_rowval[flat_i] == i2
-                            B_nzval[flat_i] = Bbuff[i1,j1]
-                        end
-                    end
-                end
-            end
-        else
-            for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
-                    zip(block_diagonal_solver.block_indices, solvers,
-                        block_diagonal_solver.B_buffers_out,
-                        block_diagonal_solver.B_buffers_in,
-                        block_diagonal_solver.B_column_indices)
-                B_colptr = B.colptr
-                B_rowval = B.rowval
-                B_nzval = B.nzval
-                firstrow = first(bi)
-                for (j1, j2) ∈ enumerate(Bcols)
-                    first_i = B_colptr[j2]
-                    last_i = B_colptr[j2+1] - 1
-                    col_rv = @view B_rowval[first_i:last_i]
-                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                    for (i1, i2) ∈ enumerate(bi)
-                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                            flat_i += 1
-                        end
-                        if flat_i > last_i
-                            break
-                        end
-                        if B_rowval[flat_i] == i2
-                            Bbuff_in[i1,j1] = B_nzval[flat_i]
+            else
+                for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
+                        zip(block_diagonal_solver.block_indices, solvers,
+                            block_diagonal_solver.B_buffers_out,
+                            block_diagonal_solver.B_buffers_in,
+                            block_diagonal_solver.B_column_indices)
+                    B_colptr = B.colptr
+                    B_rowval = B.rowval
+                    B_nzval = B.nzval
+                    firstrow = first(bi)
+                    for (j1, j2) ∈ enumerate(Bcols)
+                        first_i = B_colptr[j2]
+                        last_i = B_colptr[j2+1] - 1
+                        col_rv = @view B_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                        for (i1, i2) ∈ enumerate(bi)
+                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
+                            if B_rowval[flat_i] == i2
+                                Bbuff_in[i1,j1] = B_nzval[flat_i]
+                            end
                         end
                     end
-                end
-                ldiv!(Bbuff_out, s, Bbuff_in)
-                for (j1, j2) ∈ enumerate(Bcols)
-                    first_i = B_colptr[j2]
-                    last_i = B_colptr[j2+1] - 1
-                    col_rv = @view B_rowval[first_i:last_i]
-                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                    for (i1, i2) ∈ enumerate(bi)
-                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                            flat_i += 1
-                        end
-                        if flat_i > last_i
-                            break
-                        end
-                        if B_rowval[flat_i] == i2
-                            B_nzval[flat_i] = Bbuff_out[i1,j1]
+                    ldiv!(Bbuff_out, s, Bbuff_in)
+                    for (j1, j2) ∈ enumerate(Bcols)
+                        first_i = B_colptr[j2]
+                        last_i = B_colptr[j2+1] - 1
+                        col_rv = @view B_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                        for (i1, i2) ∈ enumerate(bi)
+                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
+                            if B_rowval[flat_i] == i2
+                                B_nzval[flat_i] = Bbuff_out[i1,j1]
+                            end
                         end
                     end
                 end
             end
         end
+        return nothing
     end
-    return nothing
 end
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::BlockAinvDotBSerial{T}) where T
@@ -2583,23 +2631,25 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
 end
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
                        B::BlockAinvDotBShared{T}) where T
-    solver = block_diagonal_solver.local_block_serial_solver
-    if solver !== nothing
-        block = B.block
-        partial_block = B.partial_block
-        partial_col_range = B.partial_col_range
-        partial_row_range = B.partial_row_range
-        synchronize_shared = B.synchronize_shared
+    @inbounds begin
+        solver = block_diagonal_solver.local_block_serial_solver
+        if solver !== nothing
+            block = B.block
+            partial_block = B.partial_block
+            partial_col_range = B.partial_col_range
+            partial_row_range = B.partial_row_range
+            synchronize_shared = B.synchronize_shared
 
-        # Probably more efficient to parallelise over columns in `block` than to use a
-        # parallelised `ldiv!()` on the full block.
-        ldiv!(solver, @view(block[:,partial_col_range]))
+            # Probably more efficient to parallelise over columns in `block` than to use a
+            # parallelised `ldiv!()` on the full block.
+            ldiv!(solver, @view(block[:,partial_col_range]))
 
-        synchronize_shared()
+            synchronize_shared()
 
-        partial_block .= @view block[partial_row_range,:]
+            partial_block .= @view block[partial_row_range,:]
+        end
+        return nothing
     end
-    return nothing
 end
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
                        B::Matrix{T}) where T
@@ -2631,38 +2681,89 @@ end
 
 function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractMatrix, B_rowinds,
                            B_colinds)
-    blocks = Ainv_dot_B.blocks
-    if length(blocks) == 0
-        # Nothing to do.
+    @inbounds begin
+        blocks = Ainv_dot_B.blocks
+        if length(blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        block_rowinds = Ainv_dot_B.block_rowinds
+        block_colinds = Ainv_dot_B.block_colinds
+        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+            for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
+                block[i1,j1] = B[B_rowinds[i2],B_colinds[j2]]
+            end
+        end
         return nothing
     end
-
-    block_rowinds = Ainv_dot_B.block_rowinds
-    block_colinds = Ainv_dot_B.block_colinds
-    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
-            block[i1,j1] = B[B_rowinds[i2],B_colinds[j2]]
-        end
-    end
-    return nothing
 end
 function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMatrixCSC,
                            B_rowinds, B_colinds)
-    blocks = Ainv_dot_B.blocks
-    if length(blocks) == 0
-        # Nothing to do.
+    @inbounds begin
+        blocks = Ainv_dot_B.blocks
+        if length(blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        block_rowinds = Ainv_dot_B.block_rowinds
+        block_colinds = Ainv_dot_B.block_colinds
+        B_colptr = B.colptr
+        B_rowval = B.rowval
+        B_nzval = B.nzval
+        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+            block_nrow = length(rowinds)
+            first_row = first(rowinds)
+            for (j1, j2) ∈ enumerate(colinds)
+                B_col = B_colinds[j2]
+                first_i = B_colptr[B_col]
+                last_i = B_colptr[B_col+1] - 1
+                col_rv = @view B_rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                i1 = 1
+                while i1 ≤ block_nrow
+                    B_row = B_rowval[flat_i]
+                    block_global_row = B_rowinds[rowinds[i1]]
+                    if B_row == block_global_row
+                        block[i1,j1] = B_nzval[flat_i]
+                        i1 += 1
+                        flat_i += 1
+                    elseif B_row > block_global_row
+                        block[i1,j1] = 0.0
+                        i1 += 1
+                    else
+                        flat_i += 1
+                    end
+                    if flat_i > last_i
+                        block[i1:end,j1] .= 0.0
+                        break
+                    end
+                end
+            end
+        end
         return nothing
     end
+end
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMatrixCSC,
+                           B_rowinds, B_colinds)
+    @inbounds begin
+        block_rowinds = Ainv_dot_B.block_rowinds
+        block_colinds = Ainv_dot_B.block_colinds
+        if isempty(block_rowinds) || isempty(block_colinds)
+            # Nothing to do.
+            return nothing
+        end
+        block = Ainv_dot_B.block
+        partial_col_range = Ainv_dot_B.partial_col_range
+        B_colptr = B.colptr
+        B_rowval = B.rowval
+        B_nzval = B.nzval
 
-    block_rowinds = Ainv_dot_B.block_rowinds
-    block_colinds = Ainv_dot_B.block_colinds
-    B_colptr = B.colptr
-    B_rowval = B.rowval
-    B_nzval = B.nzval
-    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-        block_nrow = length(rowinds)
-        first_row = first(rowinds)
-        for (j1, j2) ∈ enumerate(colinds)
+        block_nrow = length(block_rowinds)
+        first_row = first(block_rowinds)
+        for j1 ∈ partial_col_range
+            j2 = block_colinds[j1]
             B_col = B_colinds[j2]
             first_i = B_colptr[B_col]
             last_i = B_colptr[B_col+1] - 1
@@ -2671,7 +2772,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMat
             i1 = 1
             while i1 ≤ block_nrow
                 B_row = B_rowval[flat_i]
-                block_global_row = B_rowinds[rowinds[i1]]
+                block_global_row = B_rowinds[block_rowinds[i1]]
                 if B_row == block_global_row
                     block[i1,j1] = B_nzval[flat_i]
                     i1 += 1
@@ -2688,58 +2789,15 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMat
                 end
             end
         end
-    end
-    return nothing
-end
-function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMatrixCSC,
-                           B_rowinds, B_colinds)
-    block_rowinds = Ainv_dot_B.block_rowinds
-    block_colinds = Ainv_dot_B.block_colinds
-    if isempty(block_rowinds) || isempty(block_colinds)
-        # Nothing to do.
+
         return nothing
     end
-    block = Ainv_dot_B.block
-    partial_col_range = Ainv_dot_B.partial_col_range
-    B_colptr = B.colptr
-    B_rowval = B.rowval
-    B_nzval = B.nzval
-
-    block_nrow = length(block_rowinds)
-    first_row = first(block_rowinds)
-    for j1 ∈ partial_col_range
-        j2 = block_colinds[j1]
-        B_col = B_colinds[j2]
-        first_i = B_colptr[B_col]
-        last_i = B_colptr[B_col+1] - 1
-        col_rv = @view B_rowval[first_i:last_i]
-        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-        i1 = 1
-        while i1 ≤ block_nrow
-            B_row = B_rowval[flat_i]
-            block_global_row = B_rowinds[block_rowinds[i1]]
-            if B_row == block_global_row
-                block[i1,j1] = B_nzval[flat_i]
-                i1 += 1
-                flat_i += 1
-            elseif B_row > block_global_row
-                block[i1,j1] = 0.0
-                i1 += 1
-            else
-                flat_i += 1
-            end
-            if flat_i > last_i
-                block[i1:end,j1] .= 0.0
-                break
-            end
-        end
-    end
-
-    return nothing
 end
 @inline function copy_B_submatrix!(Ainv_dot_B::Union{BlockAinvDotBSerial,BlockAinvDotBShared},
                                    B::SubArray)
-    return copy_B_submatrix!(Ainv_dot_B, B.parent, B.indices[1], B.indices[2])
+    @inbounds begin
+        return copy_B_submatrix!(Ainv_dot_B, B.parent, B.indices[1], B.indices[2])
+    end
 end
 
 # copy_C_submatrix!() is identical to copy_B_submatrix!(), but keep as a separate function
@@ -2747,39 +2805,125 @@ end
 # using a transposed representation of the C blocks at some point.
 function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractMatrix, C_rowinds,
                            C_colinds)
-    blocks = block_C.blocks
-    if length(blocks) == 0
-        # Nothing to do.
+    @inbounds begin
+        blocks = block_C.blocks
+        if length(blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        block_rowinds = block_C.block_rowinds
+        block_colinds = block_C.block_colinds
+        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+            for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
+                block[i1,j1] = C[C_rowinds[i2],C_colinds[j2]]
+            end
+        end
         return nothing
     end
-
-    block_rowinds = block_C.block_rowinds
-    block_colinds = block_C.block_colinds
-    for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-        for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
-            block[i1,j1] = C[C_rowinds[i2],C_colinds[j2]]
-        end
-    end
-    return nothing
 end
 function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_rowinds,
                            C_colinds)
-    blocks = block_C.blocks
-    if length(blocks) == 0
-        # Nothing to do.
+    @inbounds begin
+        blocks = block_C.blocks
+        if length(blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        block_rowinds = block_C.block_rowinds
+        block_colinds = block_C.block_colinds
+        C_colptr = C.colptr
+        C_rowval = C.rowval
+        C_nzval = C.nzval
+        if eltype(blocks) <: Matrix
+            for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+                block_nrow = length(rowinds)
+                first_row = first(rowinds)
+                for (j1, j2) ∈ enumerate(colinds)
+                    C_col = C_colinds[j2]
+                    first_i = C_colptr[C_col]
+                    last_i = C_colptr[C_col+1] - 1
+                    col_rv = @view C_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                    i1 = 1
+                    while i1 ≤ block_nrow
+                        C_row = C_rowval[flat_i]
+                        block_global_row = C_rowinds[rowinds[i1]]
+                        if C_row == block_global_row
+                            block[i1,j1] = C_nzval[flat_i]
+                            i1 += 1
+                            flat_i += 1
+                        elseif C_row > block_global_row
+                            block[i1,j1] = 0.0
+                            i1 += 1
+                        else
+                            flat_i += 1
+                        end
+                        if flat_i > last_i
+                            block[i1:end,j1] .= 0.0
+                            break
+                        end
+                    end
+                end
+            end
+        else
+            for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
+                block_nrow = length(rowinds)
+                first_row = first(rowinds)
+                block_colptr = block.colptr
+                block_rowval = block.rowval
+                block_nzval = block.nzval
+                for (j1, j2) ∈ enumerate(colinds)
+                    C_col = C_colinds[j2]
+                    first_i = C_colptr[C_col]
+                    last_i = C_colptr[C_col+1] - 1
+                    col_rv = @view C_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                    block_i = block_colptr[j1]
+                    block_last_i = block_colptr[j1+1] - 1
+                    while block_i ≤ block_last_i
+                        C_row = C_rowval[flat_i]
+                        block_global_row = C_rowinds[rowinds[block_rowval[block_i]]]
+                        if C_row == block_global_row
+                            block_nzval[block_i] = C_nzval[flat_i]
+                            block_i += 1
+                            flat_i += 1
+                        elseif C_row > block_global_row
+                            block_nzval[block_i] = 0.0
+                            block_i += 1
+                        else
+                            flat_i += 1
+                        end
+                        if flat_i > last_i
+                            block_nzval[block_i:block_last_i] .= 0.0
+                            break
+                        end
+                    end
+                end
+            end
+        end
         return nothing
     end
+end
+function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_rowinds,
+                           C_colinds)
+    @inbounds begin
+        block_rowinds = block_C.block_rowinds
+        block_colinds = block_C.block_colinds
+        if isempty(block_rowinds) || isempty(block_colinds)
+            # Nothing to do.
+            return nothing
+        end
+        block = block_C.block
+        C_colptr = C.colptr
+        C_rowval = C.rowval
+        C_nzval = C.nzval
 
-    block_rowinds = block_C.block_rowinds
-    block_colinds = block_C.block_colinds
-    C_colptr = C.colptr
-    C_rowval = C.rowval
-    C_nzval = C.nzval
-    if eltype(blocks) <: Matrix
-        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-            block_nrow = length(rowinds)
-            first_row = first(rowinds)
-            for (j1, j2) ∈ enumerate(colinds)
+        block_nrow = length(block_rowinds)
+        first_row = first(block_rowinds)
+        if isa(block, Matrix)
+            for (j1, j2) ∈ enumerate(block_colinds)
                 C_col = C_colinds[j2]
                 first_i = C_colptr[C_col]
                 last_i = C_colptr[C_col+1] - 1
@@ -2788,7 +2932,7 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                 i1 = 1
                 while i1 ≤ block_nrow
                     C_row = C_rowval[flat_i]
-                    block_global_row = C_rowinds[rowinds[i1]]
+                    block_global_row = C_rowinds[block_rowinds[i1]]
                     if C_row == block_global_row
                         block[i1,j1] = C_nzval[flat_i]
                         i1 += 1
@@ -2805,15 +2949,11 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                     end
                 end
             end
-        end
-    else
-        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-            block_nrow = length(rowinds)
-            first_row = first(rowinds)
+        else
             block_colptr = block.colptr
             block_rowval = block.rowval
             block_nzval = block.nzval
-            for (j1, j2) ∈ enumerate(colinds)
+            for (j1, j2) ∈ enumerate(block_colinds)
                 C_col = C_colinds[j2]
                 first_i = C_colptr[C_col]
                 last_i = C_colptr[C_col+1] - 1
@@ -2823,7 +2963,7 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                 block_last_i = block_colptr[j1+1] - 1
                 while block_i ≤ block_last_i
                     C_row = C_rowval[flat_i]
-                    block_global_row = C_rowinds[rowinds[block_rowval[block_i]]]
+                    block_global_row = C_rowinds[block_rowinds[block_rowval[block_i]]]
                     if C_row == block_global_row
                         block_nzval[block_i] = C_nzval[flat_i]
                         block_i += 1
@@ -2841,424 +2981,375 @@ function copy_C_submatrix!(block_C::BlockCSerial, C::AbstractSparseMatrixCSC, C_
                 end
             end
         end
-    end
-    return nothing
-end
-function copy_C_submatrix!(block_C::BlockCShared, C::AbstractSparseMatrixCSC, C_rowinds,
-                           C_colinds)
-    block_rowinds = block_C.block_rowinds
-    block_colinds = block_C.block_colinds
-    if isempty(block_rowinds) || isempty(block_colinds)
-        # Nothing to do.
         return nothing
     end
-    block = block_C.block
-    C_colptr = C.colptr
-    C_rowval = C.rowval
-    C_nzval = C.nzval
-
-    block_nrow = length(block_rowinds)
-    first_row = first(block_rowinds)
-    if isa(block, Matrix)
-        for (j1, j2) ∈ enumerate(block_colinds)
-            C_col = C_colinds[j2]
-            first_i = C_colptr[C_col]
-            last_i = C_colptr[C_col+1] - 1
-            col_rv = @view C_rowval[first_i:last_i]
-            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-            i1 = 1
-            while i1 ≤ block_nrow
-                C_row = C_rowval[flat_i]
-                block_global_row = C_rowinds[block_rowinds[i1]]
-                if C_row == block_global_row
-                    block[i1,j1] = C_nzval[flat_i]
-                    i1 += 1
-                    flat_i += 1
-                elseif C_row > block_global_row
-                    block[i1,j1] = 0.0
-                    i1 += 1
-                else
-                    flat_i += 1
-                end
-                if flat_i > last_i
-                    block[i1:end,j1] .= 0.0
-                    break
-                end
-            end
-        end
-    else
-        block_colptr = block.colptr
-        block_rowval = block.rowval
-        block_nzval = block.nzval
-        for (j1, j2) ∈ enumerate(block_colinds)
-            C_col = C_colinds[j2]
-            first_i = C_colptr[C_col]
-            last_i = C_colptr[C_col+1] - 1
-            col_rv = @view C_rowval[first_i:last_i]
-            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-            block_i = block_colptr[j1]
-            block_last_i = block_colptr[j1+1] - 1
-            while block_i ≤ block_last_i
-                C_row = C_rowval[flat_i]
-                block_global_row = C_rowinds[block_rowinds[block_rowval[block_i]]]
-                if C_row == block_global_row
-                    block_nzval[block_i] = C_nzval[flat_i]
-                    block_i += 1
-                    flat_i += 1
-                elseif C_row > block_global_row
-                    block_nzval[block_i] = 0.0
-                    block_i += 1
-                else
-                    flat_i += 1
-                end
-                if flat_i > last_i
-                    block_nzval[block_i:block_last_i] .= 0.0
-                    break
-                end
-            end
-        end
-    end
-    return nothing
 end
 @inline function copy_C_submatrix!(block_C::Union{BlockCSerial,BlockCShared}, C::SubArray)
-    return copy_C_submatrix!(block_C, C.parent, C.indices[1], C.indices[2])
+    @inbounds begin
+        return copy_C_submatrix!(block_C, C.parent, C.indices[1], C.indices[2])
+    end
 end
 
 # Note that combining all the contributions to C_dot_Ainv_dot_B from different processes
 # is taken care of by MPISchurComplements.
 function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCSerial,
                            Ainv_dot_B::BlockAinvDotBSerial)
-    C_blocks = C.blocks
-    if length(C_blocks) == 0
-        # Nothing to do.
+    @inbounds begin
+        C_blocks = C.blocks
+        if length(C_blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        mul_blocks = C.right_multiplication_buffer_blocks
+        Ainv_dot_B_blocks = Ainv_dot_B.blocks
+        block_output_inds = C.block_rowinds # This is identical to Ainv_dot_B.block_colinds
+
+        colptr = C_dot_Ainv_dot_B.colptr
+        rowval = C_dot_Ainv_dot_B.rowval
+        C_dot_Ainv_dot_B_storage = C_dot_Ainv_dot_B.storage
+
+        # The rows are labelled by block_hypercube_position, so there are no overlaps, and we
+        # can directly set entries, instead of adding to them, and so do not need to
+        # zero-initialise the output buffer.
+        block_hypercube_positions = C.block_hypercube_positions
+        for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                   Ainv_dot_B_blocks, block_output_inds,
+                                                   block_hypercube_positions)
+            nzval = @view C_dot_Ainv_dot_B_storage[bhp,:]
+
+            mul!(mb, Cb, AiBb, -1.0, 0.0)
+
+            # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
+            first_row = first(output_inds)
+            nrows = length(output_inds)
+            for (j, col) ∈ enumerate(output_inds)
+                first_i = colptr[col]
+                last_i = colptr[col+1] - 1
+                col_rv = @view rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+                i = 1
+                while flat_i ≤ last_i && i ≤ nrows
+                    if rowval[flat_i] == output_inds[i]
+                        nzval[flat_i] = mb[i,j]
+                        flat_i += 1
+                        i += 1
+                    else
+                        # rowval[flat_i] must be less than output_inds[i]
+                        flat_i += 1
+                    end
+                end
+            end
+        end
+
         return nothing
     end
+end
+function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
+                           Ainv_dot_B::BlockAinvDotBShared)
+    @inbounds begin
+        C_block = C.block
+        mul_block = C.right_multiplication_buffer_block
+        block_output_inds = C.block_rowinds
+        block_output_colinds = C.block_right_multiplication_output_colinds
+        Ainv_dot_B_block = Ainv_dot_B.block
 
-    mul_blocks = C.right_multiplication_buffer_blocks
-    Ainv_dot_B_blocks = Ainv_dot_B.blocks
-    block_output_inds = C.block_rowinds # This is identical to Ainv_dot_B.block_colinds
+        if isempty(block_output_inds) || isempty(block_output_colinds)
+            return nothing
+        end
 
-    colptr = C_dot_Ainv_dot_B.colptr
-    rowval = C_dot_Ainv_dot_B.rowval
-    C_dot_Ainv_dot_B_storage = C_dot_Ainv_dot_B.storage
+        colptr = C_dot_Ainv_dot_B.colptr
+        rowval = C_dot_Ainv_dot_B.rowval
+        nzval = @view C_dot_Ainv_dot_B.storage[C.block_hypercube_position,:]
 
-    # The rows are labelled by block_hypercube_position, so there are no overlaps, and we
-    # can directly set entries, instead of adding to them, and so do not need to
-    # zero-initialise the output buffer.
-    block_hypercube_positions = C.block_hypercube_positions
-    for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                               Ainv_dot_B_blocks, block_output_inds,
-                                               block_hypercube_positions)
-        nzval = @view C_dot_Ainv_dot_B_storage[bhp,:]
+        # Output buffer columns are divided by 'hypercube position' so there are no
+        # overlaps, and we can directly set entries, instead of adding to them, and so do
+        # not need to zero-initialise the output buffer.
+        mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
 
-        mul!(mb, Cb, AiBb, -1.0, 0.0)
-
-        # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
-        first_row = first(output_inds)
-        nrows = length(output_inds)
-        for (j, col) ∈ enumerate(output_inds)
+        # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
+        first_row = first(block_output_inds)
+        nrows = length(block_output_inds)
+        for (j, col) ∈ enumerate(block_output_colinds)
             first_i = colptr[col]
             last_i = colptr[col+1] - 1
             col_rv = @view rowval[first_i:last_i]
             flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
             i = 1
             while flat_i ≤ last_i && i ≤ nrows
-                if rowval[flat_i] == output_inds[i]
-                    nzval[flat_i] = mb[i,j]
+                if rowval[flat_i] == block_output_inds[i]
+                    nzval[flat_i] = mul_block[i,j]
                     flat_i += 1
                     i += 1
                 else
-                    # rowval[flat_i] must be less than output_inds[i]
+                    # rowval[flat_i] must be less than block_output_inds[i].
                     flat_i += 1
                 end
             end
         end
-    end
 
-    return nothing
-end
-function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
-                           Ainv_dot_B::BlockAinvDotBShared)
-    C_block = C.block
-    mul_block = C.right_multiplication_buffer_block
-    block_output_inds = C.block_rowinds
-    block_output_colinds = C.block_right_multiplication_output_colinds
-    Ainv_dot_B_block = Ainv_dot_B.block
-
-    if isempty(block_output_inds) || isempty(block_output_colinds)
         return nothing
     end
-
-    colptr = C_dot_Ainv_dot_B.colptr
-    rowval = C_dot_Ainv_dot_B.rowval
-    nzval = @view C_dot_Ainv_dot_B.storage[C.block_hypercube_position,:]
-
-    # Output buffer columns are divided by 'hypercube position' so there are no
-    # overlaps, and we can directly set entries, instead of adding to them, and so do
-    # not need to zero-initialise the output buffer.
-    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
-
-    # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
-    first_row = first(block_output_inds)
-    nrows = length(block_output_inds)
-    for (j, col) ∈ enumerate(block_output_colinds)
-        first_i = colptr[col]
-        last_i = colptr[col+1] - 1
-        col_rv = @view rowval[first_i:last_i]
-        flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
-        i = 1
-        while flat_i ≤ last_i && i ≤ nrows
-            if rowval[flat_i] == block_output_inds[i]
-                nzval[flat_i] = mul_block[i,j]
-                flat_i += 1
-                i += 1
-            else
-                # rowval[flat_i] must be less than block_output_inds[i].
-                flat_i += 1
-            end
-        end
-    end
-
-    return nothing
 end
 
 function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
-    @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
-        local_top_vector_indices = solver.local_top_vector_indices
-        all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
-        local_bottom_vector_indices = solver.local_bottom_vector_indices
-        a = @view A[all_local_top_vector_a_block_indices,all_local_top_vector_a_block_indices]
-        b = @view A[local_top_vector_indices,local_bottom_vector_indices]
-        c = @view A[local_bottom_vector_indices,local_top_vector_indices]
-        d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
-        update_schur_complement!(solver.local_block_solver, a, b, c, d)
+    @inbounds begin
+        @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+            local_top_vector_indices = solver.local_top_vector_indices
+            all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
+            local_bottom_vector_indices = solver.local_bottom_vector_indices
+            a = @view A[all_local_top_vector_a_block_indices,all_local_top_vector_a_block_indices]
+            b = @view A[local_top_vector_indices,local_bottom_vector_indices]
+            c = @view A[local_bottom_vector_indices,local_top_vector_indices]
+            d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
+            update_schur_complement!(solver.local_block_solver, a, b, c, d)
+        end
+        return nothing
     end
-    return nothing
 end
 
 function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
                            Ainv_dot_B::BlockAinvDotBSerial, global_y::AbstractVector)
-    blocks = Ainv_dot_B.blocks
-    if length(blocks) == 0
-        # Nothing to do.
+    @inbounds begin
+        blocks = Ainv_dot_B.blocks
+        if length(blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
+                zip(Ainv_dot_B.vector_buffer_blocks_in, Ainv_dot_B.vector_buffer_blocks_out,
+                    Ainv_dot_B.block_rowinds, Ainv_dot_B.block_colinds, blocks)
+            for (i1, i2) ∈ enumerate(colinds)
+                vec_buffer_in[i1] = global_y[i2]
+            end
+            mul!(vec_buffer_out, block, vec_buffer_in)
+            for (i2, i1) ∈ enumerate(rowinds)
+                top_vec_buffer[i1] = vec_buffer_out[i2]
+            end
+        end
         return nothing
     end
-
-    for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
-            zip(Ainv_dot_B.vector_buffer_blocks_in, Ainv_dot_B.vector_buffer_blocks_out,
-                Ainv_dot_B.block_rowinds, Ainv_dot_B.block_colinds, blocks)
-        for (i1, i2) ∈ enumerate(colinds)
-            vec_buffer_in[i1] = global_y[i2]
-        end
-        mul!(vec_buffer_out, block, vec_buffer_in)
-        for (i2, i1) ∈ enumerate(rowinds)
-            top_vec_buffer[i1] = vec_buffer_out[i2]
-        end
-    end
-    return nothing
 end
 function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
                            Ainv_dot_B::BlockAinvDotBShared, global_y::AbstractVector)
-    partial_block = Ainv_dot_B.partial_block
-    vector_buffer_block_in = Ainv_dot_B.vector_buffer_block_in
-    vector_buffer_block_out = Ainv_dot_B.vector_buffer_block_out
-    block_partial_rowinds = Ainv_dot_B.block_partial_rowinds
-    block_partial_colinds = Ainv_dot_B.block_partial_colinds
-    partial_col_range = Ainv_dot_B.partial_col_range
-    synchronize_shared = Ainv_dot_B.synchronize_shared
+    @inbounds begin
+        partial_block = Ainv_dot_B.partial_block
+        vector_buffer_block_in = Ainv_dot_B.vector_buffer_block_in
+        vector_buffer_block_out = Ainv_dot_B.vector_buffer_block_out
+        block_partial_rowinds = Ainv_dot_B.block_partial_rowinds
+        block_partial_colinds = Ainv_dot_B.block_partial_colinds
+        partial_col_range = Ainv_dot_B.partial_col_range
+        synchronize_shared = Ainv_dot_B.synchronize_shared
 
-    for (i1, i2) ∈ zip(partial_col_range, block_partial_colinds)
-        vector_buffer_block_in[i1] = global_y[i2]
-    end
-    synchronize_shared()
+        for (i1, i2) ∈ zip(partial_col_range, block_partial_colinds)
+            vector_buffer_block_in[i1] = global_y[i2]
+        end
+        synchronize_shared()
 
-    mul!(vector_buffer_block_out, partial_block, vector_buffer_block_in)
-    for (i2, i1) ∈ enumerate(block_partial_rowinds)
-        top_vec_buffer[i1] = vector_buffer_block_out[i2]
+        mul!(vector_buffer_block_out, partial_block, vector_buffer_block_in)
+        for (i2, i1) ∈ enumerate(block_partial_rowinds)
+            top_vec_buffer[i1] = vector_buffer_block_out[i2]
+        end
+        return nothing
     end
-    return nothing
 end
 
 function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial,
                                Ainv_dot_u::AbstractVector)
 
-    blocks = C.blocks
-    vector_range = C.vector_range
-    vector_intermediate_buffer = C.vector_intermediate_buffer
-    synchronize_shared = C.synchronize_shared
+    @inbounds begin
+        blocks = C.blocks
+        vector_range = C.vector_range
+        vector_intermediate_buffer = C.vector_intermediate_buffer
+        synchronize_shared = C.synchronize_shared
 
-    # The rows are labelled by block_hypercube_position, so there are no overlaps, and we
-    # can directly set entries, instead of adding to them, and so do not need to
-    # zero-initialise the intermediate buffer.
-    block_hypercube_positions = C.block_hypercube_positions
-    if length(blocks) > 0
-        for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block, bhp) ∈
-                zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out, C.block_rowinds,
-                    C.block_colinds, blocks, block_hypercube_positions)
-            vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
-            for (i1, i2) ∈ enumerate(colinds)
-                vec_buffer_in[i1] = Ainv_dot_u[i2]
-            end
-            mul!(vec_buffer_out, block, vec_buffer_in)
-            for (i2, i1) ∈ enumerate(rowinds)
-                vector_intermediate_buffer_local[i1] = -vec_buffer_out[i2]
+        # The rows are labelled by block_hypercube_position, so there are no overlaps, and
+        # we can directly set entries, instead of adding to them, and so do not need to
+        # zero-initialise the intermediate buffer.
+        block_hypercube_positions = C.block_hypercube_positions
+        if length(blocks) > 0
+            for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block, bhp) ∈
+                    zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out,
+                        C.block_rowinds, C.block_colinds, blocks,
+                        block_hypercube_positions)
+                vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
+                for (i1, i2) ∈ enumerate(colinds)
+                    vec_buffer_in[i1] = Ainv_dot_u[i2]
+                end
+                mul!(vec_buffer_out, block, vec_buffer_in)
+                for (i2, i1) ∈ enumerate(rowinds)
+                    vector_intermediate_buffer_local[i1] = -vec_buffer_out[i2]
+                end
             end
         end
+
+        synchronize_shared()
+
+        # Sum contributions from all processes into the output.
+        if !isempty(vector_range)
+            @views sum!(C_dot_Ainv_dot_u[vector_range]',
+                        vector_intermediate_buffer[:,vector_range])
+        end
+
+        return nothing
     end
-
-    synchronize_shared()
-
-    # Sum contributions from all processes into the output.
-    if !isempty(vector_range)
-        @views sum!(C_dot_Ainv_dot_u[vector_range]', vector_intermediate_buffer[:,vector_range])
-    end
-
-    return nothing
 end
 function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared,
                                Ainv_dot_u::AbstractVector)
 
-    block = C.block
-    vector_range = C.vector_range
-    vector_intermediate_buffer = C.vector_intermediate_buffer
-    synchronize_shared = C.synchronize_shared
-    vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
-    vec_buffer_block_in = C.vector_buffer_block_in
-    vec_buffer_block_out = C.vector_buffer_block_out
-    block_rowinds = C.block_rowinds
-    partial_block_colinds = C.partial_block_colinds
-    partial_col_range = C.partial_col_range
-    block_synchronize_shared = C.block_synchronize_shared
-    synchronize_shared = C.synchronize_shared
+    @inbounds begin
+        block = C.block
+        vector_range = C.vector_range
+        vector_intermediate_buffer = C.vector_intermediate_buffer
+        synchronize_shared = C.synchronize_shared
+        vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
+        vec_buffer_block_in = C.vector_buffer_block_in
+        vec_buffer_block_out = C.vector_buffer_block_out
+        block_rowinds = C.block_rowinds
+        partial_block_colinds = C.partial_block_colinds
+        partial_col_range = C.partial_col_range
+        block_synchronize_shared = C.block_synchronize_shared
+        synchronize_shared = C.synchronize_shared
 
-    # The rows are labelled by block_hypercube_position, so there are no overlaps, and we
-    # can directly set entries, instead of adding to them, and so do not need to
-    # zero-initialise the output buffer.
-    for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
-        vec_buffer_block_in[i1] = Ainv_dot_u[i2]
+        # The rows are labelled by block_hypercube_position, so there are no overlaps, and
+        # we can directly set entries, instead of adding to them, and so do not need to
+        # zero-initialise the output buffer.
+        for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
+            vec_buffer_block_in[i1] = Ainv_dot_u[i2]
+        end
+
+        block_synchronize_shared()
+
+        mul!(vec_buffer_block_out, block, vec_buffer_block_in)
+        for (i2, i1) ∈ enumerate(block_rowinds)
+            vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
+        end
+
+        synchronize_shared()
+
+        # Sum contributions from all processes into the output.
+        if !isempty(vector_range)
+            @views sum!(C_dot_Ainv_dot_u[vector_range]',
+                        vector_intermediate_buffer[:,vector_range])
+        end
+
+        return nothing
     end
-
-    block_synchronize_shared()
-
-    mul!(vec_buffer_block_out, block, vec_buffer_block_in)
-    for (i2, i1) ∈ enumerate(block_rowinds)
-        vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
-    end
-
-    synchronize_shared()
-
-    # Sum contributions from all processes into the output.
-    if !isempty(vector_range)
-        @views sum!(C_dot_Ainv_dot_u[vector_range]', vector_intermediate_buffer[:,vector_range])
-    end
-
-    return nothing
 end
 
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
-        # MPISchurComplement allows the RHS and solution vectors to be the same array.
-        # It is slightly faster to copy the data to/from local buffers than to use @view
-        # with Vector{Int64} indices.
-        partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
-        partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
-        this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
-        this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
-        this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
-        this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
-        this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
-        this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
-        u = solver.u_buffer
-        v = solver.v_buffer
-        # Use the a_block_indices here so that no shared-memory synchronization is needed
-        # before the ldiv!() call for the A subblock with the
-        # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-        # MPISchurComplement ldiv!().
-        for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
-            u[i1] = U[i2]
-        end
-        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-            # This loop uses 'no overlap' indices
-            # (`this_shared_local_bottom_vector_no_overlap_indices`) because when there
-            # are periodic dimensions, at the top level (and only the top level, not any
-            # intermediate levels) the right-hand-side entries need to be taken only from
-            # the non-repeated points, with the repeated points being zero-ed out.
-            v[i1] = U[i2]
-        end
-        for i ∈ this_shared_local_bottom_vector_repeat_indices
-            # Zero out repeated points at the top level
-            v[i] = 0.0
-        end
-        if solver.has_periodic
-            for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                # At the bottom level, need to add any contributions that the top and
-                # intermediate levels have added to repeated points into the non-repeated
-                # points.
-                v[i1] += U[i2]
+    @inbounds begin
+        @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
+            # MPISchurComplement allows the RHS and solution vectors to be the same array.
+            # It is slightly faster to copy the data to/from local buffers than to use
+            # @view with Vector{Int64} indices.
+            partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
+            partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
+            this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
+            this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
+            this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
+            this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
+            this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
+            this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
+            u = solver.u_buffer
+            v = solver.v_buffer
+            # Use the a_block_indices here so that no shared-memory synchronization is
+            # needed before the ldiv!() call for the A subblock with the
+            # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
+            # MPISchurComplement ldiv!().
+            for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
+                u[i1] = U[i2]
+            end
+            for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                # This loop uses 'no overlap' indices
+                # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                # there are periodic dimensions, at the top level (and only the top level,
+                # not any intermediate levels) the right-hand-side entries need to be
+                # taken only from the non-repeated points, with the repeated points being
+                # zero-ed out.
+                v[i1] = U[i2]
+            end
+            for i ∈ this_shared_local_bottom_vector_repeat_indices
+                # Zero out repeated points at the top level
+                v[i] = 0.0
+            end
+            if solver.has_periodic
+                for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                    # At the bottom level, need to add any contributions that the top and
+                    # intermediate levels have added to repeated points into the
+                    # non-repeated points.
+                    v[i1] += U[i2]
+                end
+            end
+            ldiv!(u, v, solver.local_block_solver, u, v)
+            for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
+                X[i1] = u[i2]
+            end
+            for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
+                X[i1] = v[i2]
             end
         end
-        ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
-            X[i1] = u[i2]
-        end
-        for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
-            X[i1] = v[i2]
-        end
+        return nothing
     end
-    return nothing
 end
 function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
-    @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
-        # MPISchurComplement allows the RHS and solution vectors to be the same array.
-        # It is slightly faster to copy the data to/from local buffers than to use @view
-        # with Vector{Int64} indices.
-        partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
-        partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
-        this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
-        this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
-        this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
-        this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
-        this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
-        this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
-        u = solver.u_buffer
-        v = solver.v_buffer
-        # Use the a_block_indices here so that no shared-memory synchronization is needed
-        # before the ldiv!() call for the A subblock with the
-        # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-        # MPISchurComplement ldiv!().
-        for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
-            u[i1] = U[i2]
-        end
-        for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-            # This loop uses 'no overlap' indices
-            # (`this_shared_local_bottom_vector_no_overlap_indices`) because when there
-            # are periodic dimensions, at the top level (and only the top level, not any
-            # intermediate levels) the right-hand-side entries need to be taken only from
-            # the non-repeated points, with the repeated points being zero-ed out.
-            v[i1] = U[i2]
-        end
-        for i ∈ this_shared_local_bottom_vector_repeat_indices
-            # Zero out repeated points at the top level
-            v[i] = 0.0
-        end
-        if solver.has_periodic
-            for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                # At the bottom level, need to add any contributions that the top and
-                # intermediate levels have added to repeated points into the non-repeated
-                # points.
-                v[i1] += U[i2]
+    @inbounds begin
+        @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
+            # MPISchurComplement allows the RHS and solution vectors to be the same array.
+            # It is slightly faster to copy the data to/from local buffers than to use
+            # @view with Vector{Int64} indices.
+            partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
+            partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
+            this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
+            this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
+            this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
+            this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
+            this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
+            this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
+            u = solver.u_buffer
+            v = solver.v_buffer
+            # Use the a_block_indices here so that no shared-memory synchronization is
+            # needed before the ldiv!() call for the A subblock with the
+            # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
+            # MPISchurComplement ldiv!().
+            for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
+                u[i1] = U[i2]
+            end
+            for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                # This loop uses 'no overlap' indices
+                # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                # there are periodic dimensions, at the top level (and only the top level,
+                # not any intermediate levels) the right-hand-side entries need to be
+                # taken only from the non-repeated points, with the repeated points being
+                # zero-ed out.
+                v[i1] = U[i2]
+            end
+            for i ∈ this_shared_local_bottom_vector_repeat_indices
+                # Zero out repeated points at the top level
+                v[i] = 0.0
+            end
+            if solver.has_periodic
+                for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                    # At the bottom level, need to add any contributions that the top and
+                    # intermediate levels have added to repeated points into the
+                    # non-repeated points.
+                    v[i1] += U[i2]
+                end
+            end
+            ldiv!(u, v, solver.local_block_solver, u, v)
+            for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices,
+                               partial_a_block_sub_selection_indices)
+                U[i1] = u[i2]
+            end
+            for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
+                               this_shared_local_bottom_sub_selection_indices)
+                U[i1] = v[i2]
             end
         end
-        ldiv!(u, v, solver.local_block_solver, u, v)
-        for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
-            U[i1] = u[i2]
-        end
-        for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
-            U[i1] = v[i2]
-        end
+        return nothing
     end
-    return nothing
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
                U::AbstractMatrix{T}) where T
