@@ -54,6 +54,7 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
     t1 = time_ns()
     icntl = copy(default_icntl)
     icntl[4] = 1 # Non-verbose, only error messages.
+    icntl[14] = 100 # Percentage increase in the estimated working space (default is between 25 and 35).
     icntl[18] = 3 # User-provided distributed matrix pattern.
     #icntl[20] = 11 # Distributed RHS (also 10, not sure which value is best)
     icntl[20] = 0 # Centralised RHS.
