@@ -123,4 +123,4 @@ end
 
 benchmark(run_MUMPS, params_1d, seed_1d, "MUMPS_1d"; use_shared=false)
 benchmark(run_MUMPS, params_2d, seed_2d, "MUMPS_2d"; use_shared=false)
-#benchmark(run_MUMPS, params_3d, seed_3d, "MUMPS_3d"; use_shared=false)
+benchmark(run_MUMPS, params_3d, seed_3d, "MUMPS_3d"; use_shared=false)

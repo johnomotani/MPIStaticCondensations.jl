@@ -92,23 +92,33 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
 
-    nproc = distributed_nproc * shared_nproc
+    if use_shared
+        ns = n_shared
+    else
+        ns = Threads.nthreads()
+    end
+    nproc = distributed_nproc * ns
     ndim = length(params.nelement_list)
 
     if distributed_rank == 0 && shared_rank == 0
         println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), level_multiplier=$level_multiplier, $params")
     end
 
-    # For now, only distribute the last dimension.
-    if distributed_nproc > params.nelement_list[end] || params.nelement_list[end] % distributed_nproc != 0
-        # Cannot parallelise in this way, so skip.
-        if distributed_rank == 0 && shared_rank == 0
-            println("Parallelisation does not fit this grid, skipping...\n")
-        end
-        return nothing
-    end
     nrank_list = ones(Int64, ndim)
-    nrank_list[end] = distributed_nproc
+    if use_shared
+        # For now, only distribute the last dimension.
+        if distributed_nproc > params.nelement_list[end] || params.nelement_list[end] % distributed_nproc != 0
+            # Cannot parallelise in this way, so skip.
+            if distributed_rank == 0 && shared_rank == 0
+                println("Parallelisation does not fit this grid, skipping...\n")
+            end
+            return nothing
+        end
+        nrank_list[end] = distributed_nproc
+    else
+        # Generate matrices as though we only use shared-memory, so that MUMPS can run on
+        # any number of processes.
+    end
     irank_list = get_iranks(nrank_list, distributed_rank)
     dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
                   for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
@@ -180,11 +190,6 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
         if label !== nothing
             run_dir = mkpath(results_directory)
             total_size = prod(d.n for d ∈ dimensions)
-            if use_shared
-                ns = n_shared
-            else
-                ns = Threads.nthreads()
-            end
             function vec2string(v)
                 return "[" * join(v, ",") * "]"
             end
