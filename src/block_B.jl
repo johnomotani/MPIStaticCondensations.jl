@@ -82,8 +82,7 @@ struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync}
     end
 end
 
-function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractMatrix, B_rowinds,
-                           B_colinds)
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, full_A::AbstractMatrix)
     @inbounds begin
         blocks = Ainv_dot_B.blocks
         if length(blocks) == 0
@@ -95,14 +94,14 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractMatrix, B
         block_colinds = Ainv_dot_B.block_colinds
         for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
             for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
-                block[i1,j1] = B[B_rowinds[i2],B_colinds[j2]]
+                block[i1,j1] = full_A[i2,j2]
             end
         end
         return nothing
     end
 end
-function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMatrixCSC,
-                           B_rowinds, B_colinds)
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
+                           full_A::AbstractSparseMatrixCSC)
     @inbounds begin
         blocks = Ainv_dot_B.blocks
         if length(blocks) == 0
@@ -112,27 +111,26 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMat
 
         block_rowinds = Ainv_dot_B.block_rowinds
         block_colinds = Ainv_dot_B.block_colinds
-        B_colptr = B.colptr
-        B_rowval = B.rowval
-        B_nzval = B.nzval
+        full_A_colptr = full_A.colptr
+        full_A_rowval = full_A.rowval
+        full_A_nzval = full_A.nzval
         for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
             block_nrow = length(rowinds)
             first_row = first(rowinds)
             for (j1, j2) ∈ enumerate(colinds)
-                B_col = B_colinds[j2]
-                first_i = B_colptr[B_col]
-                last_i = B_colptr[B_col+1] - 1
-                col_rv = @view B_rowval[first_i:last_i]
+                first_i = full_A_colptr[j2]
+                last_i = full_A_colptr[j2+1] - 1
+                col_rv = @view full_A_rowval[first_i:last_i]
                 flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
                 i1 = 1
                 while i1 ≤ block_nrow
-                    B_row = B_rowval[flat_i]
-                    block_global_row = B_rowinds[rowinds[i1]]
-                    if B_row == block_global_row
-                        block[i1,j1] = B_nzval[flat_i]
+                    full_A_row = full_A_rowval[flat_i]
+                    block_global_row = rowinds[i1]
+                    if full_A_row == block_global_row
+                        block[i1,j1] = full_A_nzval[flat_i]
                         i1 += 1
                         flat_i += 1
-                    elseif B_row > block_global_row
+                    elseif full_A_row > block_global_row
                         block[i1,j1] = 0.0
                         i1 += 1
                     else
@@ -148,8 +146,8 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial, B::AbstractSparseMat
         return nothing
     end
 end
-function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMatrixCSC,
-                           B_rowinds, B_colinds)
+function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
+                           full_A::AbstractSparseMatrixCSC)
     @inbounds begin
         block_rowinds = Ainv_dot_B.block_rowinds
         block_colinds = Ainv_dot_B.block_colinds
@@ -159,28 +157,27 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMat
         end
         block = Ainv_dot_B.block
         partial_col_range = Ainv_dot_B.partial_col_range
-        B_colptr = B.colptr
-        B_rowval = B.rowval
-        B_nzval = B.nzval
+        full_A_colptr = full_A.colptr
+        full_A_rowval = full_A.rowval
+        full_A_nzval = full_A.nzval
 
         block_nrow = length(block_rowinds)
         first_row = first(block_rowinds)
         for j1 ∈ partial_col_range
             j2 = block_colinds[j1]
-            B_col = B_colinds[j2]
-            first_i = B_colptr[B_col]
-            last_i = B_colptr[B_col+1] - 1
-            col_rv = @view B_rowval[first_i:last_i]
+            first_i = full_A_colptr[j2]
+            last_i = full_A_colptr[j2+1] - 1
+            col_rv = @view full_A_rowval[first_i:last_i]
             flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
             i1 = 1
             while i1 ≤ block_nrow
-                B_row = B_rowval[flat_i]
-                block_global_row = B_rowinds[block_rowinds[i1]]
-                if B_row == block_global_row
-                    block[i1,j1] = B_nzval[flat_i]
+                full_A_row = full_A_rowval[flat_i]
+                block_global_row = block_rowinds[i1]
+                if full_A_row == block_global_row
+                    block[i1,j1] = full_A_nzval[flat_i]
                     i1 += 1
                     flat_i += 1
-                elseif B_row > block_global_row
+                elseif full_A_row > block_global_row
                     block[i1,j1] = 0.0
                     i1 += 1
                 else
@@ -194,12 +191,6 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared, B::AbstractSparseMat
         end
 
         return nothing
-    end
-end
-@inline function copy_B_submatrix!(Ainv_dot_B::Union{BlockAinvDotBSerial,BlockAinvDotBShared},
-                                   B::SubArray)
-    @inbounds begin
-        return copy_B_submatrix!(Ainv_dot_B, B.parent, B.indices[1], B.indices[2])
     end
 end
 

@@ -147,7 +147,7 @@ function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_lev
                                    block_synchronize_shared=nothing)
     # The A blocks may be sparse at the top level, but will generally be dense on lower
     # levels, so only use a sparse LU solver when is_top_level=true.
-    if isempty(level_info.a_block_sub_selection_indices)
+    if isempty(level_info.local_top_vector_a_block_indices)
         return MPIStaticCondensationNull{data_type}()
     elseif use_shared_blocks
         return BlockDiagonalSolverShared{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
