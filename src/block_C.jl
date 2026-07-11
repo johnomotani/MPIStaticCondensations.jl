@@ -374,7 +374,7 @@ end
 end
 
 function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial,
-                               Ainv_dot_u::AbstractVector)
+                               Ainv_dot_u)
 
     @inbounds begin
         blocks = C.blocks
@@ -387,15 +387,11 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
         # zero-initialise the intermediate buffer.
         block_hypercube_positions = C.block_hypercube_positions
         if length(blocks) > 0
-            for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block, bhp) ∈
-                    zip(C.vector_buffer_blocks_in, C.vector_buffer_blocks_out,
-                        C.block_rowinds, C.block_colinds, blocks,
-                        block_hypercube_positions)
+            for (vec_buffer_out, rowinds, block, bhp, Aiu_block) ∈
+                    zip(C.vector_buffer_blocks_out, C.block_rowinds, blocks,
+                        block_hypercube_positions, Ainv_dot_u)
                 vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
-                for (i1, i2) ∈ enumerate(colinds)
-                    vec_buffer_in[i1] = Ainv_dot_u[i2]
-                end
-                mul!(vec_buffer_out, block, vec_buffer_in)
+                mul!(vec_buffer_out, block, Aiu_block)
                 for (i2, i1) ∈ enumerate(rowinds)
                     vector_intermediate_buffer_local[i1] = -vec_buffer_out[i2]
                 end
@@ -414,32 +410,21 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
     end
 end
 function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared,
-                               Ainv_dot_u::AbstractVector)
+                               Ainv_dot_u)
 
     @inbounds begin
         block = C.block
         vector_range = C.vector_range
         vector_intermediate_buffer = C.vector_intermediate_buffer
-        synchronize_shared = C.synchronize_shared
         vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
-        vec_buffer_block_in = C.vector_buffer_block_in
         vec_buffer_block_out = C.vector_buffer_block_out
         block_rowinds = C.block_rowinds
-        partial_block_colinds = C.partial_block_colinds
-        partial_col_range = C.partial_col_range
-        block_synchronize_shared = C.block_synchronize_shared
         synchronize_shared = C.synchronize_shared
 
         # The rows are labelled by block_hypercube_position, so there are no overlaps, and
         # we can directly set entries, instead of adding to them, and so do not need to
         # zero-initialise the output buffer.
-        for (i1, i2) ∈ zip(partial_col_range, partial_block_colinds)
-            vec_buffer_block_in[i1] = Ainv_dot_u[i2]
-        end
-
-        block_synchronize_shared()
-
-        mul!(vec_buffer_block_out, block, vec_buffer_block_in)
+        mul!(vec_buffer_block_out, block, Ainv_dot_u)
         for (i2, i1) ∈ enumerate(block_rowinds)
             vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
         end

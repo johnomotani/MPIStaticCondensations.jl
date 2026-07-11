@@ -223,34 +223,29 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared, A::AbstractMatrix
     end
 end
 
-function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T},
+function ldiv!(buffers, block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::AbstractVector{T}) where T
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if solvers != [nothing]
             x_buffer = block_diagonal_solver.x_buffer
             u_buffer = block_diagonal_solver.u_buffer
-            for (bi, s) ∈ zip(block_diagonal_solver.block_indices, solvers)
+            for (bi, s, buff) ∈ zip(block_diagonal_solver.block_indices, solvers, buffers)
                 n = length(bi)
                 this_u_buffer = @view u_buffer[1:n]
-                this_x_buffer = @view x_buffer[1:n]
                 for (i1, i2) ∈ enumerate(bi)
                     this_u_buffer[i1] = u[i2]
                 end
-                ldiv!(this_x_buffer, s, this_u_buffer)
-                for (i2, i1) ∈ enumerate(bi)
-                    x[i1] = this_x_buffer[i2]
-                end
+                ldiv!(buff, s, this_u_buffer)
             end
         end
         return nothing
     end
 end
-function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
+function ldiv!(buffer, block_diagonal_solver::BlockDiagonalSolverShared{T},
                u::AbstractVector{T}) where T
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
-        x_buffer = block_diagonal_solver.x_buffer
         block_comm_rank = block_diagonal_solver.block_comm_rank
         block_indices = block_diagonal_solver.block_indices
         synchronize_shared = block_diagonal_solver.synchronize_shared
@@ -269,21 +264,13 @@ function ldiv!(x::AbstractVector{T}, block_diagonal_solver::BlockDiagonalSolverS
                     u_buffer[i1] = u[i2]
                 end
             end
-            ldiv!(x_buffer, solver, u_buffer)
-            if block_comm_rank == 0
-                for (i2, i1) ∈ enumerate(block_indices)
-                    x[i1] = x_buffer[i2]
-                end
-            end
+            ldiv!(buffer, solver, u_buffer)
         else
             if block_comm_rank == 0
                 for (i1, i2) ∈ enumerate(block_indices)
-                    x_buffer[i1] = u[i2]
+                    buffer[i1] = u[i2]
                 end
-                ldiv!(solver, x_buffer)
-                for (i2, i1) ∈ enumerate(block_indices)
-                    x[i1] = x_buffer[i2]
-                end
+                ldiv!(solver, buffer)
             end
         end
         return nothing

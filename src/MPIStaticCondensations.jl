@@ -73,10 +73,7 @@ using LinearAlgebra.LAPACK: getrf!
 using MPI
 using MPIDenseLUs
 using MPISchurComplements
-using MPISchurComplements: MPISchurComplementAFactorization,
-                           MPISchurComplementBlockAinvDotB, MPISchurComplementBlockC
-import MPISchurComplements: ldiv_Bmatrix!, copy_B_submatrix!, Ainv_dot_B_dot_y!,
-                            copy_C_submatrix!, mul_C_Ainv_dot_B!, mul_C_dot_Ainv_dot_u!
+using MPISchurComplements: MPISchurComplementAFactorization
 using Primes
 using SparseArrays
 using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
@@ -103,7 +100,7 @@ struct MPIStaticCondensationNull{Tf<:AbstractFloat} <: MPIStaticCondensation{Tf}
 
 struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeatab,Trangeabs,Trangeb,Trangebs,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
-    local_block_solver::Tsolver
+    schur_complement_solver::Tsolver
     local_top_vector_indices::Tranget
     all_local_top_vector_a_block_indices::Trangeatab
     partial_local_top_vector_a_block_indices::Trangeatab
@@ -1816,7 +1813,7 @@ function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
             c = @view A[local_bottom_vector_indices,local_top_vector_indices]
             d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
 end
-            update_schur_complement!(solver.local_block_solver, a, b, c, d)
+            update_schur_complement!(solver.schur_complement_solver, a, b, c, d)
         end
         return nothing
     end
@@ -1829,6 +1826,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
+            schur_complement_solver = solver.schur_complement_solver
             partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
             partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
@@ -1839,40 +1837,68 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
             u = solver.u_buffer
             v = solver.v_buffer
-            # Use the a_block_indices here so that no shared-memory synchronization is
-            # needed before the ldiv!() call for the A subblock with the
-            # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-            # MPISchurComplement ldiv!().
-            for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
-                u[i1] = U[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-                # This loop uses 'no overlap' indices
-                # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
-                # there are periodic dimensions, at the top level (and only the top level,
-                # not any intermediate levels) the right-hand-side entries need to be
-                # taken only from the non-repeated points, with the repeated points being
-                # zero-ed out.
-                v[i1] = U[i2]
-            end
-            for i ∈ this_shared_local_bottom_vector_repeat_indices
-                # Zero out repeated points at the top level
-                v[i] = 0.0
-            end
-            if solver.has_periodic
-                for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                    # At the bottom level, need to add any contributions that the top and
-                    # intermediate levels have added to repeated points into the
-                    # non-repeated points.
-                    v[i1] += U[i2]
+            if isa(schur_complement_solver, BlockedSchurComplement)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
                 end
-            end
-            ldiv!(u, v, solver.local_block_solver, u, v)
-            for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
-                X[i1] = u[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
-                X[i1] = v[i2]
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                ldiv!(X, v, schur_complement_solver, U, v)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
+                    X[i1] = v[i2]
+                end
+            else
+                # Use the a_block_indices here so that no shared-memory synchronization is
+                # needed before the ldiv!() call for the A subblock with the
+                # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
+                # MPISchurComplement ldiv!().
+                for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
+                    u[i1] = U[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
+                end
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                ldiv!(u, v, schur_complement_solver, u, v)
+                for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
+                    X[i1] = u[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
+                    X[i1] = v[i2]
+                end
             end
         end
         return nothing
@@ -1884,6 +1910,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
+            schur_complement_solver = solver.schur_complement_solver
             partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
             partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
@@ -1892,44 +1919,73 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
             this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
-            u = solver.u_buffer
             v = solver.v_buffer
-            # Use the a_block_indices here so that no shared-memory synchronization is
-            # needed before the ldiv!() call for the A subblock with the
-            # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-            # MPISchurComplement ldiv!().
-            for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
-                u[i1] = U[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-                # This loop uses 'no overlap' indices
-                # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
-                # there are periodic dimensions, at the top level (and only the top level,
-                # not any intermediate levels) the right-hand-side entries need to be
-                # taken only from the non-repeated points, with the repeated points being
-                # zero-ed out.
-                v[i1] = U[i2]
-            end
-            for i ∈ this_shared_local_bottom_vector_repeat_indices
-                # Zero out repeated points at the top level
-                v[i] = 0.0
-            end
-            if solver.has_periodic
-                for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                    # At the bottom level, need to add any contributions that the top and
-                    # intermediate levels have added to repeated points into the
-                    # non-repeated points.
-                    v[i1] += U[i2]
+            if isa(schur_complement_solver, BlockedSchurComplement)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
                 end
-            end
-            ldiv!(u, v, solver.local_block_solver, u, v)
-            for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices,
-                               partial_a_block_sub_selection_indices)
-                U[i1] = u[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
-                               this_shared_local_bottom_sub_selection_indices)
-                U[i1] = v[i2]
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                ldiv!(U, v, schur_complement_solver, U, v)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
+                                   this_shared_local_bottom_sub_selection_indices)
+                    U[i1] = v[i2]
+                end
+            else
+                u = solver.u_buffer
+                # Use the a_block_indices here so that no shared-memory synchronization is
+                # needed before the ldiv!() call for the A subblock with the
+                # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
+                # MPISchurComplement ldiv!().
+                for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
+                    u[i1] = U[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
+                end
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                ldiv!(u, v, schur_complement_solver, u, v)
+                for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices,
+                                   partial_a_block_sub_selection_indices)
+                    U[i1] = u[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
+                                   this_shared_local_bottom_sub_selection_indices)
+                    U[i1] = v[i2]
+                end
             end
         end
         return nothing

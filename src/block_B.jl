@@ -305,8 +305,9 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
     end
 end
 
-function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
-                           Ainv_dot_B::BlockAinvDotBSerial, global_y::AbstractVector)
+function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
+                                            Ainv_dot_B::BlockAinvDotBSerial,
+                                            global_y::AbstractVector)
     @inbounds begin
         blocks = Ainv_dot_B.blocks
         if length(blocks) == 0
@@ -314,22 +315,24 @@ function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
             return nothing
         end
 
-        for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block) ∈
-                zip(Ainv_dot_B.vector_buffer_blocks_in, Ainv_dot_B.vector_buffer_blocks_out,
-                    Ainv_dot_B.block_rowinds, Ainv_dot_B.block_colinds, blocks)
+        for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block, Aiu_block) ∈
+                zip(Ainv_dot_B.vector_buffer_blocks_in,
+                    Ainv_dot_B.vector_buffer_blocks_out, Ainv_dot_B.block_rowinds,
+                    Ainv_dot_B.block_colinds, blocks, Ainv_dot_u)
             for (i1, i2) ∈ enumerate(colinds)
                 vec_buffer_in[i1] = global_y[i2]
             end
             mul!(vec_buffer_out, block, vec_buffer_in)
             for (i2, i1) ∈ enumerate(rowinds)
-                top_vec_buffer[i1] = vec_buffer_out[i2]
+                x[i1] = Aiu_block[i2] - vec_buffer_out[i2]
             end
         end
         return nothing
     end
 end
-function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
-                           Ainv_dot_B::BlockAinvDotBShared, global_y::AbstractVector)
+function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
+                                            Ainv_dot_B::BlockAinvDotBShared,
+                                            global_y::AbstractVector)
     @inbounds begin
         partial_block = Ainv_dot_B.partial_block
         vector_buffer_block_in = Ainv_dot_B.vector_buffer_block_in
@@ -346,7 +349,7 @@ function Ainv_dot_B_dot_y!(top_vec_buffer::AbstractVector,
 
         mul!(vector_buffer_block_out, partial_block, vector_buffer_block_in)
         for (i2, i1) ∈ enumerate(block_partial_rowinds)
-            top_vec_buffer[i1] = vector_buffer_block_out[i2]
+            x[i1] = Ainv_dot_u[i2] - vector_buffer_block_out[i2]
         end
         return nothing
     end
