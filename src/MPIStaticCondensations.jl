@@ -121,6 +121,7 @@ end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
 Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
+include("block_S.jl")
 include("block_C.jl")
 include("block_B.jl")
 include("block_diagonal_solvers.jl")

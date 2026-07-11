@@ -205,7 +205,7 @@ end
 
 # Note that combining all the contributions to C_dot_Ainv_dot_B from different processes
 # is taken care of by MPISchurComplements.
-function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCSerial,
+function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
                            Ainv_dot_B::BlockAinvDotBSerial)
     @inbounds begin
         C_blocks = C.blocks
@@ -214,13 +214,16 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCSerial,
             return nothing
         end
 
+        sc_matrix = schur_complement.matrix
+        C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B
+        synchronize_shared = sc.synchronize_shared
+
         mul_blocks = C.right_multiplication_buffer_blocks
         Ainv_dot_B_blocks = Ainv_dot_B.blocks
         block_output_inds = C.block_rowinds # This is identical to Ainv_dot_B.block_colinds
 
-        colptr = C_dot_Ainv_dot_B.colptr
-        rowval = C_dot_Ainv_dot_B.rowval
-        C_dot_Ainv_dot_B_storage = C_dot_Ainv_dot_B.storage
+        colptr = sc_matrix.colptr
+        rowval = sc_matrix.rowval
 
         # The rows are labelled by block_hypercube_position, so there are no overlaps, and we
         # can directly set entries, instead of adding to them, and so do not need to
@@ -229,7 +232,7 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCSerial,
         for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
                                                    Ainv_dot_B_blocks, block_output_inds,
                                                    block_hypercube_positions)
-            nzval = @view C_dot_Ainv_dot_B_storage[bhp,:]
+            nzval = @view C_dot_Ainv_dot_B[bhp,:]
 
             mul!(mb, Cb, AiBb, -1.0, 0.0)
 
@@ -255,12 +258,22 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCSerial,
             end
         end
 
+        synchronize_shared()
+
+        flat_range = schur_complement.flat_range
+        if !isempty(flat_range)
+            @views sum!(sc_matrix.nzval[flat_range]', C_dot_Ainv_dot_B[:,flat_range])
+        end
+
         return nothing
     end
 end
-function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
+function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                            Ainv_dot_B::BlockAinvDotBShared)
     @inbounds begin
+        sc_matrix = schur_complement.matrix
+        C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B
+        synchronize_shared = sc.synchronize_shared
         C_block = C.block
         mul_block = C.right_multiplication_buffer_block
         block_output_inds = C.block_rowinds
@@ -271,9 +284,9 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
             return nothing
         end
 
-        colptr = C_dot_Ainv_dot_B.colptr
-        rowval = C_dot_Ainv_dot_B.rowval
-        nzval = @view C_dot_Ainv_dot_B.storage[C.block_hypercube_position,:]
+        colptr = sc_matrix.colptr
+        rowval = sc_matrix.rowval
+        nzval = @view C_dot_Ainv_dot_B[C.block_hypercube_position,:]
 
         # Output buffer columns are divided by 'hypercube position' so there are no
         # overlaps, and we can directly set entries, instead of adding to them, and so do
@@ -299,6 +312,13 @@ function mul_C_Ainv_dot_B!(C_dot_Ainv_dot_B::NamedTuple, C::BlockCShared,
                     flat_i += 1
                 end
             end
+        end
+
+        synchronize_shared()
+
+        flat_range = schur_complement.flat_range
+        if !isempty(flat_range)
+            @views sum!(sc_matrix.nzval[flat_range]', C_dot_Ainv_dot_B[:,flat_range])
         end
 
         return nothing
