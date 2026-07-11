@@ -207,6 +207,10 @@ end
 # is taken care of by MPISchurComplements.
 function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
                            Ainv_dot_B::BlockAinvDotBSerial)
+    # We store locally all columns in `Ainv_dot_B` (only local rows) and all rows of `C`
+    # (only local columns). Therefore we can take the matrix product `Ainv_dot_B*C` with
+    # the local chunks, then do a sum-reduce to get the final result. The
+    # `schur_complement.matrix` buffer is full size on every rank.
     @inbounds begin
         C_blocks = C.blocks
         if length(C_blocks) == 0
@@ -270,6 +274,10 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
 end
 function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                            Ainv_dot_B::BlockAinvDotBShared)
+    # We store locally all columns in `Ainv_dot_B` (only local rows) and all rows of `C`
+    # (only local columns). Therefore we can take the matrix product `Ainv_dot_B*C` with
+    # the local chunks, then do a sum-reduce to get the final result. The
+    # `schur_complement.matrix` buffer is full size on every rank.
     @inbounds begin
         sc_matrix = schur_complement.matrix
         C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B

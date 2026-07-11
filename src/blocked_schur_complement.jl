@@ -8,88 +8,39 @@ struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu,Ttimer}
     timer::Ttimer
 end
 
-function update_A_factorization!(sc::BlockedSchurComplementSolver, A)
+function lu!(sc::BlockedSchurComplementSolver, full_A)
     timer = sc.timer
     A_factorization = sc.A_factorization
+    B = sc.B
+    C = sc.C
+    schur_complement = sc.schur_complement
+    schur_complement_factorization = sc.schur_complement_factorization
+    synchronize_shared = sc.synchronize_shared
 
-    @sc_timeit timer "lu(A)" begin
-        lu!(A_factorization, A)
-    end
-    return nothing
-end
-
-function update_Ainv_dot_B!(sc::BlockedSchurComplementSolver, A)
-    @inbounds begin
-        timer = sc.timer
-        A_factorization = sc.A_factorization
-        Ainv_dot_B = sc.Ainv_dot_B
-        synchronize_shared = sc.synchronize_shared
-
+    @sc_timeit timer "lu! BlockedSchurComplementSolver" begin
+        @sc_timeit timer "lu(A)" begin
+            lu!(A_factorization, full_A)
+        end
         @sc_timeit timer "Ainv_dot_B" begin
             synchronize_shared()
 
-            copy_B_submatrix!(Ainv_dot_B, A)
+            copy_B_submatrix!(B, full_A)
 
-            ldiv_Bmatrix!(A_factorization, Ainv_dot_B)
+            ldiv_Bmatrix!(A_factorization, B)
         end
-        return nothing
-    end
-end
-
-function update_C!(sc::BlockedSchurComplementSolver, A)
-    @inbounds begin
-        timer = sc.timer
-        C_local_row_repeats_partial = sc.C_local_row_repeats_partial
-        sc_C = sc.C
-
         @sc_timeit timer "C" begin
-            copy_C_submatrix!(sc_C, C)
+            copy_C_submatrix!(C, full_A)
         end
-        return nothing
-    end
-end
-
-function update_schur_complement_factorization!(sc::BlockedSchurComplementSolver, A)
-    @inbounds begin
-        timer = sc.timer
-        schur_complement = sc.schur_complement
-        B = sc.B
-        local_top_vector_unique_entries_partial = sc.local_top_vector_unique_entries_partial
-        C = sc.C
-        C_dot_Ainv_dot_B = sc.C_dot_Ainv_dot_B
-        schur_complement_factorization = sc.schur_complement_factorization
-        D_global_column_range_partial = sc.D_global_column_range_partial
-        D_local_column_range_partial = sc.D_local_column_range_partial
-        unique_bottom_vector_entries = sc.unique_bottom_vector_entries
-        local_bottom_vector_unique_entries = sc.local_bottom_vector_unique_entries
-        synchronize_shared = sc.synchronize_shared
-
         @sc_timeit timer "schur_complement" begin
             synchronize_shared()
 
-            # We store locally all columns in `Ainv_dot_B` (only local rows) and all rows
-            # of `C` (only local columns). Therefore we can take the matrix product
-            # `Ainv_dot_B*C` with the local chunks, then do a sum-reduce to get the final
-            # result. The `schur_complement` buffer is full size on every rank.
             mul_C_Ainv_dot_B!(schur_complement, C, B)
             synchronize_shared()
-            add_D_to_schur_complement!(schur_complement, A)
+            add_D_to_schur_complement!(schur_complement, full_A)
             synchronize_shared()
 
             lu!(schur_complement_factorization, schur_complement.matrix)
         end
-
-        return nothing
-    end
-end
-
-function lu!(sc::BlockedSchurComplementSolver, A)
-    timer = sc.timer
-    @sc_timeit timer "lu! BlockedSchurComplementSolver" begin
-        update_A_factorization!(sc, A)
-        update_Ainv_dot_B!(sc, A)
-        update_C!(sc, A)
-        update_schur_complement_factorization!(sc, A)
     end
 
     return nothing
