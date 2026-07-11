@@ -73,10 +73,7 @@ using LinearAlgebra.LAPACK: getrf!
 using MPI
 using MPIDenseLUs
 using MPISchurComplements
-using MPISchurComplements: MPISchurComplementAFactorization,
-                           MPISchurComplementBlockAinvDotB, MPISchurComplementBlockC
-import MPISchurComplements: ldiv_Bmatrix!, copy_B_submatrix!, Ainv_dot_B_dot_y!,
-                            copy_C_submatrix!, mul_C_Ainv_dot_B!, mul_C_dot_Ainv_dot_u!
+using MPISchurComplements: MPISchurComplementAFactorization
 using Primes
 using SparseArrays
 using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
@@ -100,34 +97,6 @@ const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
 struct MPIStaticCondensationNull{Tf<:AbstractFloat} <: MPIStaticCondensation{Tf} end
-
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPISchurComplement{Tf},Tranget,Trangeatab,Trangeabs,Trangeb,Trangebs,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
-    n::Ti
-    local_block_solver::Tsolver
-    local_top_vector_indices::Tranget
-    all_local_top_vector_a_block_indices::Trangeatab
-    partial_local_top_vector_a_block_indices::Trangeatab
-    partial_a_block_sub_selection_indices::Trangeabs
-    local_bottom_vector_indices::Trangeb
-    this_shared_local_bottom_vector_indices::Trangeb
-    this_shared_local_bottom_vector_no_overlap_indices::Trangeb
-    this_shared_local_bottom_sub_selection_indices::Trangebs
-    this_shared_local_bottom_sub_selection_no_overlap_indices::Trangeb
-    this_shared_local_bottom_vector_repeat_indices::Trangeb
-    this_shared_local_bottom_periodic_pairs::Matrix{Ti}
-    u_buffer::Vector{Tf}
-    v_buffer::Vector{Tf}
-    has_periodic::Bool
-    synchronize_shared::Tsync
-    timer::Ttimer
-end
-Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
-Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
-
-include("block_C.jl")
-include("block_B.jl")
-include("block_diagonal_solvers.jl")
-include("blocked_schur_complement.jl")
 
 function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer,
                                            float_type=Float64)
@@ -308,6 +277,35 @@ function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
     return Dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries,
                      remove_boundaries)
 end
+
+include("block_S.jl")
+include("block_C.jl")
+include("block_B.jl")
+include("block_diagonal_solvers.jl")
+include("blocked_schur_complement.jl")
+
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+    n::Ti
+    schur_complement_solver::Tsolver
+    local_top_vector_indices::Tranget
+    partial_local_top_vector_indices::Trangept
+    partial_top_sub_range::UnitRange{Ti}
+    local_bottom_vector_indices::Trangeb
+    this_shared_local_bottom_vector_indices::Trangeb
+    this_shared_local_bottom_vector_no_overlap_indices::Trangeb
+    this_shared_local_bottom_sub_selection_indices::Trangebs
+    this_shared_local_bottom_sub_selection_no_overlap_indices::Trangeb
+    this_shared_local_bottom_vector_repeat_indices::Trangeb
+    this_shared_local_bottom_periodic_pairs::Matrix{Ti}
+    u_buffer::Tbuff
+    v_buffer::Tbuff
+    y_buffer::Tbuff
+    has_periodic::Bool
+    synchronize_shared::Tsync
+    timer::Ttimer
+end
+Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
+Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
 
 function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{<:Integer})
     n_local_tuple = Tuple(d.n_local for d ∈ dimensions)
@@ -638,12 +636,9 @@ MPI.Barrier(comm::FakeComm) = nothing
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     iblock_list::Matrix{Ti}
-    all_local_top_vector_a_block_indices::Vector{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
-    all_a_block_sub_selection_indices::Vector{Ti}
-    a_block_sub_selection_indices::Vector{Vector{Ti}}
-    a_block_lu_selection_indices::Vector{Vector{Ti}}
-    a_block_B_column_indices::Vector{Vector{Ti}}
+    a_block_off_diagonal_indices::Vector{Vector{Ti}}
+    a_block_off_diagonal_bottom_vector_indices::Vector{Vector{Ti}}
     n_subgroups::Ti
     subgroup_i::Ti
     subgroup_size::Ti
@@ -679,15 +674,13 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             return LevelInfo(; has_periodic, block_sizes, global_size=0,
                              global_bottom_vector_size=0, top_vector_indices=Ti[],
                              local_top_vector_indices=Ti[],
-                             all_local_top_vector_a_block_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),
-                             all_a_block_sub_selection_indices=Ti[],
-                             a_block_sub_selection_indices=Vector{Ti}[],
-                             a_block_lu_selection_indices=Vector{Ti}[],
-                             a_block_B_column_indices=Vector{Ti}[], n_subgroups=0,
-                             subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
-                             bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
+                             a_block_off_diagonal_indices=Vector{Ti}[],
+                             a_block_off_diagonal_bottom_vector_indices=Vector{Ti}[],
+                             n_subgroups=0, subgroup_i=-1, subgroup_size=0,
+                             block_comm=shared_comm, bottom_vector_indices=Ti[],
+                             local_bottom_vector_indices=Ti[],
                              local_bottom_vector_no_overlap_indices=Ti[],
                              local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
                              local_bottom_vector_repeat_indices=Ti[],
@@ -755,7 +748,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         for idim ∈ 1:length(dimensions)
             get_boundary_indices!(idim, length(dimensions), 0)
         end
-        # There will be duplicated points in block_boundary_indices. Sort the list and remove
+        # There will be duplicated points in boundary_indices. Sort the list and remove
         # the duplicates.
         sort!(boundary_indices)
         unique!(boundary_indices)
@@ -913,13 +906,10 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         all_block_interior_indices = sort!(vcat(block_interior_indices))
         # Find the points from interior_indices that are part of block_interior_indices.
         # Generally this will not be all the points in block_interior_indices.
-        all_local_top_vector_a_block_indices = Ti[]
         local_top_vector_a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-        all_a_block_sub_selection_indices = Ti[]
-        a_block_sub_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
         # The following search relies on both `interior_indices` and `block_interior_indices`
         # being sorted.
-        for (this_block_interior_indices, this_local_top_vector_a_block_indices, this_a_block_sub_selection_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices, a_block_sub_selection_indices)
+        for (this_block_interior_indices, this_local_top_vector_a_block_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices)
             i_count = 1
             bi_count = 1
             while (i_count ≤ length(interior_indices)
@@ -927,34 +917,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                 i = interior_indices[i_count]
                 bi = this_block_interior_indices[bi_count]
                 if i == bi
-                    push!(all_local_top_vector_a_block_indices, i)
                     push!(this_local_top_vector_a_block_indices, i)
-                    push!(all_a_block_sub_selection_indices, i_count)
-                    push!(this_a_block_sub_selection_indices, i_count)
-                    i_count += 1
-                    bi_count += 1
-                elseif i < bi
-                    i_count += 1
-                else
-                    bi_count += 1
-                end
-            end
-        end
-        sort!(all_local_top_vector_a_block_indices)
-        sort!(all_a_block_sub_selection_indices)
-
-        a_block_lu_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-        # The following search relies on both `all_a_block_sub_selection_indices` and
-        # `a_block_sub_selection_indices` being sorted.
-        for (this_a_block_sub_selection_indices, this_a_block_lu_selection_indices) ∈ zip(a_block_sub_selection_indices, a_block_lu_selection_indices)
-            i_count = 1
-            bi_count = 1
-            while (i_count ≤ length(all_a_block_sub_selection_indices)
-                   && bi_count ≤ length(this_a_block_sub_selection_indices))
-                i = all_a_block_sub_selection_indices[i_count]
-                bi = this_a_block_sub_selection_indices[bi_count]
-                if i == bi
-                    push!(this_a_block_lu_selection_indices, i_count)
                     i_count += 1
                     bi_count += 1
                 elseif i < bi
@@ -1012,24 +975,46 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
         end
 
-        # Get the index within boundary_indices of the entries in block_boundary_indices.
-        # The following search relies on both `a_block_B_column_indices` and
-        # `block_boundary_indices` being sorted.
-        a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
-        if is_bottom_level && has_periodic
-            B_column_boundary_indices = get_non_repeated_indices_and_repeats(dimensions, boundary_indices)[1]
-        else
-            B_column_boundary_indices = boundary_indices
-        end
-        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
+        # Get the index within level_indices of the entries in block_boundary_indices.
+        # The following search relies on both `a_block_off_diagonal_indices` and
+        # `level_indices` being sorted.
+        a_block_off_diagonal_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_off_diagonal_indices, block_boundary_indices)
             nbbi = length(this_block_boundary_indices)
             if nbbi == 0
                 continue
             end
-            b_count = max(searchsortedlast(B_column_boundary_indices, first(this_block_boundary_indices)) - 1, 1)
+            l_count = max(searchsortedlast(level_indices, first(this_block_boundary_indices)) - 1, 1)
             bb_count = 1
-            while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ nbbi
-                i = B_column_boundary_indices[b_count]
+            while l_count ≤ length(level_indices) && bb_count ≤ nbbi
+                i = level_indices[l_count]
+                bi = this_block_boundary_indices[bb_count]
+                if i == bi
+                    push!(this_a_block_B_column_indices, l_count)
+                    l_count += 1
+                    bb_count += 1
+                elseif i < bi
+                    l_count += 1
+                else
+                    bb_count += 1
+                end
+            end
+        end
+
+        # Get the index within bottom_vector_indices of the entries in
+        # block_boundary_indices.  The following search relies on both
+        # `a_block_off_diagonal_bottom_vector_indices` and `boundary_indices`
+        # being sorted.
+        a_block_off_diagonal_bottom_vector_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_off_diagonal_bottom_vector_indices, block_boundary_indices)
+            nbbi = length(this_block_boundary_indices)
+            if nbbi == 0
+                continue
+            end
+            b_count = max(searchsortedlast(boundary_indices, first(this_block_boundary_indices)) - 1, 1)
+            bb_count = 1
+            while b_count ≤ length(boundary_indices) && bb_count ≤ nbbi
+                i = boundary_indices[b_count]
                 bi = this_block_boundary_indices[bb_count]
                 if i == bi
                     push!(this_a_block_B_column_indices, b_count)
@@ -1053,9 +1038,6 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         local_top_vector_indices = Ti[]
         t_count = 1
         nt = length(interior_indices)
-        all_a_block_indices = Ti[]
-        a_count = 1
-        na = length(all_local_top_vector_a_block_indices)
         local_bottom_vector_indices = Ti[]
         b_count = 1
         nb = length(boundary_indices)
@@ -1070,7 +1052,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         np = size(local_bottom_vector_periodic_pairs, 2)
         count = 1
         n = length(level_indices)
-        while (t_count ≤ nt || a_count ≤ na || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
+        while (t_count ≤ nt || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
             if t_count ≤ nt && b_count ≤ nb && interior_indices[t_count] == boundary_indices[b_count]
                 error("interior_indices and boundary_indices should not overlap, got "
                       * "interior_indices[$t_count]=$(interior_indices[t_count]) and "
@@ -1079,10 +1061,6 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             if t_count ≤ nt && interior_indices[t_count] == level_indices[count]
                 push!(local_top_vector_indices, count)
                 t_count += 1
-            end
-            if a_count ≤ na && all_local_top_vector_a_block_indices[a_count] == level_indices[count]
-                push!(all_a_block_indices, count)
-                a_count += 1
             end
             if r_count ≤ nr && global_bottom_vector_repeat_inds[r_count] == boundary_indices[b_count]
                 push!(local_bottom_vector_repeat_indices, b_count)
@@ -1106,12 +1084,11 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             end
             count += 1
         end
-        if t_count != nt + 1 || a_count != na + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
+        if t_count != nt + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
             error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1). "
-                  * "t_count=$a_count while nt+1=$(nt+1), "
-                  * "a_count=$a_count while na+1=$(na+1), "
+                  * "t_count=$t_count while nt+1=$(nt+1), "
                   * "b_count=$b_count while nb+1=$(nb+1), "
-                  * "r_count=$a_count while nr+1=$(nr+1), "
+                  * "r_count=$r_count while nr+1=$(nr+1), "
                   * "p_count=$p_count while np+1=$(np+1).")
         end
 
@@ -1152,12 +1129,9 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          top_vector_indices=global_top_vector_indices,
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
-                         all_local_top_vector_a_block_indices=all_a_block_indices,
                          local_top_vector_a_block_indices=a_block_indices,
-                         all_a_block_sub_selection_indices=all_a_block_sub_selection_indices,
-                         a_block_sub_selection_indices=a_block_sub_selection_indices,
-                         a_block_lu_selection_indices=a_block_lu_selection_indices,
-                         a_block_B_column_indices=a_block_B_column_indices,
+                         a_block_off_diagonal_indices=a_block_off_diagonal_indices,
+                         a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
@@ -1182,7 +1156,7 @@ end
                             allocate_shared_int::Union{Function,Nothing}=nothing,
                             synchronize_shared::Union{Function,Nothing}=nothing,
                             schur_tile_size::Union{Nothing,Integer}=nothing,
-                            use_sparse::Bool=true, separate_Ainv_B::Bool=false,
+                            separate_Ainv_B::Bool=false,
                             optimize_schur_complement_size::Bool=true,
                             timer::Union{Nothing,TimerOutput}=nothing,
                             check_lu::Bool=false)
@@ -1215,9 +1189,6 @@ members must be able to create shared-memory arrays.
 `allocate_shared_float`, `allocate_shared_int`, and `synchronize_shared` are as required
 by `mpi_schur_complement()`. `schur_tile_size` is passed to the `tile_size` argument of
 `mpi_schur_complement()`.
-
-`use_sparse` indicates whether to use a sparse-matrix solver as the lowest-level LU
-solver, and within the MPISchurComplement solvers.
 
 `separate_Ainv_B` is passed through to the MPISchurComplement constructors.
 
@@ -1253,7 +1224,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  allocate_shared_int::F2=nothing,
                                  synchronize_shared::F3=nothing,
                                  schur_tile_size::Union{Nothing,Integer}=nothing,
-                                 use_sparse::Bool=true, separate_Ainv_B::Bool=false,
+                                 separate_Ainv_B::Bool=false,
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
@@ -1347,7 +1318,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         last_use_shared_blocks = (length(level_info_list) > 1
                                   && length(last_level_info.local_top_vector_a_block_indices) == 1
                                   && MPI.Comm_size(last_level_info.block_comm) > 1)
-        if last_use_shared_blocks
+        # Always use 'shared memory' solver on last level
+        if last_level_info.block_comm != MPI.COMM_NULL
             block_comm_rank = MPI.Comm_rank(last_level_info.block_comm)
             block_comm_size = MPI.Comm_size(last_level_info.block_comm)
             if block_comm_size == shared_comm_size
@@ -1363,20 +1335,22 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info.block_comm)
                 last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
             end
-            last_A_block_solver = get_block_diagonal_solver(last_level_info, data_type,
-                                                            use_sparse,
+            # Fake the LevelInfo argument here, because this solver will be passed
+            # matrices and rhs/solution vectors that do not need the 'top vector' entries
+            # selecting out of them.
+            ntop = length(last_level_info.local_top_vector_indices)
+            fake_level_info = (global_size=ntop, global_bottom_vector_size=0,
+                               local_top_vector_a_block_indices=(1:ntop,),
+                               a_block_off_diagonal_indices=(1:0,),
+                               block_comm=last_level_info.block_comm)
+            last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
                                                             length(level_info_list) == 1,
                                                             true, timer, check_lu,
                                                             last_block_allocate_shared_float,
                                                             last_block_allocate_shared_int,
                                                             last_block_synchronize_shared)
         else
-            block_comm_rank = 0
-            block_comm_size = 1
-            last_A_block_solver = get_block_diagonal_solver(last_level_info, data_type,
-                                                            use_sparse,
-                                                            length(level_info_list) == 1,
-                                                            false, timer, check_lu)
+            last_A_block_solver = MPIStaticCondensationNull{data_type}()
         end
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
@@ -1398,7 +1372,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
-                                 copy_input_to_dense_buffers=(use_sparse && last_level_info.has_periodic),
+                                 copy_input_to_dense_buffers=last_level_info.has_periodic,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
@@ -1411,18 +1385,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_allocate_shared_int_list =
         [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
          for li ∈ level_info_list]
-    if use_sparse
-        schur_complement_buffer_list =
-            [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
-                                                 lai, li.block_sizes,
-                                                 li.bottom_vector_indices,
-                                                 li.bottom_vector_indices)
-             for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
-                                      level_allocate_shared_float_list[1:end-1],
-                                      level_allocate_shared_int_list[1:end-1])]
-    else
-        schur_complement_buffer_list = [nothing for _ ∈ level_info_list[1:end-1]]
-    end
+    schur_complement_buffer_list =
+        [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
+                                             lai, li.block_sizes,
+                                             li.bottom_vector_indices,
+                                             li.bottom_vector_indices; ind_type)
+         for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
+                                  level_allocate_shared_float_list[1:end-1],
+                                  level_allocate_shared_int_list[1:end-1])]
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
@@ -1452,7 +1422,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             end
             use_shared_blocks = (level > 1 && length(this_level_info.local_top_vector_a_block_indices) == 1
                                  && block_comm_size > 1)
-            if block_comm_size == shared_comm_size
+            if block_comm_size == 1
+                # No shared-memory parallelism.
+                block_allocate_shared_float = (args...) -> Vector{data_type}(undef, args...)
+                block_allocate_shared_int = (args...) -> Vector{ind_type}(undef, args...)
+                block_synchronize_shared = () -> nothing
+            elseif block_comm_size == shared_comm_size
                 block_allocate_shared_float = allocate_shared_float
                 block_allocate_shared_int = allocate_shared_int
                 if synchronize_shared === nothing
@@ -1466,154 +1441,40 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 block_synchronize_shared = () -> MPI.Barrier(this_level_info.block_comm)
             end
 
-            C_buffer = nothing
-            C_buffer_ncopies = 2^length(dimensions)
-            if use_sparse
-                schur_complement_buffer = schur_complement_buffer_list[level]
-                if level == 1 || !sparse_C_blocks
-                    matrix_template = nothing
-                else
-                    matrix_template = schur_complement_buffer_list[level-1]
-                end
-                if use_shared_blocks
-                    if this_level_info.block_comm == MPI.COMM_NULL
-                        this_A_block_solver = MPIStaticCondensationNull{data_type}()
-                        Ainv_dot_B_buffer = nothing
-                        C_buffer = nothing
-                    else
-                        this_A_block_solver = get_block_diagonal_solver(this_level_info,
-                                                                        data_type, use_sparse,
-                                                                        level==1,
-                                                                        use_shared_blocks,
-                                                                        timer, check_lu,
-                                                                        block_allocate_shared_float,
-                                                                        block_allocate_shared_int,
-                                                                        block_synchronize_shared)
-                        Ainv_dot_B_buffer =
-                            BlockAinvDotBShared{data_type}(this_level_info.a_block_sub_selection_indices[1],
-                                                           this_level_info.a_block_B_column_indices[1],
-                                                           block_comm_rank, block_comm_size,
-                                                           block_allocate_shared_float,
-                                                           block_synchronize_shared)
-                        C_vector_intermediate_buffer =
-                            level_allocate_shared_float(C_buffer_ncopies,
-                                                        this_level_info.global_bottom_vector_size)
-                        if this_level_comm_rank == 0
-                            C_vector_intermediate_buffer .= 0.0
-                        end
-                        C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
-                        C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc,this_level_info.global_bottom_vector_size)
-                        C_block_row_inds_full = this_level_info.a_block_B_column_indices[1]
-
-                       C_nrow = length(C_block_row_inds_full)
-                       C_rows_per_proc = (C_nrow + block_comm_size - 1) ÷ block_comm_size
-                       if isempty(this_level_info.a_block_sub_selection_indices[1])
-                           # There are no entries in the block handled by this process, so
-                           # to avoid accessing zero-length vectors, set the row range to
-                           # be empty also.
-                           C_partial_row_range = 1:0
-                       else
-                           C_partial_row_range = block_comm_rank*C_rows_per_proc+1:min((block_comm_rank+1)*C_rows_per_proc,C_nrow)
-                       end
-
-                        block_hypercube_position =
-                            get_C_hypercube_position(this_level_info.iblock_list[:,1])
-
-                        C_buffer =
-                            BlockCShared{data_type}(C_block_row_inds_full,
-                                                    C_partial_row_range,
-                                                    this_level_info.a_block_sub_selection_indices[1],
-                                                    this_level_info.local_top_vector_indices,
-                                                    this_level_info.local_bottom_vector_indices,
-                                                    matrix_template,
-                                                    block_hypercube_position,
-                                                    C_buffer_ncopies,
-                                                    right_multiplication_buffer_storage,
-                                                    C_vector_intermediate_buffer,
-                                                    C_vector_range,
-                                                    this_level_info.subgroup_i,
-                                                    block_allocate_shared_float,
-                                                    block_synchronize_shared,
-                                                    block_comm_rank, block_comm_size,
-                                                    level_synchronize_shared)
-                    end
-                else
-                    this_A_block_solver = get_block_diagonal_solver(this_level_info,
-                                                                    data_type, use_sparse,
-                                                                    level==1, false,
-                                                                    timer, check_lu)
-                    Ainv_dot_B_buffer =
-                        BlockAinvDotBSerial{data_type}(this_level_info.a_block_sub_selection_indices,
-                                                       this_level_info.a_block_B_column_indices)
-                    C_vector_intermediate_buffer =
-                        level_allocate_shared_float(C_buffer_ncopies,
-                                                    this_level_info.global_bottom_vector_size)
-                    if this_level_comm_rank == 0
-                        C_vector_intermediate_buffer .= 0.0
-                    end
-                    C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
-                    C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc, this_level_info.global_bottom_vector_size)
-                    C_block_row_inds = this_level_info.a_block_B_column_indices
-
-                    C_block_hypercube_positions =
-                        [get_C_hypercube_position(iblock)
-                         for iblock ∈ eachcol(this_level_info.iblock_list)]
-
-                    C_buffer =
-                        BlockCSerial{data_type}(C_block_row_inds,
-                                                this_level_info.a_block_sub_selection_indices,
-                                                this_level_info.local_top_vector_indices,
-                                                this_level_info.local_bottom_vector_indices,
-                                                matrix_template,
-                                                C_block_hypercube_positions,
-                                                C_buffer_ncopies,
-                                                right_multiplication_buffer_storage,
-                                                C_vector_intermediate_buffer,
-                                                C_vector_range,
-                                                block_synchronize_shared,
-                                                level_synchronize_shared)
-                end
-            else
-                this_A_block_solver = get_block_diagonal_solver(this_level_info,
-                                                                data_type, use_sparse,
-                                                                level==1,
-                                                                use_shared_blocks, timer,
-                                                                check_lu,
-                                                                block_allocate_shared_float,
-                                                                block_allocate_shared_int,
-                                                                block_synchronize_shared)
-                Ainv_dot_B_buffer = nothing
-                schur_complement_buffer = nothing
-            end
             this_level_sc =
-                mpi_schur_complement(this_A_block_solver, data_type, data_type, data_type,
-                                     this_level_info.top_vector_indices,
-                                     this_level_info.bottom_vector_indices; comm=comm,
-                                     shared_comm=this_level_shared_comm,
-                                     distributed_comm=distributed_comm,
-                                     allocate_shared_float=level_allocate_shared_float,
-                                     allocate_shared_int=level_allocate_shared_int,
-                                     synchronize_shared=level_synchronize_shared,
-                                     Ainv_dot_B_buffer=Ainv_dot_B_buffer,
-                                     C_buffer=C_buffer,
-                                     schur_complement_buffer=schur_complement_buffer,
-                                     use_sparse=use_sparse, sparse_Ainv_B=use_sparse,
-                                     parallel_schur=this_level_schur_solver,
-                                     skip_factorization=true,
-                                     schur_tile_size=schur_tile_size, check_lu=check_lu,
-                                     timer=timer)
+                BlockedSchurComplementSolver(dimensions, level, this_level_info,
+                                             schur_complement_buffer_list,
+                                             this_level_schur_solver, use_shared_blocks,
+                                             sparse_C_blocks, this_level_shared_comm,
+                                             level_synchronize_shared,
+                                             level_allocate_shared_float,
+                                             level_allocate_shared_int,
+                                             block_synchronize_shared,
+                                             block_allocate_shared_float,
+                                             block_allocate_shared_int,
+                                             right_multiplication_buffer_storage,
+                                             check_lu)
         end
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
-        this_u_buffer = level_allocate_shared_float(length(this_level_info.local_top_vector_indices))
+        if level == n_levels
+            this_u_buffer = level_allocate_shared_float(length(this_level_info.local_top_vector_indices))
+        else
+            this_u_buffer = level_allocate_shared_float(0)
+        end
         this_v_buffer = level_allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
+        if level == n_levels
+            this_y_buffer = level_allocate_shared_float(0)
+        else
+            this_y_buffer = level_allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
+        end
 
         # Need to create a version of local_top_vector_indices and
         # local_bottom_vector_indices that is split into ranges to be handled in parallel
         # by all the processes in the shared-memory block.
         ntop = length(this_level_info.local_top_vector_indices)
         top_points_per_proc = (ntop + level_shared_comm_size - 1) ÷ level_shared_comm_size
-        top_subset = level_shared_comm_rank*top_points_per_proc+1:min((level_shared_comm_rank+1)*top_points_per_proc,ntop)
+        partial_top_sub_range = level_shared_comm_rank*top_points_per_proc+1:min((level_shared_comm_rank+1)*top_points_per_proc,ntop)
 
         nbottom = length(this_level_info.local_bottom_vector_indices)
         bottom_points_per_proc = (nbottom + level_shared_comm_size - 1) ÷ level_shared_comm_size
@@ -1656,16 +1517,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
-        na = length(this_level_info.all_local_top_vector_a_block_indices)
-        a_points_per_block_proc = (na + block_comm_size - 1) ÷ block_comm_size
-        partial_a_block_range = block_comm_rank*a_points_per_block_proc+1:min((block_comm_rank+1)*a_points_per_block_proc,na)
-
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
-                                          this_level_info.all_local_top_vector_a_block_indices,
-                                          this_level_info.all_local_top_vector_a_block_indices[partial_a_block_range],
-                                          this_level_info.all_a_block_sub_selection_indices[partial_a_block_range],
+                                          @view(this_level_info.local_top_vector_indices[partial_top_sub_range]),
+                                          partial_top_sub_range,
                                           this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_no_overlap_indices,
@@ -1673,7 +1529,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_sub_selection_no_overlap_indices,
                                           this_shared_local_bottom_vector_repeat_indices,
                                           this_shared_local_bottom_periodic_pairs,
-                                          this_u_buffer, this_v_buffer,
+                                          this_u_buffer, this_v_buffer, this_y_buffer,
                                           this_level_info.has_periodic,
                                           level_synchronize_shared, timer)
     end
@@ -1792,7 +1648,9 @@ function lu!(solver::MPIStaticCondensationNull, A::AbstractMatrix)
     return nothing
 end
 
-function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationNull{T},
+# Here `X` might be `Vector{T}` or `Vector{Vector{T}}`, so don't make type specification
+# for it any stricter.
+function ldiv!(X::AbstractVector, solver::MPIStaticCondensationNull{T},
                U::AbstractVector{T}) where T
     return nothing
 end
@@ -1805,18 +1663,21 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
     return nothing
 end
 
-function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
+function lu!(solver::MPIStaticCondensationParallel, A)
     @inbounds begin
         @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
-            local_top_vector_indices = solver.local_top_vector_indices
-            all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
-            local_bottom_vector_indices = solver.local_bottom_vector_indices
-            a = @view A[all_local_top_vector_a_block_indices,all_local_top_vector_a_block_indices]
-            b = @view A[local_top_vector_indices,local_bottom_vector_indices]
-            c = @view A[local_bottom_vector_indices,local_top_vector_indices]
-            d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
-end
-            update_schur_complement!(solver.local_block_solver, a, b, c, d)
+            schur_complement_solver = solver.schur_complement_solver
+            if isa(schur_complement_solver, BlockedSchurComplementSolver)
+                lu!(schur_complement_solver, A)
+            else
+                local_top_vector_indices = solver.local_top_vector_indices
+                local_bottom_vector_indices = solver.local_bottom_vector_indices
+                a = @view A[local_top_vector_indices,local_top_vector_indices]
+                b = @view A[local_top_vector_indices,local_bottom_vector_indices]
+                c = @view A[local_bottom_vector_indices,local_top_vector_indices]
+                d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
+                update_schur_complement!(schur_complement_solver, a, b, c, d)
+            end
         end
         return nothing
     end
@@ -1829,50 +1690,77 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
-            partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
-            partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
+            schur_complement_solver = solver.schur_complement_solver
+            partial_local_top_vector_indices = solver.partial_local_top_vector_indices
+            partial_top_sub_range = solver.partial_top_sub_range
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
             this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
             this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
             this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
             this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
-            u = solver.u_buffer
+            y = solver.y_buffer
             v = solver.v_buffer
-            # Use the a_block_indices here so that no shared-memory synchronization is
-            # needed before the ldiv!() call for the A subblock with the
-            # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-            # MPISchurComplement ldiv!().
-            for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
-                u[i1] = U[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-                # This loop uses 'no overlap' indices
-                # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
-                # there are periodic dimensions, at the top level (and only the top level,
-                # not any intermediate levels) the right-hand-side entries need to be
-                # taken only from the non-repeated points, with the repeated points being
-                # zero-ed out.
-                v[i1] = U[i2]
-            end
-            for i ∈ this_shared_local_bottom_vector_repeat_indices
-                # Zero out repeated points at the top level
-                v[i] = 0.0
-            end
-            if solver.has_periodic
-                for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                    # At the bottom level, need to add any contributions that the top and
-                    # intermediate levels have added to repeated points into the
-                    # non-repeated points.
-                    v[i1] += U[i2]
+            if isa(schur_complement_solver, BlockedSchurComplementSolver)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
                 end
-            end
-            ldiv!(u, v, solver.local_block_solver, u, v)
-            for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
-                X[i1] = u[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
-                X[i1] = v[i2]
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                ldiv!(X, y, schur_complement_solver, U, v)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
+                    X[i1] = y[i2]
+                end
+            else
+                u = solver.u_buffer
+                for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
+                    u[i1] = U[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
+                end
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                solver.synchronize_shared()
+                ldiv!(u, v, schur_complement_solver, u, v)
+                for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
+                    X[i1] = u[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
+                    X[i1] = v[i2]
+                end
             end
         end
         return nothing
@@ -1884,52 +1772,79 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
-            partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
-            partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
+            schur_complement_solver = solver.schur_complement_solver
+            partial_local_top_vector_indices = solver.partial_local_top_vector_indices
+            partial_top_sub_range = solver.partial_top_sub_range
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
             this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
             this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
             this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
             this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
-            u = solver.u_buffer
             v = solver.v_buffer
-            # Use the a_block_indices here so that no shared-memory synchronization is
-            # needed before the ldiv!() call for the A subblock with the
-            # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-            # MPISchurComplement ldiv!().
-            for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
-                u[i1] = U[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-                # This loop uses 'no overlap' indices
-                # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
-                # there are periodic dimensions, at the top level (and only the top level,
-                # not any intermediate levels) the right-hand-side entries need to be
-                # taken only from the non-repeated points, with the repeated points being
-                # zero-ed out.
-                v[i1] = U[i2]
-            end
-            for i ∈ this_shared_local_bottom_vector_repeat_indices
-                # Zero out repeated points at the top level
-                v[i] = 0.0
-            end
-            if solver.has_periodic
-                for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                    # At the bottom level, need to add any contributions that the top and
-                    # intermediate levels have added to repeated points into the
-                    # non-repeated points.
-                    v[i1] += U[i2]
+            if isa(schur_complement_solver, BlockedSchurComplementSolver)
+                y = solver.y_buffer
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
                 end
-            end
-            ldiv!(u, v, solver.local_block_solver, u, v)
-            for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices,
-                               partial_a_block_sub_selection_indices)
-                U[i1] = u[i2]
-            end
-            for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
-                               this_shared_local_bottom_sub_selection_indices)
-                U[i1] = v[i2]
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                ldiv!(U, y, schur_complement_solver, U, v)
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
+                                   this_shared_local_bottom_sub_selection_indices)
+                    U[i1] = y[i2]
+                end
+            else
+                u = solver.u_buffer
+                for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
+                    u[i1] = U[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
+                    # This loop uses 'no overlap' indices
+                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
+                    # there are periodic dimensions, at the top level (and only the top level,
+                    # not any intermediate levels) the right-hand-side entries need to be
+                    # taken only from the non-repeated points, with the repeated points being
+                    # zero-ed out.
+                    v[i1] = U[i2]
+                end
+                for i ∈ this_shared_local_bottom_vector_repeat_indices
+                    # Zero out repeated points at the top level
+                    v[i] = 0.0
+                end
+                if solver.has_periodic
+                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
+                        # At the bottom level, need to add any contributions that the top and
+                        # intermediate levels have added to repeated points into the
+                        # non-repeated points.
+                        v[i1] += U[i2]
+                    end
+                end
+                solver.synchronize_shared()
+                ldiv!(u, v, schur_complement_solver, u, v)
+                for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
+                    U[i1] = u[i2]
+                end
+                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
+                                   this_shared_local_bottom_sub_selection_indices)
+                    U[i1] = v[i2]
+                end
             end
         end
         return nothing
