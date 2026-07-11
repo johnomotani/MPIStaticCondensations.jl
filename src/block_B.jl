@@ -1,4 +1,4 @@
-struct BlockAinvDotBSerial{Tf,Ti} <: MPISchurComplementBlockAinvDotB
+struct BlockAinvDotBSerial{Tf,Ti}
     blocks::Vector{Matrix{Tf}}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
@@ -28,7 +28,7 @@ end
 
 # This version has a single block, and operations are parallelised using shared-memory
 # MPI.
-struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync} <: MPISchurComplementBlockAinvDotB
+struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync}
     block::Tm
     partial_block::Matrix{Tf}
     block_rowinds::Vector{Ti}

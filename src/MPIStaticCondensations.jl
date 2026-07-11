@@ -102,9 +102,6 @@ struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:MPIS
     n::Ti
     schur_complement_solver::Tsolver
     local_top_vector_indices::Tranget
-    all_local_top_vector_a_block_indices::Trangeatab
-    partial_local_top_vector_a_block_indices::Trangeatab
-    partial_a_block_sub_selection_indices::Trangeabs
     local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_no_overlap_indices::Trangeb
@@ -636,11 +633,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     iblock_list::Matrix{Ti}
-    all_local_top_vector_a_block_indices::Vector{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
-    all_a_block_sub_selection_indices::Vector{Ti}
-    a_block_sub_selection_indices::Vector{Vector{Ti}}
-    a_block_lu_selection_indices::Vector{Vector{Ti}}
     a_block_B_column_indices::Vector{Vector{Ti}}
     n_subgroups::Ti
     subgroup_i::Ti
@@ -677,12 +670,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             return LevelInfo(; has_periodic, block_sizes, global_size=0,
                              global_bottom_vector_size=0, top_vector_indices=Ti[],
                              local_top_vector_indices=Ti[],
-                             all_local_top_vector_a_block_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),
-                             all_a_block_sub_selection_indices=Ti[],
-                             a_block_sub_selection_indices=Vector{Ti}[],
-                             a_block_lu_selection_indices=Vector{Ti}[],
                              a_block_B_column_indices=Vector{Ti}[], n_subgroups=0,
                              subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
                              bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
@@ -753,7 +742,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         for idim ∈ 1:length(dimensions)
             get_boundary_indices!(idim, length(dimensions), 0)
         end
-        # There will be duplicated points in block_boundary_indices. Sort the list and remove
+        # There will be duplicated points in boundary_indices. Sort the list and remove
         # the duplicates.
         sort!(boundary_indices)
         unique!(boundary_indices)
@@ -911,13 +900,10 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         all_block_interior_indices = sort!(vcat(block_interior_indices))
         # Find the points from interior_indices that are part of block_interior_indices.
         # Generally this will not be all the points in block_interior_indices.
-        all_local_top_vector_a_block_indices = Ti[]
         local_top_vector_a_block_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-        all_a_block_sub_selection_indices = Ti[]
-        a_block_sub_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
         # The following search relies on both `interior_indices` and `block_interior_indices`
         # being sorted.
-        for (this_block_interior_indices, this_local_top_vector_a_block_indices, this_a_block_sub_selection_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices, a_block_sub_selection_indices)
+        for (this_block_interior_indices, this_local_top_vector_a_block_indices) ∈ zip(block_interior_indices, local_top_vector_a_block_indices)
             i_count = 1
             bi_count = 1
             while (i_count ≤ length(interior_indices)
@@ -925,34 +911,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                 i = interior_indices[i_count]
                 bi = this_block_interior_indices[bi_count]
                 if i == bi
-                    push!(all_local_top_vector_a_block_indices, i)
                     push!(this_local_top_vector_a_block_indices, i)
-                    push!(all_a_block_sub_selection_indices, i_count)
-                    push!(this_a_block_sub_selection_indices, i_count)
-                    i_count += 1
-                    bi_count += 1
-                elseif i < bi
-                    i_count += 1
-                else
-                    bi_count += 1
-                end
-            end
-        end
-        sort!(all_local_top_vector_a_block_indices)
-        sort!(all_a_block_sub_selection_indices)
-
-        a_block_lu_selection_indices = [Ti[] for _ ∈ 1:length(block_interior_indices)]
-        # The following search relies on both `all_a_block_sub_selection_indices` and
-        # `a_block_sub_selection_indices` being sorted.
-        for (this_a_block_sub_selection_indices, this_a_block_lu_selection_indices) ∈ zip(a_block_sub_selection_indices, a_block_lu_selection_indices)
-            i_count = 1
-            bi_count = 1
-            while (i_count ≤ length(all_a_block_sub_selection_indices)
-                   && bi_count ≤ length(this_a_block_sub_selection_indices))
-                i = all_a_block_sub_selection_indices[i_count]
-                bi = this_a_block_sub_selection_indices[bi_count]
-                if i == bi
-                    push!(this_a_block_lu_selection_indices, i_count)
                     i_count += 1
                     bi_count += 1
                 elseif i < bi
@@ -1010,31 +969,26 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
         end
 
-        # Get the index within boundary_indices of the entries in block_boundary_indices.
+        # Get the index within level_indices of the entries in block_boundary_indices.
         # The following search relies on both `a_block_B_column_indices` and
-        # `block_boundary_indices` being sorted.
+        # `level_indices` being sorted.
         a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
-        if is_bottom_level && has_periodic
-            B_column_boundary_indices = get_non_repeated_indices_and_repeats(dimensions, boundary_indices)[1]
-        else
-            B_column_boundary_indices = boundary_indices
-        end
         for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
             nbbi = length(this_block_boundary_indices)
             if nbbi == 0
                 continue
             end
-            b_count = max(searchsortedlast(B_column_boundary_indices, first(this_block_boundary_indices)) - 1, 1)
+            l_count = max(searchsortedlast(level_indices, first(this_block_boundary_indices)) - 1, 1)
             bb_count = 1
-            while b_count ≤ length(B_column_boundary_indices) && bb_count ≤ nbbi
-                i = B_column_boundary_indices[b_count]
+            while l_count ≤ length(level_indices) && bb_count ≤ nbbi
+                i = level_indices[l_count]
                 bi = this_block_boundary_indices[bb_count]
                 if i == bi
-                    push!(this_a_block_B_column_indices, b_count)
-                    b_count += 1
+                    push!(this_a_block_B_column_indices, l_count)
+                    l_count += 1
                     bb_count += 1
                 elseif i < bi
-                    b_count += 1
+                    l_count += 1
                 else
                     bb_count += 1
                 end
@@ -1051,9 +1005,6 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         local_top_vector_indices = Ti[]
         t_count = 1
         nt = length(interior_indices)
-        all_a_block_indices = Ti[]
-        a_count = 1
-        na = length(all_local_top_vector_a_block_indices)
         local_bottom_vector_indices = Ti[]
         b_count = 1
         nb = length(boundary_indices)
@@ -1068,7 +1019,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         np = size(local_bottom_vector_periodic_pairs, 2)
         count = 1
         n = length(level_indices)
-        while (t_count ≤ nt || a_count ≤ na || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
+        while (t_count ≤ nt || b_count ≤ nb || bno_count ≤ nbno || r_count ≤ nr || p_count ≤ np) && count ≤ n
             if t_count ≤ nt && b_count ≤ nb && interior_indices[t_count] == boundary_indices[b_count]
                 error("interior_indices and boundary_indices should not overlap, got "
                       * "interior_indices[$t_count]=$(interior_indices[t_count]) and "
@@ -1077,10 +1028,6 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             if t_count ≤ nt && interior_indices[t_count] == level_indices[count]
                 push!(local_top_vector_indices, count)
                 t_count += 1
-            end
-            if a_count ≤ na && all_local_top_vector_a_block_indices[a_count] == level_indices[count]
-                push!(all_a_block_indices, count)
-                a_count += 1
             end
             if r_count ≤ nr && global_bottom_vector_repeat_inds[r_count] == boundary_indices[b_count]
                 push!(local_bottom_vector_repeat_indices, b_count)
@@ -1104,12 +1051,11 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             end
             count += 1
         end
-        if t_count != nt + 1 || a_count != na + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
+        if t_count != nt + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
             error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1). "
-                  * "t_count=$a_count while nt+1=$(nt+1), "
-                  * "a_count=$a_count while na+1=$(na+1), "
+                  * "t_count=$t_count while nt+1=$(nt+1), "
                   * "b_count=$b_count while nb+1=$(nb+1), "
-                  * "r_count=$a_count while nr+1=$(nr+1), "
+                  * "r_count=$r_count while nr+1=$(nr+1), "
                   * "p_count=$p_count while np+1=$(np+1).")
         end
 
@@ -1150,11 +1096,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          top_vector_indices=global_top_vector_indices,
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
-                         all_local_top_vector_a_block_indices=all_a_block_indices,
                          local_top_vector_a_block_indices=a_block_indices,
-                         all_a_block_sub_selection_indices=all_a_block_sub_selection_indices,
-                         a_block_sub_selection_indices=a_block_sub_selection_indices,
-                         a_block_lu_selection_indices=a_block_lu_selection_indices,
                          a_block_B_column_indices=a_block_B_column_indices,
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
@@ -1488,7 +1430,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                                         block_allocate_shared_int,
                                                                         block_synchronize_shared)
                         Ainv_dot_B_buffer =
-                            BlockAinvDotBShared{data_type}(this_level_info.a_block_sub_selection_indices[1],
+                            BlockAinvDotBShared{data_type}(this_level_info.local_top_vector_a_block_indices[1],
                                                            this_level_info.a_block_B_column_indices[1],
                                                            block_comm_rank, block_comm_size,
                                                            block_allocate_shared_float,
@@ -1505,7 +1447,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
                        C_nrow = length(C_block_row_inds_full)
                        C_rows_per_proc = (C_nrow + block_comm_size - 1) ÷ block_comm_size
-                       if isempty(this_level_info.a_block_sub_selection_indices[1])
+                       if isempty(this_level_info.local_top_vector_a_block_indices[1])
                            # There are no entries in the block handled by this process, so
                            # to avoid accessing zero-length vectors, set the row range to
                            # be empty also.
@@ -1520,7 +1462,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                         C_buffer =
                             BlockCShared{data_type}(C_block_row_inds_full,
                                                     C_partial_row_range,
-                                                    this_level_info.a_block_sub_selection_indices[1],
+                                                    this_level_info.local_top_vector_a_block_indices[1],
                                                     this_level_info.local_top_vector_indices,
                                                     this_level_info.local_bottom_vector_indices,
                                                     matrix_template,
@@ -1541,7 +1483,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                                     level==1, false,
                                                                     timer, check_lu)
                     Ainv_dot_B_buffer =
-                        BlockAinvDotBSerial{data_type}(this_level_info.a_block_sub_selection_indices,
+                        BlockAinvDotBSerial{data_type}(this_level_info.local_top_vector_a_block_indices,
                                                        this_level_info.a_block_B_column_indices)
                     C_vector_intermediate_buffer =
                         level_allocate_shared_float(C_buffer_ncopies,
@@ -1559,7 +1501,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
                     C_buffer =
                         BlockCSerial{data_type}(C_block_row_inds,
-                                                this_level_info.a_block_sub_selection_indices,
+                                                this_level_info.local_top_vector_a_block_indices,
                                                 this_level_info.local_top_vector_indices,
                                                 this_level_info.local_bottom_vector_indices,
                                                 matrix_template,
@@ -1654,16 +1596,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
-        na = length(this_level_info.all_local_top_vector_a_block_indices)
-        a_points_per_block_proc = (na + block_comm_size - 1) ÷ block_comm_size
-        partial_a_block_range = block_comm_rank*a_points_per_block_proc+1:min((block_comm_rank+1)*a_points_per_block_proc,na)
-
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
-                                          this_level_info.all_local_top_vector_a_block_indices,
-                                          this_level_info.all_local_top_vector_a_block_indices[partial_a_block_range],
-                                          this_level_info.all_a_block_sub_selection_indices[partial_a_block_range],
                                           this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_no_overlap_indices,
@@ -1803,18 +1738,21 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
     return nothing
 end
 
-function lu!(solver::MPIStaticCondensationParallel, A::AbstractMatrix)
+function lu!(solver::MPIStaticCondensationParallel, A)
     @inbounds begin
         @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
-            local_top_vector_indices = solver.local_top_vector_indices
-            all_local_top_vector_a_block_indices = solver.all_local_top_vector_a_block_indices
-            local_bottom_vector_indices = solver.local_bottom_vector_indices
-            a = @view A[all_local_top_vector_a_block_indices,all_local_top_vector_a_block_indices]
-            b = @view A[local_top_vector_indices,local_bottom_vector_indices]
-            c = @view A[local_bottom_vector_indices,local_top_vector_indices]
-            d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
-end
-            update_schur_complement!(solver.schur_complement_solver, a, b, c, d)
+            schur_complement_solver = solver.schur_complement_solver
+            if isa(schur_complement_solver, BlockedSchurComplement)
+                lu!(schur_complement_solver, A)
+            else
+                local_top_vector_indices = solver.local_top_vector_indices
+                local_bottom_vector_indices = solver.local_bottom_vector_indices
+                a = @view A[local_top_vector_indices,local_top_vector_indices]
+                b = @view A[local_top_vector_indices,local_bottom_vector_indices]
+                c = @view A[local_bottom_vector_indices,local_top_vector_indices]
+                d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
+                update_schur_complement!(schur_complement_solver, a, b, c, d)
+            end
         end
         return nothing
     end
@@ -1828,8 +1766,6 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
             schur_complement_solver = solver.schur_complement_solver
-            partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
-            partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
             this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
             this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
@@ -1865,11 +1801,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                     X[i1] = v[i2]
                 end
             else
-                # Use the a_block_indices here so that no shared-memory synchronization is
-                # needed before the ldiv!() call for the A subblock with the
-                # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-                # MPISchurComplement ldiv!().
-                for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
+                for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
                 end
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
@@ -1894,7 +1826,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                     end
                 end
                 ldiv!(u, v, schur_complement_solver, u, v)
-                for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices, partial_a_block_sub_selection_indices)
+                for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
                     X[i1] = u[i2]
                 end
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
@@ -1912,8 +1844,6 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
             schur_complement_solver = solver.schur_complement_solver
-            partial_local_top_vector_a_block_indices = solver.partial_local_top_vector_a_block_indices
-            partial_a_block_sub_selection_indices = solver.partial_a_block_sub_selection_indices
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
             this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
             this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
@@ -1950,11 +1880,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                 end
             else
                 u = solver.u_buffer
-                # Use the a_block_indices here so that no shared-memory synchronization is
-                # needed before the ldiv!() call for the A subblock with the
-                # BlockDiagonalSolverSerial/BlockDiagonalSolverShared inside the
-                # MPISchurComplement ldiv!().
-                for (i1, i2) ∈ zip(partial_a_block_sub_selection_indices, partial_local_top_vector_a_block_indices)
+                for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
                 end
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
@@ -1979,8 +1905,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                     end
                 end
                 ldiv!(u, v, schur_complement_solver, u, v)
-                for (i1, i2) ∈ zip(partial_local_top_vector_a_block_indices,
-                                   partial_a_block_sub_selection_indices)
+                for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
                     U[i1] = u[i2]
                 end
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,

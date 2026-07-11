@@ -1,4 +1,4 @@
-struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function} <: MPISchurComplementBlockC
+struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     blocks::Vector{Tb}
     block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
@@ -75,7 +75,7 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function} <: MPISchurCo
     end
 end
 
-struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function} <: MPISchurComplementBlockC
+struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
     block_rowinds::Vector{Ti}
     block_colinds::Vector{Ti}

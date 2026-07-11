@@ -4,7 +4,6 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Trange
-    lu_selection_indices::Trange
     sparse_buffers::Vector{Tsparse}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
@@ -12,13 +11,12 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
     B_buffers_out::Vector{Matrix{Tf}}
     B_buffers_in::Vector{Matrix{Tf}}
     check_lu::Bool
-    function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, lu_selection_indices,
-                                           B_column_indices, use_sparse, timer,
+    function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, B_column_indices,
+                                           use_sparse, timer,
                                            check_lu) where {Tf, Ti <: Integer}
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
         block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
-        lu_selection_indices = [li for li ∈ lu_selection_indices if !isempty(li)]
         B_column_indices = [Bc for (Bc, bi) ∈ zip(B_column_indices, block_indices)
                             if !isempty(bi)]
         block_sizes = [length(bi) for bi ∈ block_indices]
@@ -53,9 +51,8 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
             B_buffers_in = Matrix{Tf}[]
         end
         return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices),eltype(sparse_buffers)}(
-                   n, local_block_solver, block_indices, lu_selection_indices,
-                   sparse_buffers, x_buffer, u_buffer, B_column_indices, B_buffers_out,
-                   B_buffers_in, check_lu)
+                   n, local_block_solver, block_indices, sparse_buffers, x_buffer,
+                   u_buffer, B_column_indices, B_buffers_out, B_buffers_in, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolverSerial) = (Alu.n, Alu.n)
@@ -69,8 +66,7 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
     local_block_serial_solver::Tserialsolver
     factors::Tm
     block_indices::Trange
-    lu_selection_indices::Trange
-    partial_lu_selection_indices::Trange
+    partial_block_indices::Trange
     partial_col_range::UnitRange{Ti}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
@@ -78,11 +74,10 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
     block_comm_rank::Ti
     synchronize_shared::Tsync
     check_lu::Bool
-    function BlockDiagonalSolverShared{Tf}(n::Ti, block_indices, lu_selection_indices,
-                                           B_column_indices, block_comm,
-                                           allocate_shared_float, allocate_shared_int,
-                                           synchronize_shared::F, timer,
-                                           check_lu) where {Tf, Ti <: Integer, F}
+    function BlockDiagonalSolverShared{Tf}(n::Ti, block_indices, B_column_indices,
+                                           block_comm, allocate_shared_float,
+                                           allocate_shared_int, synchronize_shared::F,
+                                           timer, check_lu) where {Tf, Ti <: Integer, F}
         block_size = length(block_indices)
         block_comm_rank = MPI.Comm_rank(block_comm)
         block_comm_size = MPI.Comm_size(block_comm)
@@ -133,13 +128,13 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
 
         cols_per_proc = (block_size + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,block_size)
-        partial_lu_selection_indices = lu_selection_indices[partial_col_range]
+        partial_block_indices = block_indices[partial_col_range]
 
         return new{Tf,Ti,typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),typeof(block_indices),F}(
                    n, local_block_solver, local_block_serial_solver, factors,
-                   block_indices, lu_selection_indices, partial_lu_selection_indices,
-                   partial_col_range, x_buffer, u_buffer, B_column_indices,
-                   block_comm_rank, synchronize_shared, check_lu)
+                   block_indices, partial_block_indices, partial_col_range, x_buffer,
+                   u_buffer, B_column_indices, block_comm_rank, synchronize_shared,
+                   check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
@@ -156,8 +151,7 @@ function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_lev
         return MPIStaticCondensationNull{data_type}()
     elseif use_shared_blocks
         return BlockDiagonalSolverShared{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
-                                                    level_info.a_block_sub_selection_indices[1],
-                                                    level_info.a_block_lu_selection_indices[1],
+                                                    level_info.local_top_vector_a_block_indices[1],
                                                     level_info.a_block_B_column_indices[1],
                                                     level_info.block_comm,
                                                     block_allocate_shared_float,
@@ -166,22 +160,21 @@ function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_lev
                                                     check_lu)
     else
         return BlockDiagonalSolverSerial{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
-                                                    level_info.a_block_sub_selection_indices,
-                                                    level_info.a_block_lu_selection_indices,
+                                                    level_info.local_top_vector_a_block_indices,
                                                     level_info.a_block_B_column_indices,
                                                     use_sparse && is_top_level, timer, check_lu)
     end
 end
 
-function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, A::AbstractMatrix)
+function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, full_A::AbstractMatrix)
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         check_lu = block_diagonal_solver.check_lu
         if solver != [nothing]
-            for (s, inds, buffer) ∈ zip(solver, block_diagonal_solver.lu_selection_indices,
+            for (s, inds, buffer) ∈ zip(solver, block_diagonal_solver.block_indices,
                                         block_diagonal_solver.sparse_buffers)
                 if isa(s, UmfpackLU)
-                    update_sparse_matrix!(buffer, A, inds, inds)
+                    update_sparse_matrix!(buffer, full_A, inds, inds)
                     lu!(s, buffer; reuse_symbolic=false, check=check_lu)
                 else
                     factors = s.factors
@@ -195,16 +188,16 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, A::AbstractMatrix
         return nothing
     end
 end
-function lu!(block_diagonal_solver::BlockDiagonalSolverShared, A::AbstractMatrix)
+function lu!(block_diagonal_solver::BlockDiagonalSolverShared, full_A::AbstractMatrix)
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         factors = block_diagonal_solver.factors
-        lu_selection_indices = block_diagonal_solver.lu_selection_indices
-        partial_lu_selection_indices = block_diagonal_solver.partial_lu_selection_indices
+        block_indices = block_diagonal_solver.block_indices
+        partial_block_indices = block_diagonal_solver.partial_block_indices
         partial_col_range = block_diagonal_solver.partial_col_range
         synchronize_shared = block_diagonal_solver.synchronize_shared
 
-        for (j1, j2) ∈ zip(partial_col_range, partial_lu_selection_indices), (i1, i2) ∈ enumerate(lu_selection_indices)
+        for (j1, j2) ∈ zip(partial_col_range, partial_block_indices), (i1, i2) ∈ enumerate(block_indices)
             factors[i1,j1] = A[i2,j2]
         end
 
