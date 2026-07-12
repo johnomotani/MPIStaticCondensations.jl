@@ -255,9 +255,9 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
 
         synchronize_shared()
 
-        flat_range = schur_complement.flat_range
-        if !isempty(flat_range)
-            @views sum!(sc_matrix.nzval[flat_range]', C_dot_Ainv_dot_B[:,flat_range])
+        flat_range_partial = schur_complement.flat_range_partial
+        if !isempty(flat_range_partial)
+            @views sum!(sc_matrix.nzval[flat_range_partial]', C_dot_Ainv_dot_B[:,flat_range_partial])
         end
 
         return nothing

@@ -1,4 +1,4 @@
-struct BlockS{Ti,Tm,TCAiB}
+struct BlockS{Ti,Tm,TCAiB,Trange}
     matrix::Tm
     C_dot_Ainv_dot_B::TCAiB
     indices::Trange
@@ -28,7 +28,7 @@ struct BlockS{Ti,Tm,TCAiB}
         entries_per_proc = (n_flat + shared_comm_size - 1) ÷ shared_comm_size
         flat_range_partial = shared_comm_rank*entries_per_proc+1:min((shared_comm_rank+1)*entries_per_proc,n_flat)
 
-        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B)}(
+        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B),typeof(indices)}(
                    matrix, C_dot_Ainv_dot_B, indices, column_range_partial,
                    flat_range_partial)
     end
