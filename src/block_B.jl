@@ -1,16 +1,19 @@
-struct BlockAinvDotBSerial{Tf,Ti}
-    blocks::Vector{Matrix{Tf}}
-    block_rowinds::Vector{Vector{Ti}}
-    block_colinds::Vector{Vector{Ti}}
+struct BlockAinvDotBSerial{Tf,Ti,Tb,Trange}
+    blocks::Vector{Tb}
+    block_rowinds::Vector{Trange}
+    block_colinds::Vector{Trange}
+    bottom_block_colinds::Vector{Trange}
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
 
-    function BlockAinvDotBSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
-                                     block_colinds::Vector{Vector{Ti}}) where {Tf,Ti}
+    function BlockAinvDotBSerial{Tf}(block_rowinds::Vector{<:AbstractVector{Ti}},
+                                     block_colinds::Vector{<:AbstractVector{Ti}},
+                                     bottom_block_colinds::Vector{<:AbstractVector{Ti}}) where {Tf,Ti}
         non_empty_blocks = [!isempty(ri) && !isempty(ci)
                             for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
         block_rowinds = block_rowinds[non_empty_blocks]
         block_colinds = block_colinds[non_empty_blocks]
+        bottom_block_colinds = bottom_block_colinds[non_empty_blocks]
         blocks = Matrix{Tf}[]
         vector_buffer_blocks_in = Vector{Tf}[]
         vector_buffer_blocks_out = Vector{Tf}[]
@@ -21,37 +24,42 @@ struct BlockAinvDotBSerial{Tf,Ti}
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
         end
-        return new{Tf,Ti}(blocks, block_rowinds, block_colinds, vector_buffer_blocks_in,
-                          vector_buffer_blocks_out)
+        return new{Tf,Ti,eltype(blocks),eltype(block_rowinds)}(
+                   blocks, block_rowinds, block_colinds, bottom_block_colinds,
+                   vector_buffer_blocks_in, vector_buffer_blocks_out)
     end
 end
 
 # This version has a single block, and operations are parallelised using shared-memory
 # MPI.
-struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync}
-    block::Tm
+struct BlockAinvDotBShared{Tf,Ti,Tb,Trange,Tsync}
+    block::Tb
     partial_block::Matrix{Tf}
-    block_rowinds::Vector{Ti}
+    block_rowinds::Trange
     block_partial_rowinds::Vector{Ti}
-    block_colinds::Vector{Ti}
+    block_colinds::Trange
     block_partial_colinds::Vector{Ti}
-    buffer::Tm
+    bottom_block_colinds::Trange
+    bottom_block_partial_colinds::Vector{Ti}
+    buffer::Tb
     partial_col_range::UnitRange{Ti}
     partial_row_range::UnitRange{Ti}
     vector_buffer_block_in::Vector{Tf}
     vector_buffer_block_out::Vector{Tf}
     synchronize_shared::Tsync
 
-    function BlockAinvDotBShared{Tf}(block_rowinds::Vector{Ti}, block_colinds::Vector{Ti},
+    function BlockAinvDotBShared{Tf}(block_rowinds::AbstractVector{Ti},
+                                     block_colinds::AbstractVector{Ti},
+                                     bottom_block_colinds::AbstractVector{Ti},
                                      block_comm_rank::Integer, block_comm_size::Integer,
                                      allocate_shared_float::Fa,
                                      synchronize_shared::Fs) where {Tf,Ti,Fa,Fs}
         if isempty(block_rowinds) || isempty(block_colinds)
-            return new{Tf,Ti,Matrix{Tf},Fs}(zeros(Tf, 0, 0), zeros(Tf, 0, 0),
-                                            block_rowinds, zeros(Ti, 0), block_colinds,
-                                            zeros(Ti, 0), zeros(Tf, 0, 0), 1:0, 1:0,
-                                            zeros(Tf, 0), zeros(Tf, 0),
-                                            synchronize_shared)
+            return new{Tf,Ti,Matrix{Tf},typeof(block_colinds),Fs}(
+                       zeros(Tf, 0, 0), zeros(Tf, 0, 0), block_rowinds, zeros(Ti, 0),
+                       block_colinds, zeros(Ti, 0), bottom_block_colinds, zeros(Ti, 0),
+                       zeros(Tf, 0, 0), 1:0, 1:0, zeros(Tf, 0), zeros(Tf, 0),
+                       synchronize_shared)
         end
 
         nrow = length(block_rowinds)
@@ -61,6 +69,7 @@ struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync}
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
         block_partial_colinds = block_colinds[partial_col_range]
+        bottom_block_partial_colinds = bottom_block_colinds[partial_col_range]
         rows_per_proc = (nrow + block_comm_size - 1) ÷ block_comm_size
         partial_row_range = block_comm_rank*rows_per_proc+1:min((block_comm_rank+1)*rows_per_proc,nrow)
         partial_nrow = length(partial_row_range)
@@ -73,12 +82,11 @@ struct BlockAinvDotBShared{Tf,Ti,Tm,Tsync}
         vector_buffer_block_in[partial_col_range] .= 0.0
         vector_buffer_block_out .= 0.0
 
-        return new{Tf,Ti,typeof(block),Fs}(block, partial_block, block_rowinds,
-                                           block_partial_rowinds, block_colinds,
-                                           block_partial_colinds, buffer,
-                                           partial_col_range, partial_row_range,
-                                           vector_buffer_block_in,
-                                           vector_buffer_block_out, synchronize_shared)
+        return new{Tf,Ti,typeof(block),typeof(block_rowinds),Fs}(
+                   block, partial_block, block_rowinds, block_partial_rowinds,
+                   block_colinds, block_partial_colinds, bottom_block_partial_colinds,
+                   buffer, partial_col_range, partial_row_range, vector_buffer_block_in,
+                   vector_buffer_block_out, synchronize_shared)
     end
 end
 
@@ -326,7 +334,7 @@ end
 
 function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
                                             Ainv_dot_B::BlockAinvDotBSerial,
-                                            global_y::AbstractVector)
+                                            y::AbstractVector)
     @inbounds begin
         blocks = Ainv_dot_B.blocks
         if length(blocks) == 0
@@ -337,9 +345,9 @@ function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
         for (vec_buffer_in, vec_buffer_out, rowinds, colinds, block, Aiu_block) ∈
                 zip(Ainv_dot_B.vector_buffer_blocks_in,
                     Ainv_dot_B.vector_buffer_blocks_out, Ainv_dot_B.block_rowinds,
-                    Ainv_dot_B.block_colinds, blocks, Ainv_dot_u)
+                    Ainv_dot_B.bottom_block_colinds, blocks, Ainv_dot_u)
             for (i1, i2) ∈ enumerate(colinds)
-                vec_buffer_in[i1] = global_y[i2]
+                vec_buffer_in[i1] = y[i2]
             end
             mul!(vec_buffer_out, block, vec_buffer_in)
             for (i2, i1) ∈ enumerate(rowinds)
@@ -351,18 +359,18 @@ function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
 end
 function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
                                             Ainv_dot_B::BlockAinvDotBShared,
-                                            global_y::AbstractVector)
+                                            y::AbstractVector)
     @inbounds begin
         partial_block = Ainv_dot_B.partial_block
         vector_buffer_block_in = Ainv_dot_B.vector_buffer_block_in
         vector_buffer_block_out = Ainv_dot_B.vector_buffer_block_out
         block_partial_rowinds = Ainv_dot_B.block_partial_rowinds
-        block_partial_colinds = Ainv_dot_B.block_partial_colinds
-        partial_col_range = Ainv_dot_B.partial_col_range
+        bbottom_lock_partial_colinds = Ainv_dot_B.bbottom_lock_partial_colinds
+        partial_col_range = Ainv_dot_B.partial_bottom_col_range
         synchronize_shared = Ainv_dot_B.synchronize_shared
 
-        for (i1, i2) ∈ zip(partial_col_range, block_partial_colinds)
-            vector_buffer_block_in[i1] = global_y[i2]
+        for (i1, i2) ∈ zip(partial_col_range, block_partial_bottom_colinds)
+            vector_buffer_block_in[i1] = y[i2]
         end
         synchronize_shared()
 

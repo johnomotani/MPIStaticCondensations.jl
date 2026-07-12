@@ -299,6 +299,7 @@ struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Unio
     this_shared_local_bottom_periodic_pairs::Matrix{Ti}
     u_buffer::Tbuff
     v_buffer::Tbuff
+    y_buffer::Tbuff
     has_periodic::Bool
     synchronize_shared::Tsync
     timer::Ttimer
@@ -1431,7 +1432,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              this_level_schur_solver, use_shared_blocks,
-                                             level_shared_comm, level_synchronize_shared,
+                                             sparse_C_blocks, level_shared_comm,
+                                             level_synchronize_shared,
                                              level_allocate_shared_float,
                                              level_allocate_shared_int,
                                              block_synchronize_shared,
@@ -1448,6 +1450,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_u_buffer = level_allocate_shared_float(0)
         end
         this_v_buffer = level_allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
+        if level == n_levels
+            this_y_buffer = level_allocate_shared_float(0)
+        else
+            this_y_buffer = level_allocate_shared_float(length(this_level_info.local_bottom_vector_indices))
+        end
 
         # Need to create a version of local_top_vector_indices and
         # local_bottom_vector_indices that is split into ranges to be handled in parallel
@@ -1509,7 +1516,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_sub_selection_no_overlap_indices,
                                           this_shared_local_bottom_vector_repeat_indices,
                                           this_shared_local_bottom_periodic_pairs,
-                                          this_u_buffer, this_v_buffer,
+                                          this_u_buffer, this_v_buffer, this_y_buffer,
                                           this_level_info.has_periodic,
                                           level_synchronize_shared, timer)
     end
@@ -1759,6 +1766,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
             v = solver.v_buffer
             if isa(schur_complement_solver, BlockedSchurComplementSolver)
+                y = solver.y_buffer
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
                     # This loop uses 'no overlap' indices
                     # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
@@ -1780,10 +1788,10 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                         v[i1] += U[i2]
                     end
                 end
-                ldiv!(U, v, schur_complement_solver, U, v)
+                ldiv!(U, y, schur_complement_solver, U, v)
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
                                    this_shared_local_bottom_sub_selection_indices)
-                    U[i1] = v[i2]
+                    U[i1] = y[i2]
                 end
             else
                 u = solver.u_buffer

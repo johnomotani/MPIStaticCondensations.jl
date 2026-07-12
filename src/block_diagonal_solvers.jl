@@ -180,7 +180,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, full_A::AbstractM
                 else
                     factors = s.factors
                     for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
-                        factors[i1,j1] = A[i2,j2]
+                        factors[i1,j1] = full_A[i2,j2]
                     end
                     getrf!(factors, s.ipiv; check=check_lu)
                 end

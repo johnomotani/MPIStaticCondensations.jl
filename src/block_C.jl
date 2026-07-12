@@ -1,8 +1,8 @@
-struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
+struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     blocks::Vector{Tb}
-    block_rowinds::Vector{Vector{Ti}}
-    bottom_block_rowinds::Vector{Vector{Ti}}
-    block_colinds::Vector{Vector{Ti}}
+    block_rowinds::Vector{Trange}
+    bottom_block_rowinds::Vector{Trange}
+    block_colinds::Vector{Trange}
     block_hypercube_positions::Vector{Ti}
     output_buffer_ncopies::Ti
     right_multiplication_buffer_blocks::Trmbb
@@ -13,9 +13,9 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     block_synchronize_shared::Fsb
     synchronize_shared::Fs
 
-    function BlockCSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
-                              bottom_block_rowinds::Vector{Vector{Ti}},
-                              block_colinds::Vector{Vector{Ti}},
+    function BlockCSerial{Tf}(block_rowinds::Vector{<:AbstractVector{Ti}},
+                              bottom_block_rowinds::Vector{<:AbstractVector{Ti}},
+                              block_colinds::Vector{<:AbstractVector{Ti}},
                               local_top_vector_indices::Vector{Ti},
                               local_bottom_vector_indices::Vector{Ti},
                               matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
@@ -69,7 +69,7 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{eltype(blocks),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(vector_intermediate_buffer),Fsb,Fs}(
+        return new{eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(vector_intermediate_buffer),Fsb,Fs}(
                    blocks, block_rowinds, bottom_block_rowinds, block_colinds,
                    block_hypercube_positions, output_buffer_ncopies,
                    right_multiplication_buffer_blocks, vector_buffer_blocks_in,
@@ -78,11 +78,11 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     end
 end
 
-struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
-    block_rowinds::Vector{Ti}
-    bottom_block_rowinds::Vector{Ti}
-    block_colinds::Vector{Ti}
+    block_rowinds::Trange
+    bottom_block_rowinds::Trange
+    block_colinds::Trange
     partial_block_colinds::Vector{Ti}
     partial_col_range::UnitRange{Ti}
     block_hypercube_position::Ti
@@ -130,11 +130,11 @@ struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     # values, the binary number formed by the string of 0s and 1s (ordered in the same way
     # as the dimensions) is translated back to an integer to give the intermediate buffer
     # column.
-    function BlockCShared{Tf}(block_rowinds_full::Vector{Ti},
-                              bottom_block_rowinds_full::Vector{Ti},
-                              partial_row_range::UnitRange{Ti}, block_colinds::Vector{Ti},
-                              local_top_vector_indices::Vector{Ti},
-                              local_bottom_vector_indices::Vector{Ti},
+    function BlockCShared{Tf}(block_rowinds_full::AbstractVector{Ti},
+                              bottom_block_rowinds_full::AbstractVector{Ti},
+                              partial_row_range::UnitRange{Ti}, block_colinds::AbstractVector{Ti},
+                              local_top_vector_indices::AbstractVector{Ti},
+                              local_bottom_vector_indices::AbstractVector{Ti},
                               matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
                               block_hypercube_position::Ti,
                               output_buffer_ncopies::Ti,
@@ -175,7 +175,7 @@ struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{typeof(block),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+        return new{typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, bottom_block_rowinds, block_colinds,
                    partial_block_colinds, partial_col_range, block_hypercube_position,
                    output_buffer_ncopies, right_multiplication_buffer_block,
@@ -382,7 +382,7 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
         block_hypercube_positions = C.block_hypercube_positions
         if length(blocks) > 0
             for (vec_buffer_out, rowinds, block, bhp, Aiu_block) ∈
-                    zip(C.vector_buffer_blocks_out, C.block_rowinds, blocks,
+                    zip(C.vector_buffer_blocks_out, C.bottom_block_rowinds, blocks,
                         block_hypercube_positions, Ainv_dot_u)
                 vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
                 mul!(vec_buffer_out, block, Aiu_block)

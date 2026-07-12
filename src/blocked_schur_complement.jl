@@ -8,11 +8,11 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu}
 
     function BlockedSchurComplementSolver(
                  dimensions::Vector{<:Dimension}, level::Integer, level_info,
-                 schur_complement_factorization, use_shared_blocks::Bool, shared_comm,
-                 synchronize_shared::Fsync, allocate_shared_float::Faf,
-                 allocate_shared_int::Fai, block_synchronize_shared::Fbsync,
-                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
-                 right_multiplication_buffer_storage,
+                 schur_complement_factorization, use_shared_blocks::Bool,
+                 sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
+                 allocate_shared_float::Faf, allocate_shared_int::Fai,
+                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
+                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
                  check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
 
         timer = schur_complement_factorization.timer
@@ -51,6 +51,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu}
                                                             block_synchronize_shared)
                 B = BlockAinvDotBShared{data_type}(level_info.local_top_vector_a_block_indices[1],
                                                    level_info.a_block_off_diagonal_indices[1],
+                                                   level_info.a_block_off_diagonal_bottom_vector_indices[1],
                                                    block_comm_rank, block_comm_size,
                                                    block_allocate_shared_float,
                                                    block_synchronize_shared)
@@ -100,7 +101,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu}
             A_factorization = get_block_diagonal_solver(level_info, data_type, level==1,
                                                         false, timer, check_lu)
             B = BlockAinvDotBSerial{data_type}(level_info.local_top_vector_a_block_indices,
-                                               level_info.a_block_off_diagonal_indices)
+                                               level_info.a_block_off_diagonal_indices,
+                                               level_info.a_block_off_diagonal_bottom_vector_indices)
             nbottom = length(level_info.local_bottom_vector_indices)
             C_vector_intermediate_buffer =
                 allocate_shared_float(C_buffer_ncopies, nbottom)
@@ -200,10 +202,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             end
 
             @sc_timeit timer "v-C.Ainv.u" begin
-                # Initialise to zero, because when C does not include all rows, the matrix
-                # multiplication below would not initialise all elements.
-                y[bottom_sub_range] .= 0.0
-                mul_C_dot_Ainv_dot_u!(y, sc.C, Ainv_dot_u)
+                mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
 
                 for i ∈ bottom_sub_range
                     y[i] += v[i]

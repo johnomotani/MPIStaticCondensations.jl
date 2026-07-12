@@ -20,6 +20,9 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
 
         n_flat = nnz(matrix)
         C_dot_Ainv_dot_B = allocate_shared_float(C_buffer_ncopies, n_flat)
+        if shared_comm_rank == 0
+            C_dot_Ainv_dot_B .= 0.0
+        end
 
         ncol = length(indices)
         cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
@@ -34,13 +37,13 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
     end
 end
 
-function add_D_to_schur_complement!(schur_complement::BlockS, A)
+function add_D_to_schur_complement!(schur_complement::BlockS, full_A)
     @inbounds begin
         # Only get the local rows for D, so just add these to the local rows of
         # `schur_complement`.
-        A_colptr = A.colptr
-        A_rowval = A.rowval
-        A_nzval = A.nzval
+        full_A_colptr = full_A.colptr
+        full_A_rowval = full_A.rowval
+        full_A_nzval = full_A.nzval
         sc_matrix = schur_complement.matrix
         sc_colptr = sc_matrix.colptr
         sc_rowval = sc_matrix.rowval
@@ -62,19 +65,19 @@ function add_D_to_schur_complement!(schur_complement::BlockS, A)
             flat_i = first_i
 
             full_j = sc_indices[j]
-            full_first_i = A_colptr[full_j]
-            full_last_i = A_colptr[full_j+1]-1
+            full_first_i = full_A_colptr[full_j]
+            full_last_i = full_A_colptr[full_j+1]-1
             if full_last_i < full_first_i
                 continue
             end
 
             first_row = sc_rowval[first_i]
-            full_flat_i = max(searchsortedlast(A_rowval, first_row) - 1, 1)
+            full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
             while flat_i ≤ last_i && full_flat_i ≤ full_last_i
                 row = sc_indices[sc_rowval[flat_i]]
-                full_row = A_rowval[full_flat_i]
+                full_row = full_A_rowval[full_flat_i]
                 if row == full_row
-                    sc_nzval[flat_i] += A_nzval[full_flat_i]
+                    sc_nzval[flat_i] += full_A_nzval[full_flat_i]
                     flat_i += 1
                     full_flat_i += 1
                 elseif row < full_row
