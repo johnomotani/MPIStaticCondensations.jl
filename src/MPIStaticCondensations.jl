@@ -634,7 +634,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     local_top_vector_indices::Vector{Ti}
     iblock_list::Matrix{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
-    a_block_B_column_indices::Vector{Vector{Ti}}
+    a_block_off_diagonal_indices::Vector{Vector{Ti}}
     n_subgroups::Ti
     subgroup_i::Ti
     subgroup_size::Ti
@@ -672,7 +672,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),
-                             a_block_B_column_indices=Vector{Ti}[], n_subgroups=0,
+                             a_block_off_diagonal_indices=Vector{Ti}[], n_subgroups=0,
                              subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
                              bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
                              local_bottom_vector_no_overlap_indices=Ti[],
@@ -970,10 +970,10 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         end
 
         # Get the index within level_indices of the entries in block_boundary_indices.
-        # The following search relies on both `a_block_B_column_indices` and
+        # The following search relies on both `a_block_off_diagonal_indices` and
         # `level_indices` being sorted.
-        a_block_B_column_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
-        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_B_column_indices, block_boundary_indices)
+        a_block_off_diagonal_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_off_diagonal_indices, block_boundary_indices)
             nbbi = length(this_block_boundary_indices)
             if nbbi == 0
                 continue
@@ -1097,7 +1097,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
                          local_top_vector_a_block_indices=a_block_indices,
-                         a_block_B_column_indices=a_block_B_column_indices,
+                         a_block_off_diagonal_indices=a_block_off_diagonal_indices,
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
@@ -1431,7 +1431,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                                         block_synchronize_shared)
                         Ainv_dot_B_buffer =
                             BlockAinvDotBShared{data_type}(this_level_info.local_top_vector_a_block_indices[1],
-                                                           this_level_info.a_block_B_column_indices[1],
+                                                           this_level_info.a_block_off_diagonal_indices[1],
                                                            block_comm_rank, block_comm_size,
                                                            block_allocate_shared_float,
                                                            block_synchronize_shared)
@@ -1443,7 +1443,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                         end
                         C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
                         C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc,this_level_info.global_bottom_vector_size)
-                        C_block_row_inds_full = this_level_info.a_block_B_column_indices[1]
+                        C_block_row_inds_full = this_level_info.a_block_off_diagonal_indices[1]
 
                        C_nrow = length(C_block_row_inds_full)
                        C_rows_per_proc = (C_nrow + block_comm_size - 1) ÷ block_comm_size
@@ -1484,7 +1484,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                                     timer, check_lu)
                     Ainv_dot_B_buffer =
                         BlockAinvDotBSerial{data_type}(this_level_info.local_top_vector_a_block_indices,
-                                                       this_level_info.a_block_B_column_indices)
+                                                       this_level_info.a_block_off_diagonal_indices)
                     C_vector_intermediate_buffer =
                         level_allocate_shared_float(C_buffer_ncopies,
                                                     this_level_info.global_bottom_vector_size)
@@ -1493,7 +1493,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                     end
                     C_vector_points_per_proc = (this_level_info.global_bottom_vector_size + this_level_comm_size - 1) ÷ this_level_comm_size
                     C_vector_range = this_level_comm_rank*C_vector_points_per_proc+1:min((this_level_comm_rank+1)*C_vector_points_per_proc, this_level_info.global_bottom_vector_size)
-                    C_block_row_inds = this_level_info.a_block_B_column_indices
+                    C_block_row_inds = this_level_info.a_block_off_diagonal_indices
 
                     C_block_hypercube_positions =
                         [get_C_hypercube_position(iblock)

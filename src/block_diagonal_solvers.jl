@@ -152,7 +152,7 @@ function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_lev
     elseif use_shared_blocks
         return BlockDiagonalSolverShared{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
                                                     level_info.local_top_vector_a_block_indices[1],
-                                                    level_info.a_block_B_column_indices[1],
+                                                    level_info.a_block_off_diagonal_indices[1],
                                                     level_info.block_comm,
                                                     block_allocate_shared_float,
                                                     block_allocate_shared_int,
@@ -161,7 +161,7 @@ function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_lev
     else
         return BlockDiagonalSolverSerial{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
                                                     level_info.local_top_vector_a_block_indices,
-                                                    level_info.a_block_B_column_indices,
+                                                    level_info.a_block_off_diagonal_indices,
                                                     use_sparse && is_top_level, timer, check_lu)
     end
 end
