@@ -1,3 +1,5 @@
+import MPISchurComplements: ldiv_Bmatrix!
+
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
 struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse} <: MPISchurComplementAFactorization{Tf}
@@ -215,7 +217,8 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared, full_A::AbstractM
     end
 end
 
-function ldiv!(buffers, block_diagonal_solver::BlockDiagonalSolverSerial{T},
+function ldiv!(buffers::AbstractVector,
+               block_diagonal_solver::BlockDiagonalSolverSerial{T},
                u::AbstractVector{T}) where T
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
@@ -234,7 +237,8 @@ function ldiv!(buffers, block_diagonal_solver::BlockDiagonalSolverSerial{T},
         return nothing
     end
 end
-function ldiv!(buffer, block_diagonal_solver::BlockDiagonalSolverShared{T},
+function ldiv!(buffer::AbstractVector{T},
+               block_diagonal_solver::BlockDiagonalSolverShared{T},
                u::AbstractVector{T}) where T
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
@@ -551,15 +555,15 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
         return nothing
     end
 end
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
-                       B::BlockAinvDotBSerial{T}) where T
+function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
+                             B::BlockAinvDotBSerial{T}) where T
     for (solver, block) ∈ zip(block_diagonal_solver.local_block_solver, B.blocks)
         ldiv!(solver, block)
     end
     return nothing
 end
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
-                       B::BlockAinvDotBShared{T}) where T
+function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
+                             B::BlockAinvDotBShared{T}) where T
     @inbounds begin
         solver = block_diagonal_solver.local_block_serial_solver
         if solver !== nothing

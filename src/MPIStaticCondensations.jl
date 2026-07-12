@@ -284,10 +284,12 @@ include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf}},Tranget,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     schur_complement_solver::Tsolver
     local_top_vector_indices::Tranget
+    partial_local_top_vector_indices::Trangept
+    partial_top_sub_range::UnitRange{Ti}
     local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_indices::Trangeb
     this_shared_local_bottom_vector_no_overlap_indices::Trangeb
@@ -1413,7 +1415,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         # by all the processes in the shared-memory block.
         ntop = length(this_level_info.local_top_vector_indices)
         top_points_per_proc = (ntop + level_shared_comm_size - 1) ÷ level_shared_comm_size
-        top_subset = level_shared_comm_rank*top_points_per_proc+1:min((level_shared_comm_rank+1)*top_points_per_proc,ntop)
+        partial_top_sub_range = level_shared_comm_rank*top_points_per_proc+1:min((level_shared_comm_rank+1)*top_points_per_proc,ntop)
 
         nbottom = length(this_level_info.local_bottom_vector_indices)
         bottom_points_per_proc = (nbottom + level_shared_comm_size - 1) ÷ level_shared_comm_size
@@ -1459,6 +1461,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_schur_solver =
             MPIStaticCondensationParallel(this_level_info.global_size, this_level_sc,
                                           this_level_info.local_top_vector_indices,
+                                          @view(this_level_info.local_top_vector_indices[partial_top_sub_range]),
+                                          partial_top_sub_range,
                                           this_level_info.local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_indices,
                                           this_shared_local_bottom_vector_no_overlap_indices,
@@ -1626,6 +1630,8 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
             schur_complement_solver = solver.schur_complement_solver
+            partial_local_top_vector_indices = solver.partial_local_top_vector_indices
+            partial_top_sub_range = solver.partial_top_sub_range
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
             this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
             this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
@@ -1704,6 +1710,8 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             # It is slightly faster to copy the data to/from local buffers than to use
             # @view with Vector{Int64} indices.
             schur_complement_solver = solver.schur_complement_solver
+            partial_local_top_vector_indices = solver.partial_local_top_vector_indices
+            partial_top_sub_range = solver.partial_top_sub_range
             this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
             this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
             this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices

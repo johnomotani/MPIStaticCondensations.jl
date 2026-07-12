@@ -153,7 +153,7 @@ function lu!(sc::BlockedSchurComplementSolver, full_A)
 
             copy_B_submatrix!(B, full_A)
 
-            ldiv_Bmatrix!(A_factorization, B)
+            ldiv_block_Bmatrix!(A_factorization, B)
         end
         @sc_timeit timer "C" begin
             copy_C_submatrix!(C, full_A)
