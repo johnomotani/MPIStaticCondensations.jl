@@ -25,7 +25,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu}
 
         C_buffer_ncopies = 2^length(dimensions)
 
-        schur_complement = BlockS(dimensions, level_info.local_bottom_vector_indices,
+        schur_complement = BlockS(dimensions, level_info.bottom_vector_indices,
+                                  level_info.local_bottom_vector_indices,
                                   level_info.block_sizes, C_buffer_ncopies, shared_comm,
                                   allocate_shared_float, allocate_shared_int)
 

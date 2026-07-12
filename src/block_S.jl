@@ -5,18 +5,20 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
     column_range_partial::UnitRange{Ti}
     flat_range_partial::UnitRange{Ti}
 
-    function BlockS(dimensions::Vector{<:Dimension}, indices,
+    function BlockS(dimensions::Vector{<:Dimension}, bottom_vector_indices,
+                    local_bottom_vector_indices,
                     block_sizes::Union{Vector{<:Integer},Nothing}, C_buffer_ncopies,
                     shared_comm, allocate_shared_float::F1,
                     allocate_shared_int::F2) where {F1,F2}
-        Ti = eltype(indices)
+        Ti = eltype(local_bottom_vector_indices)
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
 
         matrix = get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
                                                      allocate_shared_float,
                                                      allocate_shared_int, block_sizes,
-                                                     indices, indices; ind_type=Ti)
+                                                     bottom_vector_indices,
+                                                     bottom_vector_indices; ind_type=Ti)
 
         n_flat = nnz(matrix)
         C_dot_Ainv_dot_B = allocate_shared_float(C_buffer_ncopies, n_flat)
@@ -24,16 +26,16 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
             C_dot_Ainv_dot_B .= 0.0
         end
 
-        ncol = length(indices)
+        ncol = length(local_bottom_vector_indices)
         cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
         column_range_partial = shared_comm_rank*cols_per_proc+1:min((shared_comm_rank+1)*cols_per_proc,ncol)
 
         entries_per_proc = (n_flat + shared_comm_size - 1) ÷ shared_comm_size
         flat_range_partial = shared_comm_rank*entries_per_proc+1:min((shared_comm_rank+1)*entries_per_proc,n_flat)
 
-        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B),typeof(indices)}(
-                   matrix, C_dot_Ainv_dot_B, indices, column_range_partial,
-                   flat_range_partial)
+        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B),typeof(local_bottom_vector_indices)}(
+                   matrix, C_dot_Ainv_dot_B, local_bottom_vector_indices,
+                   column_range_partial, flat_range_partial)
     end
 end
 
