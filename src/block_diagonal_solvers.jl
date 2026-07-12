@@ -140,9 +140,8 @@ end
 Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
 Base.size(Alu::BlockDiagonalSolverShared, d::Integer) = size(Alu)[d]
 
-function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_level,
-                                   use_shared_blocks, timer, check_lu,
-                                   block_allocate_shared_float=nothing,
+function get_block_diagonal_solver(level_info, data_type, is_top_level, use_shared_blocks,
+                                   timer, check_lu, block_allocate_shared_float=nothing,
                                    block_allocate_shared_int=nothing,
                                    block_synchronize_shared=nothing)
     # The A blocks may be sparse at the top level, but will generally be dense on lower
@@ -162,7 +161,7 @@ function get_block_diagonal_solver(level_info, data_type, use_sparse, is_top_lev
         return BlockDiagonalSolverSerial{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
                                                     level_info.local_top_vector_a_block_indices,
                                                     level_info.a_block_off_diagonal_indices,
-                                                    use_sparse && is_top_level, timer, check_lu)
+                                                    is_top_level, timer, check_lu)
     end
 end
 

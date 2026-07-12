@@ -1122,7 +1122,7 @@ end
                             allocate_shared_int::Union{Function,Nothing}=nothing,
                             synchronize_shared::Union{Function,Nothing}=nothing,
                             schur_tile_size::Union{Nothing,Integer}=nothing,
-                            use_sparse::Bool=true, separate_Ainv_B::Bool=false,
+                            separate_Ainv_B::Bool=false,
                             optimize_schur_complement_size::Bool=true,
                             timer::Union{Nothing,TimerOutput}=nothing,
                             check_lu::Bool=false)
@@ -1155,9 +1155,6 @@ members must be able to create shared-memory arrays.
 `allocate_shared_float`, `allocate_shared_int`, and `synchronize_shared` are as required
 by `mpi_schur_complement()`. `schur_tile_size` is passed to the `tile_size` argument of
 `mpi_schur_complement()`.
-
-`use_sparse` indicates whether to use a sparse-matrix solver as the lowest-level LU
-solver, and within the MPISchurComplement solvers.
 
 `separate_Ainv_B` is passed through to the MPISchurComplement constructors.
 
@@ -1193,7 +1190,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  allocate_shared_int::F2=nothing,
                                  synchronize_shared::F3=nothing,
                                  schur_tile_size::Union{Nothing,Integer}=nothing,
-                                 use_sparse::Bool=true, separate_Ainv_B::Bool=false,
+                                 separate_Ainv_B::Bool=false,
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
@@ -1304,7 +1301,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
             end
             last_A_block_solver = get_block_diagonal_solver(last_level_info, data_type,
-                                                            use_sparse,
                                                             length(level_info_list) == 1,
                                                             true, timer, check_lu,
                                                             last_block_allocate_shared_float,
@@ -1314,7 +1310,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             block_comm_rank = 0
             block_comm_size = 1
             last_A_block_solver = get_block_diagonal_solver(last_level_info, data_type,
-                                                            use_sparse,
                                                             length(level_info_list) == 1,
                                                             false, timer, check_lu)
         end
@@ -1338,7 +1333,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
-                                 copy_input_to_dense_buffers=(use_sparse && last_level_info.has_periodic),
+                                 copy_input_to_dense_buffers=last_level_info.has_periodic,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
@@ -1351,18 +1346,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_allocate_shared_int_list =
         [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
          for li ∈ level_info_list]
-    if use_sparse
-        schur_complement_buffer_list =
-            [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
-                                                 lai, li.block_sizes,
-                                                 li.bottom_vector_indices,
-                                                 li.bottom_vector_indices)
-             for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
-                                      level_allocate_shared_float_list[1:end-1],
-                                      level_allocate_shared_int_list[1:end-1])]
-    else
-        schur_complement_buffer_list = [nothing for _ ∈ level_info_list[1:end-1]]
-    end
+    schur_complement_buffer_list =
+        [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
+                                             lai, li.block_sizes,
+                                             li.bottom_vector_indices,
+                                             li.bottom_vector_indices)
+         for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
+                                  level_allocate_shared_float_list[1:end-1],
+                                  level_allocate_shared_int_list[1:end-1])]
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
