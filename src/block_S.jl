@@ -1,14 +1,36 @@
 struct BlockS{Ti,Tm,TCAiB}
     matrix::Tm
     C_dot_Ainv_dot_B::TCAiB
-    flat_range::UnitRange{Ti}
+    indices::Trange
+    column_range_partial::UnitRange{Ti}
+    flat_range_partial::UnitRange{Ti}
 
-    function BlockS(C_buffer_ncopies, allocate_shared_float::F) where F
-        matrix = nothing
+    function BlockS(dimensions::Vector{<:Dimension}, indices,
+                    block_sizes::Union{Vector{<:Integer},Nothing}, C_buffer_ncopies,
+                    shared_comm, allocate_shared_float::F1,
+                    allocate_shared_int::F2) where {F1,F2}
+        Ti = eltype(indices)
+        shared_comm_size = MPI.Comm_size(shared_comm)
+        shared_comm_rank = MPI.Comm_rank(shared_comm)
 
-        C_dot_Ainv_dot_B = allocate_shared_float(C_buffer_ncopies, nnz(matrix))
+        matrix = get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
+                                                     allocate_shared_float,
+                                                     allocate_shared_int, block_sizes,
+                                                     indices, indices; ind_type=Ti)
 
-        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B)}(matrix, C_dot_Ainv_dot_B)
+        n_flat = nnz(matrix)
+        C_dot_Ainv_dot_B = allocate_shared_float(C_buffer_ncopies, n_flat)
+
+        ncol = length(indices)
+        cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
+        column_range_partial = shared_comm_rank*cols_per_proc+1:min((shared_comm_rank+1)*cols_per_proc,ncol)
+
+        entries_per_proc = (n_flat + shared_comm_size - 1) ÷ shared_comm_size
+        flat_range_partial = shared_comm_rank*entries_per_proc+1:min((shared_comm_rank+1)*entries_per_proc,n_flat)
+
+        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B)}(
+                   matrix, C_dot_Ainv_dot_B, indices, column_range_partial,
+                   flat_range_partial)
     end
 end
 
