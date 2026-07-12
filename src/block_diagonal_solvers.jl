@@ -199,7 +199,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared, full_A::AbstractM
         synchronize_shared = block_diagonal_solver.synchronize_shared
 
         for (j1, j2) ∈ zip(partial_col_range, partial_block_indices), (i1, i2) ∈ enumerate(block_indices)
-            factors[i1,j1] = A[i2,j2]
+            factors[i1,j1] = full_A[i2,j2]
         end
 
         synchronize_shared()
@@ -254,13 +254,19 @@ function ldiv!(buffer::AbstractVector{T},
         if solver === nothing
             # Nothing to do.
         elseif isa(solver, MPIDenseLU)
-            u_buffer = block_diagonal_solver.u_buffer
-            if block_comm_rank == 0
-                for (i1, i2) ∈ enumerate(block_indices)
-                    u_buffer[i1] = u[i2]
+            if length(block_indices) == length(u)
+                # There is only one block which includes the whole rhs/solution vector, so
+                # do not need to select range out of u.
+                ldiv!(buffer, solver, u)
+            else
+                u_buffer = block_diagonal_solver.u_buffer
+                if block_comm_rank == 0
+                    for (i1, i2) ∈ enumerate(block_indices)
+                        u_buffer[i1] = u[i2]
+                    end
                 end
+                ldiv!(buffer, solver, u_buffer)
             end
-            ldiv!(buffer, solver, u_buffer)
         else
             if block_comm_rank == 0
                 for (i1, i2) ∈ enumerate(block_indices)
@@ -291,7 +297,8 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if length(solvers) == 1 && length(block_diagonal_solver.block_indices[1]) == size(u, 1)
-            # There is only one block, so do not need to select range out of x/u.
+            # There is only one block which includes the whole rhs/solution vector, so do
+            # not need to select range out of x/u.
             ldiv!(x, solvers[1], u)
         else
             if block_diagonal_solver.local_block_solver !== nothing
