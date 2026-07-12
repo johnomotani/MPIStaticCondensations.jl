@@ -637,6 +637,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     iblock_list::Matrix{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
     a_block_off_diagonal_indices::Vector{Vector{Ti}}
+    a_block_off_diagonal_bottom_vector_indices::Vector{Vector{Ti}}
     n_subgroups::Ti
     subgroup_i::Ti
     subgroup_size::Ti
@@ -674,9 +675,11 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),
-                             a_block_off_diagonal_indices=Vector{Ti}[], n_subgroups=0,
-                             subgroup_i=-1, subgroup_size=0, block_comm=shared_comm,
-                             bottom_vector_indices=Ti[], local_bottom_vector_indices=Ti[],
+                             a_block_off_diagonal_indices=Vector{Ti}[],
+                             a_block_off_diagonal_block_diagonal_indices=Vector{Ti}[],
+                             n_subgroups=0, subgroup_i=-1, subgroup_size=0,
+                             block_comm=shared_comm, bottom_vector_indices=Ti[],
+                             local_bottom_vector_indices=Ti[],
                              local_bottom_vector_no_overlap_indices=Ti[],
                              local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
                              local_bottom_vector_repeat_indices=Ti[],
@@ -997,6 +1000,33 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             end
         end
 
+        # Get the index within bottom_vector_indices of the entries in
+        # block_boundary_indices.  The following search relies on both
+        # `a_block_off_diagonal_bottom_vector_indices` and `boundary_indices`
+        # being sorted.
+        a_block_off_diagonal_bottom_vector_indices = [Ti[] for _ ∈ 1:length(block_boundary_indices)]
+        for (this_a_block_B_column_indices, this_block_boundary_indices) ∈ zip(a_block_off_diagonal_bottom_vector_indices, block_boundary_indices)
+            nbbi = length(this_block_boundary_indices)
+            if nbbi == 0
+                continue
+            end
+            b_count = max(searchsortedlast(boundary_indices, first(this_block_boundary_indices)) - 1, 1)
+            bb_count = 1
+            while b_count ≤ length(boundary_indices) && bb_count ≤ nbbi
+                i = boundary_indices[b_count]
+                bi = this_block_boundary_indices[bb_count]
+                if i == bi
+                    push!(this_a_block_B_column_indices, b_count)
+                    b_count += 1
+                    bb_count += 1
+                elseif i < bi
+                    b_count += 1
+                else
+                    bb_count += 1
+                end
+            end
+        end
+
         # Sort the periodic pairs by the 'destination' indices. This turns out to be
         # convenient in a couple of places.
         local_bottom_vector_periodic_pairs = sortslices(global_bottom_vector_periodic_pairs;
@@ -1100,6 +1130,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          iblock_list=iblock_list,
                          local_top_vector_a_block_indices=a_block_indices,
                          a_block_off_diagonal_indices=a_block_off_diagonal_indices,
+                         a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
@@ -1378,7 +1409,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             end
             use_shared_blocks = (level > 1 && length(this_level_info.local_top_vector_a_block_indices) == 1
                                  && block_comm_size > 1)
-            if block_comm_size == shared_comm_size
+            if block_comm_size == 1
+                # No shared-memory parallelism.
+                block_allocate_shared_float = (args...) -> Vector{data_type}(undef, args...)
+                block_allocate_shared_int = (args...) -> Vector{ind_type}(undef, args...)
+                block_synchronize_shared = () -> nothing
+            elseif block_comm_size == shared_comm_size
                 block_allocate_shared_float = allocate_shared_float
                 block_allocate_shared_int = allocate_shared_int
                 if synchronize_shared === nothing
@@ -1400,7 +1436,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              level_allocate_shared_int,
                                              block_synchronize_shared,
                                              block_allocate_shared_float,
-                                             block_allocate_shared_int, check_lu)
+                                             block_allocate_shared_int,
+                                             right_multiplication_buffer_storage,
+                                             check_lu)
         end
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)

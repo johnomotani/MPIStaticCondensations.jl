@@ -211,11 +211,11 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
 
         sc_matrix = schur_complement.matrix
         C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B
-        synchronize_shared = sc.synchronize_shared
+        synchronize_shared = C.synchronize_shared
 
         mul_blocks = C.right_multiplication_buffer_blocks
         Ainv_dot_B_blocks = Ainv_dot_B.blocks
-        block_output_inds = C.block_rowinds # This is identical to Ainv_dot_B.block_colinds
+        block_output_inds = C.bottom_block_rowinds
 
         colptr = sc_matrix.colptr
         rowval = sc_matrix.rowval
@@ -272,7 +272,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
     @inbounds begin
         sc_matrix = schur_complement.matrix
         C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B
-        synchronize_shared = sc.synchronize_shared
+        synchronize_shared = C.synchronize_shared
         C_block = C.block
         mul_block = C.right_multiplication_buffer_block
         block_output_inds = C.block_rowinds

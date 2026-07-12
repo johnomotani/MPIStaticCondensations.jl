@@ -51,8 +51,8 @@ function add_D_to_schur_complement!(schur_complement::BlockS, A)
         nrow = length(sc_indices)
         last_full_row = sc_indices[end]
         for j ∈ sc_column_range_partial
-            first_i = sc_colptr[j1]
-            last_i = sc_colptr[j1+1] - 1
+            first_i = sc_colptr[j]
+            last_i = sc_colptr[j+1] - 1
             if last_i < first_i
                 continue
             end

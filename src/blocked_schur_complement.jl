@@ -1,4 +1,4 @@
-struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu}
+struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu}
     A_factorization::TA
     B::TB
     C::TC
@@ -12,6 +12,7 @@ struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu}
                  synchronize_shared::Fsync, allocate_shared_float::Faf,
                  allocate_shared_int::Fai, block_synchronize_shared::Fbsync,
                  block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
+                 right_multiplication_buffer_storage,
                  check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
 
         timer = schur_complement_factorization.timer
@@ -63,7 +64,7 @@ struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu}
                 C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,level_info.local_bottom_vector_size)
                 C_block_row_inds_full = level_info.a_block_off_diagonal_indices[1]
 
-               C_nrow = length(C_block_row_inds_full)
+               C_nrow = length(level_info.a_block_off_diagonal_indices[1])
                C_rows_per_proc = (C_nrow + block_comm_size - 1) ÷ block_comm_size
                if isempty(level_info.local_top_vector_a_block_indices[1])
                    # There are no entries in the block handled by this process, so
@@ -77,7 +78,8 @@ struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu}
                 block_hypercube_position =
                     get_C_hypercube_position(level_info.iblock_list[:,1])
 
-                C = BlockCShared{data_type}(C_block_row_inds_full,
+                C = BlockCShared{data_type}(level_info.a_block_off_diagonal_indices[1],
+                                            level_info.a_block_off_diagonal_bottom_vector_indices,
                                             C_partial_row_range,
                                             level_info.local_top_vector_a_block_indices[1],
                                             level_info.local_top_vector_indices,
@@ -95,26 +97,25 @@ struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu}
                                             synchronize_shared)
             end
         else
-            this_A_block_solver = get_block_diagonal_solver(level_info, data_type,
-                                                            level==1, false, timer,
-                                                            check_lu)
+            A_factorization = get_block_diagonal_solver(level_info, data_type, level==1,
+                                                        false, timer, check_lu)
             B = BlockAinvDotBSerial{data_type}(level_info.local_top_vector_a_block_indices,
                                                level_info.a_block_off_diagonal_indices)
+            nbottom = length(level_info.local_bottom_vector_indices)
             C_vector_intermediate_buffer =
-                level_allocate_shared_float(C_buffer_ncopies,
-                                            level_info.local_bottom_vector_size)
+                allocate_shared_float(C_buffer_ncopies, nbottom)
             if shared_comm_rank == 0
                 C_vector_intermediate_buffer .= 0.0
             end
-            C_vector_points_per_proc = (level_info.local_bottom_vector_size + shared_comm_size - 1) ÷ shared_comm_size
-            C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc, level_info.local_bottom_vector_size)
-            C_block_row_inds = level_info.a_block_off_diagonal_indices
+            C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
+            C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
 
             C_block_hypercube_positions =
                 [get_C_hypercube_position(iblock)
                  for iblock ∈ eachcol(level_info.iblock_list)]
 
-            C = BlockCSerial{data_type}(C_block_row_inds,
+            C = BlockCSerial{data_type}(level_info.a_block_off_diagonal_indices,
+                                        level_info.a_block_off_diagonal_bottom_vector_indices,
                                         level_info.local_top_vector_a_block_indices,
                                         level_info.local_top_vector_indices,
                                         level_info.local_bottom_vector_indices,
@@ -129,7 +130,15 @@ struct BlockedSchurComplementSolver{TA,TB,TC,TS,TSF,TAiu}
 end
         end
 
-        return new{typeof(A_factorization),typeof(B),typeof(C),typeof(schur_complement),typeof(schur_complement_factorization),typeof(Ainv_dot_u)}(
+        if use_shared_blocks
+            # Only one block per process.
+            Ainv_dot_u = block_allocate_shared_float(length(level_info.local_top_vector_a_block_indices[1]))
+        else
+            Ainv_dot_u = [block_allocate_shared_float(length(bi))
+                          for bi ∈ level_info.local_top_vector_a_block_indices]
+        end
+
+        return new{data_type,typeof(A_factorization),typeof(B),typeof(C),typeof(schur_complement),typeof(schur_complement_factorization),typeof(Ainv_dot_u)}(
                A_factorization, B, C, schur_complement, schur_complement_factorization,
                Ainv_dot_u)
     end
@@ -183,7 +192,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             B = sc.B
             C = sc.C
             Ainv_dot_u = sc.Ainv_dot_u
-            local_bottom_vector_range_partial = C.vector_range
+            bottom_sub_range = C.vector_range
             synchronize_shared = schur_complement_factorization.synchronize_shared
 
             @sc_timeit timer "Ainv.u" begin
@@ -193,11 +202,11 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             @sc_timeit timer "v-C.Ainv.u" begin
                 # Initialise to zero, because when C does not include all rows, the matrix
                 # multiplication below would not initialise all elements.
-                y[local_bottom_vector_range_partial] .= 0.0
+                y[bottom_sub_range] .= 0.0
                 mul_C_dot_Ainv_dot_u!(y, sc.C, Ainv_dot_u)
 
-                for i ∈ local_bottom_vector_range_partial
-                    y[i1] += v[i2]
+                for i ∈ bottom_sub_range
+                    y[i] += v[i]
                 end
                 synchronize_shared()
             end

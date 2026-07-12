@@ -1,6 +1,7 @@
 struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     blocks::Vector{Tb}
     block_rowinds::Vector{Vector{Ti}}
+    bottom_block_rowinds::Vector{Vector{Ti}}
     block_colinds::Vector{Vector{Ti}}
     block_hypercube_positions::Vector{Ti}
     output_buffer_ncopies::Ti
@@ -13,6 +14,7 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     synchronize_shared::Fs
 
     function BlockCSerial{Tf}(block_rowinds::Vector{Vector{Ti}},
+                              bottom_block_rowinds::Vector{Vector{Ti}},
                               block_colinds::Vector{Vector{Ti}},
                               local_top_vector_indices::Vector{Ti},
                               local_bottom_vector_indices::Vector{Ti},
@@ -27,6 +29,7 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
         non_empty_blocks = [!isempty(ri) && !isempty(ci)
                             for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
         block_rowinds = block_rowinds[non_empty_blocks]
+        bottom_block_rowinds = bottom_block_rowinds[non_empty_blocks]
         block_colinds = block_colinds[non_empty_blocks]
         if matrix_template === nothing
             blocks = Matrix{Tf}[]
@@ -67,17 +70,18 @@ struct BlockCSerial{Tb,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
         return new{eltype(blocks),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(vector_intermediate_buffer),Fsb,Fs}(
-                   blocks, block_rowinds, block_colinds, block_hypercube_positions,
-                   output_buffer_ncopies, right_multiplication_buffer_blocks,
-                   vector_buffer_blocks_in, vector_buffer_blocks_out,
-                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
-                   synchronize_shared)
+                   blocks, block_rowinds, bottom_block_rowinds, block_colinds,
+                   block_hypercube_positions, output_buffer_ncopies,
+                   right_multiplication_buffer_blocks, vector_buffer_blocks_in,
+                   vector_buffer_blocks_out, vector_intermediate_buffer, vector_range,
+                   block_synchronize_shared, synchronize_shared)
     end
 end
 
 struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
     block_rowinds::Vector{Ti}
+    bottom_block_rowinds::Vector{Ti}
     block_colinds::Vector{Ti}
     partial_block_colinds::Vector{Ti}
     partial_col_range::UnitRange{Ti}
@@ -127,6 +131,7 @@ struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     # as the dimensions) is translated back to an integer to give the intermediate buffer
     # column.
     function BlockCShared{Tf}(block_rowinds_full::Vector{Ti},
+                              bottom_block_rowinds_full::Vector{Ti},
                               partial_row_range::UnitRange{Ti}, block_colinds::Vector{Ti},
                               local_top_vector_indices::Vector{Ti},
                               local_bottom_vector_indices::Vector{Ti},
@@ -141,6 +146,7 @@ struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
                               block_comm_size::Integer,
                               synchronize_shared::Fs) where {Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
         block_rowinds = block_rowinds_full[partial_row_range]
+        bottom_block_rowinds = bottom_block_rowinds_full[partial_row_range]
         nrow_full = length(block_rowinds_full)
         nrow = length(block_rowinds)
         ncol = length(block_colinds)
@@ -170,10 +176,10 @@ struct BlockCShared{Tb,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
         return new{typeof(block),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
-                   block, block_rowinds, block_colinds, partial_block_colinds,
-                   partial_col_range, block_hypercube_position, output_buffer_ncopies,
-                   right_multiplication_buffer_block, block_rowinds_full,
-                   vector_buffer_block_in, vector_buffer_block_out,
+                   block, block_rowinds, bottom_block_rowinds, block_colinds,
+                   partial_block_colinds, partial_col_range, block_hypercube_position,
+                   output_buffer_ncopies, right_multiplication_buffer_block,
+                   block_rowinds_full, vector_buffer_block_in, vector_buffer_block_out,
                    vector_intermediate_buffer_local, vector_intermediate_buffer,
                    vector_range, block_synchronize_shared, synchronize_shared)
     end
