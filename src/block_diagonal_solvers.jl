@@ -178,6 +178,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, full_A::AbstractM
                     update_sparse_matrix!(buffer, full_A, inds, inds)
                     lu!(s, buffer; reuse_symbolic=false, check=check_lu)
                 else
+# Could make this branch more efficient when A is a (view of a) sparse matrix?
                     factors = s.factors
                     for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
                         factors[i1,j1] = full_A[i2,j2]
@@ -198,6 +199,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared, full_A::AbstractM
         partial_col_range = block_diagonal_solver.partial_col_range
         synchronize_shared = block_diagonal_solver.synchronize_shared
 
+# Could make this branch more efficient when A is a (view of a) sparse matrix?
         for (j1, j2) ∈ zip(partial_col_range, partial_block_indices), (i1, i2) ∈ enumerate(block_indices)
             factors[i1,j1] = full_A[i2,j2]
         end
@@ -312,6 +314,7 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T}
 end
 function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
                u::Matrix{T}) where T
+# This is probably a sub-optimal implementation? Parallelise over columns of x/u?
     for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
         ldiv!(this_x, block_diagonal_solver, this_u)
     end
@@ -319,6 +322,7 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{T}
 end
 function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
                u::AbstractMatrix{T}) where T
+# ...and maybe separately parallelise this? This is probably a sub-optimal implementation? Parallelise over columns of x/u?
     return ldiv!(u, block_diagonal_solver, u)
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{T}, u::Matrix{T}) where T

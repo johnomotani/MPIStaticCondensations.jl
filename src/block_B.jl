@@ -320,10 +320,12 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
 
         synchronize_shared()
 
+@sc_timeit timer "set schur_complement to -C.A^-1.B" begin
         flat_range_partial = schur_complement.flat_range_partial
         if !isempty(flat_range_partial)
             @views sum!(sc_matrix.nzval[flat_range_partial]', C_dot_Ainv_dot_B[:,flat_range_partial])
         end
+end
 
         return nothing
     end

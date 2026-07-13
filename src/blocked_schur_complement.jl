@@ -51,10 +51,12 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
         C_buffer_ncopies = 2^length(dimensions)
 
+@sc_timeit timer "level $level schur_complement_buffer" begin
         schur_complement = BlockS(dimensions, level_info.bottom_vector_indices,
                                   level_info.local_bottom_vector_indices,
                                   level_info.block_sizes, C_buffer_ncopies, shared_comm,
                                   allocate_shared_float, allocate_shared_int)
+end
 
         if level == 1 || !sparse_C_blocks
             matrix_template = nothing
@@ -71,18 +73,23 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                 B = nothing
                 C = nothing
             else
+@sc_timeit timer "level $level get_block_diagonal_solver" begin
                 A_factorization = get_block_diagonal_solver(level_info, data_type,
                                                             level==1, use_shared_blocks,
                                                             timer, check_lu,
                                                             block_allocate_shared_float,
                                                             block_allocate_shared_int,
                                                             block_synchronize_shared)
+end
+@sc_timeit timer "level $level Ainv_dot_B_buffer" begin
                 B = BlockAinvDotBShared{data_type}(level_info.local_top_vector_a_block_indices[1],
                                                    level_info.a_block_off_diagonal_indices[1],
                                                    level_info.a_block_off_diagonal_bottom_vector_indices[1],
                                                    block_comm_rank, block_comm_size,
                                                    block_allocate_shared_float,
                                                    block_synchronize_shared)
+end
+@sc_timeit timer "level $level C setup" begin
                 C_vector_intermediate_buffer =
                     allocate_shared_float(C_buffer_ncopies, nbottom)
                 if shared_comm_rank == 0
@@ -106,6 +113,16 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                 block_hypercube_position =
                     get_C_hypercube_position(level_info.iblock_list[:,1])
 
+end
+@sc_timeit timer "level $level C creation" begin
+#println("level=$level")
+#println("level_info.a_block_off_diagonal_indices[1]=$(level_info.a_block_off_diagonal_indices[1])")
+#println("C_partial_row_range=$C_partial_row_range")
+#println("C_vector_intermediate_buffer=$C_vector_intermediate_buffer")
+#println("C_vector_range=$C_vector_range")
+#println("C_vector_init_range=$C_vector_init_range")
+#println("C_matrix_init_range=$C_matrix_init_range")
+#println("level_info.subgroup_i=", level_info.subgroup_i)
                 C = BlockCShared{data_type}(level_info.a_block_off_diagonal_indices[1],
                                             level_info.a_block_off_diagonal_bottom_vector_indices[1],
                                             C_partial_row_range,
@@ -123,13 +140,19 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             block_synchronize_shared,
                                             block_comm_rank, block_comm_size,
                                             synchronize_shared)
+end
             end
         else
+@sc_timeit timer "level $level get_block_diagonal_solver" begin
             A_factorization = get_block_diagonal_solver(level_info, data_type, level==1,
                                                         false, timer, check_lu)
+end
+@sc_timeit timer "level $level Ainv_dot_B_buffer" begin
             B = BlockAinvDotBSerial{data_type}(level_info.local_top_vector_a_block_indices,
                                                level_info.a_block_off_diagonal_indices,
                                                level_info.a_block_off_diagonal_bottom_vector_indices)
+end
+@sc_timeit timer "level $level C setup" begin
             C_vector_intermediate_buffer =
                 allocate_shared_float(C_buffer_ncopies, nbottom)
             if shared_comm_rank == 0
@@ -142,6 +165,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                 [get_C_hypercube_position(iblock)
                  for iblock ∈ eachcol(level_info.iblock_list)]
 
+end
+@sc_timeit timer "level $level C creation" begin
             C = BlockCSerial{data_type}(level_info.a_block_off_diagonal_indices,
                                         level_info.a_block_off_diagonal_bottom_vector_indices,
                                         level_info.local_top_vector_a_block_indices,
@@ -155,6 +180,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                         C_vector_range,
                                         block_synchronize_shared,
                                         synchronize_shared)
+end
         end
 
         if use_shared_blocks
@@ -195,14 +221,26 @@ function lu!(sc::BlockedSchurComplementSolver, full_A)
             copy_C_submatrix!(C, full_A)
         end
         @sc_timeit timer "schur_complement" begin
+@sc_timeit timer "sync 1" begin
             synchronize_shared()
+end
 
+@sc_timeit timer "C.(A^-1.B)" begin
             mul_C_Ainv_dot_B!(schur_complement, C, B)
+end
+@sc_timeit timer "sync 2" begin
             synchronize_shared()
+end
+@sc_timeit timer "add D to schur_complement" begin
             add_D_to_schur_complement!(schur_complement, full_A)
+end
+@sc_timeit timer "sync 3" begin
             synchronize_shared()
+end
 
+@sc_timeit timer "parallel LU schur_complement" begin
             lu!(schur_complement_factorization, schur_complement.matrix)
+end
         end
     end
 
