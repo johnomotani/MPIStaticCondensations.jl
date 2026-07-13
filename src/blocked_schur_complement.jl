@@ -10,12 +10,12 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
     function BlockedSchurComplementSolver(
                  dimensions::Vector{<:Dimension}, level::Integer, level_info,
-                 schur_complement_buffer_list, schur_complement_factorization,
-                 use_shared_blocks::Bool, sparse_C_blocks::Bool, shared_comm,
-                 synchronize_shared::Fsync, allocate_shared_float::Faf,
-                 allocate_shared_int::Fai, block_synchronize_shared::Fbsync,
-                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
-                 right_multiplication_buffer_storage,
+                 schur_complement_buffer_list, second_last_schur_complement_buffer,
+                 schur_complement_factorization, use_shared_blocks::Bool,
+                 sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
+                 allocate_shared_float::Faf, allocate_shared_int::Fai,
+                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
+                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
                  check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
@@ -50,11 +50,15 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             block_comm_size = MPI.Comm_size(block_comm)
         end
 
-        C_buffer_ncopies = 2^length(dimensions)
+        n_hypercube_positions = 2^sum(level_info.nblock .> 1)
 
-        schur_complement = BlockS(schur_complement_buffer_list[level],
-                                  level_info.local_bottom_vector_indices,
-                                  C_buffer_ncopies, shared_comm, allocate_shared_float)
+        if level ≤ length(schur_complement_buffer_list)
+            this_sc_buffer = schur_complement_buffer_list[level]
+        else
+            this_sc_buffer = second_last_schur_complement_buffer
+        end
+        schur_complement = BlockS(this_sc_buffer, level_info.local_bottom_vector_indices,
+                                  shared_comm, allocate_shared_float)
 
         if level == 1 || !sparse_C_blocks
             matrix_template = nothing
@@ -84,7 +88,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                                    block_allocate_shared_float,
                                                    block_synchronize_shared)
                 C_vector_intermediate_buffer =
-                    allocate_shared_float(C_buffer_ncopies, nbottom)
+                    allocate_shared_float(n_hypercube_positions, nbottom)
                 if shared_comm_rank == 0
                     C_vector_intermediate_buffer .= 0.0
                 end
@@ -104,7 +108,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                end
 
                 block_hypercube_position =
-                    get_C_hypercube_position(level_info.iblock_list[:,1])
+                    get_hypercube_position(level_info.iblock_list[:,1], level_info.nblock)
 
                 C = BlockCShared{data_type}(level_info.a_block_off_diagonal_indices[1],
                                             level_info.a_block_off_diagonal_bottom_vector_indices[1],
@@ -112,17 +116,14 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             level_info.local_top_vector_a_block_indices[1],
                                             level_info.local_top_vector_indices,
                                             level_info.local_bottom_vector_indices,
-                                            matrix_template,
-                                            block_hypercube_position,
-                                            C_buffer_ncopies,
+                                            matrix_template, block_hypercube_position,
+                                            n_hypercube_positions,
                                             right_multiplication_buffer_storage,
-                                            C_vector_intermediate_buffer,
-                                            C_vector_range,
+                                            C_vector_intermediate_buffer, C_vector_range,
                                             level_info.subgroup_i,
                                             block_allocate_shared_float,
-                                            block_synchronize_shared,
-                                            block_comm_rank, block_comm_size,
-                                            synchronize_shared)
+                                            block_synchronize_shared, block_comm_rank,
+                                            block_comm_size, synchronize_shared)
             end
         else
             A_factorization = get_block_diagonal_solver(level_info, data_type, level==1,
@@ -131,30 +132,28 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                                level_info.a_block_off_diagonal_indices,
                                                level_info.a_block_off_diagonal_bottom_vector_indices)
             C_vector_intermediate_buffer =
-                allocate_shared_float(C_buffer_ncopies, nbottom)
+                allocate_shared_float(n_hypercube_positions, nbottom)
             if shared_comm_rank == 0
                 C_vector_intermediate_buffer .= 0.0
             end
             C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
             C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
 
-            C_block_hypercube_positions =
-                [get_C_hypercube_position(iblock)
-                 for iblock ∈ eachcol(level_info.iblock_list)]
+            block_hypercube_positions =
+                [get_hypercube_position(iblock, level_info.nblock)
+                 for (iblock, bi) ∈ zip(eachcol(level_info.iblock_list), level_info.local_top_vector_a_block_indices)
+                 if !isempty(bi)]
 
             C = BlockCSerial{data_type}(level_info.a_block_off_diagonal_indices,
                                         level_info.a_block_off_diagonal_bottom_vector_indices,
                                         level_info.local_top_vector_a_block_indices,
                                         level_info.local_top_vector_indices,
                                         level_info.local_bottom_vector_indices,
-                                        matrix_template,
-                                        C_block_hypercube_positions,
-                                        C_buffer_ncopies,
+                                        matrix_template, block_hypercube_positions,
+                                        n_hypercube_positions,
                                         right_multiplication_buffer_storage,
-                                        C_vector_intermediate_buffer,
-                                        C_vector_range,
-                                        block_synchronize_shared,
-                                        synchronize_shared)
+                                        C_vector_intermediate_buffer, C_vector_range,
+                                        block_synchronize_shared, synchronize_shared)
         end
 
         if use_shared_blocks
@@ -162,7 +161,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             Ainv_dot_u = block_allocate_shared_float(length(level_info.local_top_vector_a_block_indices[1]))
         else
             Ainv_dot_u = [block_allocate_shared_float(length(bi))
-                          for bi ∈ level_info.local_top_vector_a_block_indices]
+                          for bi ∈ level_info.local_top_vector_a_block_indices if !isempty(bi)]
         end
 
         return new{data_type,typeof(A_factorization),typeof(B),typeof(C),typeof(schur_complement),typeof(schur_complement_factorization),typeof(Ainv_dot_u),Fsync,typeof(timer)}(

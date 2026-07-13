@@ -616,6 +616,33 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
     end
 end
 
+function get_hypercube_position(iblock::AbstractVector{<:Integer}, nblock)
+    # Use `block_sizes .> 1` filter so that we only increment the 'hypercube position' in
+    # dimensions with a block size greater than one. For dimensions where the block size
+    # is 1, there cannot be overlap between different blocks (there is only one block!),
+    # so there is no need to allow for different positions in the output buffer.
+    if all(nblock .== 1)
+        return 1
+    else
+        return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock[nblock .> 1])) + 1
+    end
+end
+function get_hypercube_position(flat_iblock::Integer, nblock)
+    iblock = zeros(typeof(flat_iblock), length(nblock))
+
+    # Convert flat_iblock to 0-based index for convenience.
+    flat_iblock -= 1
+
+    for (d, n) ∈ collect(enumerate(nblock))
+        flat_iblock, iblock[d] = divrem(flat_iblock, n)
+    end
+
+    # Convert iblock back to 1-based indices.
+    iblock .+= 1
+
+    return get_hypercube_position(iblock, nblock)
+end
+
 struct FakeComm
     rank::Int64
     size::Int64
@@ -631,6 +658,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     #level_dimensions::Vector{Dimension{Ti}}
     has_periodic::Bool
     block_sizes::Vector{Ti}
+    nblock::Vector{Ti}
     global_size::Ti
     global_bottom_vector_size::Ti
     top_vector_indices::Vector{Ti}
@@ -657,8 +685,8 @@ end
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
 # for testing of the index generation.
 function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti},
-                      block_sizes::Vector{Ti}, global_size::Ti, is_top_level::Bool,
-                      is_bottom_level::Bool,
+                      block_sizes::Vector{Ti}, nblock::Vector{Ti}, global_size::Ti,
+                      is_top_level::Bool, is_bottom_level::Bool,
                       distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
                       shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
@@ -671,7 +699,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         if shared_comm == MPI.COMM_NULL
             # This processor does no work on this level, so just fill level_info with dummy
             # values.
-            return LevelInfo(; has_periodic, block_sizes, global_size=0,
+            return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
                              global_bottom_vector_size=0, top_vector_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
@@ -782,7 +810,19 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         if subgroup_i < 0
             this_proc_blocks = 1:0
         else
-            this_proc_blocks = subgroup_i*blocks_per_proc+1:min((subgroup_i+1)*blocks_per_proc,total_nblocks)
+            # To ensure the best possible load balance, we want to have as close as
+            # possible to the same number of blocks from each hypercube position on each
+            # process (when there are multiple processes per subgroup there is only one
+            # block per subgroup, so this load balance optimisation is only relevant when
+            # there is one process per subgroup and multiple blocks per subgroup). To
+            # achieve this, first sort the blocks by hypercube position, then assign the
+            # blocks to subgroups in round-robin style from the sorted list.
+            flat_iblock_list = collect(1:total_nblocks)
+            all_hypercube_positions = [get_hypercube_position(iblock, nblock)
+                                       for iblock ∈ flat_iblock_list]
+            hp_sortinds = sortperm(all_hypercube_positions)
+            flat_iblock_list = flat_iblock_list[hp_sortinds]
+            this_proc_blocks = flat_iblock_list[subgroup_i+1:n_subgroups:end]
         end
         block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
         block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
@@ -1125,7 +1165,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             end
         end
 
-        return LevelInfo(; has_periodic, block_sizes, global_size, global_bottom_vector_size,
+        return LevelInfo(; has_periodic, block_sizes, nblock, global_size,
+                         global_bottom_vector_size,
                          top_vector_indices=global_top_vector_indices,
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
@@ -1255,6 +1296,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     block_sizes_list = [ones(ind_type, length(dimensions))]
     nelement_list = [d.nelement for d ∈ dimensions]
     nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+    nblock_list = [nelement_local_list]
     total_local_nblock = prod(nelement_local_list)
     total_local_nblock_list = [total_local_nblock]
     while total_local_nblock > 1
@@ -1263,6 +1305,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
         total_local_nblock = prod(local_nblock_list)
         push!(total_local_nblock_list, total_local_nblock)
+        push!(nblock_list, local_nblock_list)
         push!(block_sizes_list, this_block_sizes)
     end
 
@@ -1279,8 +1322,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_global_size = prod(d.n for d ∈ dimensions)
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
-    for (level, (block_sizes, total_local_nblock)) ∈ enumerate(zip(block_sizes_list,
-                                                                   total_local_nblock_list))
+    for (level, (block_sizes, nblock, total_local_nblock)) ∈
+            enumerate(zip(block_sizes_list, nblock_list, total_local_nblock_list))
         if level == 1 || level == n_levels
             # Only handle periodicity on the final level
             dims = dimensions
@@ -1302,7 +1345,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         # Keep selecting the subset of `1:prod(d.n_local for d ∈ dimensions)` that is
         # involved in each successive level.
-        this_level_info = split_matrix(dims, level_indices, block_sizes,
+        this_level_info = split_matrix(dims, level_indices, block_sizes, nblock,
                                        level_global_size, level==1, level==n_levels,
                                        distributed_comm, level_shared_comm)
         level_info_list[level] = this_level_info
@@ -1372,7 +1415,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
-                                 copy_input_to_dense_buffers=last_level_info.has_periodic,
+                                 copy_input_to_dense_buffers=(n_levels == 1 && last_level_info.has_periodic),
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
@@ -1391,8 +1434,21 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              li.bottom_vector_indices,
                                              li.bottom_vector_indices; ind_type)
          for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
-                                  level_allocate_shared_float_list[1:end-1],
-                                  level_allocate_shared_int_list[1:end-1])]
+                                  level_allocate_shared_float_list[1:end-2],
+                                  level_allocate_shared_int_list[1:end-2])]
+    schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
+    if n_levels > 1
+        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
+            nbuff = length(level_info_list[end-1].bottom_vector_indices)
+            second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
+            push!(schur_complement_nnz_list, length(second_last_schur_complement_buffer))
+        else
+            second_last_schur_complement_buffer = nothing
+            push!(schur_complement_nnz_list, 0)
+        end
+    else
+        second_last_schur_complement_buffer = nothing
+    end
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
@@ -1444,6 +1500,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
+                                             second_last_schur_complement_buffer,
                                              this_level_schur_solver, use_shared_blocks,
                                              sparse_C_blocks, this_level_shared_comm,
                                              level_synchronize_shared,
