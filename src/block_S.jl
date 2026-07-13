@@ -5,20 +5,11 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
     column_range_partial::UnitRange{Ti}
     flat_range_partial::UnitRange{Ti}
 
-    function BlockS(dimensions::Vector{<:Dimension}, bottom_vector_indices,
-                    local_bottom_vector_indices,
-                    block_sizes::Union{Vector{<:Integer},Nothing}, C_buffer_ncopies,
-                    shared_comm, allocate_shared_float::F1,
-                    allocate_shared_int::F2) where {F1,F2}
+    function BlockS(matrix, local_bottom_vector_indices, C_buffer_ncopies, shared_comm,
+                    allocate_shared_float::F) where {F}
         Ti = eltype(local_bottom_vector_indices)
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
-
-        matrix = get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
-                                                     allocate_shared_float,
-                                                     allocate_shared_int, block_sizes,
-                                                     bottom_vector_indices,
-                                                     bottom_vector_indices; ind_type=Ti)
 
         n_flat = nnz(matrix)
         C_dot_Ainv_dot_B = allocate_shared_float(C_buffer_ncopies, n_flat)

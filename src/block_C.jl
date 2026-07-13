@@ -49,9 +49,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
             if matrix_template === nothing
                 push!(blocks, zeros(Tf, nrow, ncol))
             else
-                b = get_partial_FixedSparseCSC_buffer(local_bottom_vector_indices[ri],
-                                                      local_top_vector_indices[ci],
-                                                      matrix_template, Tf)
+                b = get_partial_FixedSparseCSC_buffer(ri, ci, matrix_template, Tf)
                 push!(blocks, b)
             end
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
@@ -153,8 +151,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
         if matrix_template === nothing
             block = zeros(Tf, nrow, ncol)
         else
-            block = get_partial_FixedSparseCSC_buffer(local_bottom_vector_indices[block_rowinds],
-                                                      local_top_vector_indices[block_colinds],
+            block = get_partial_FixedSparseCSC_buffer(block_rowinds, block_colinds,
                                                       matrix_template, Tf)
         end
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size

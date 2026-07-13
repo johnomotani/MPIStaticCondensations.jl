@@ -1385,6 +1385,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_allocate_shared_int_list =
         [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
          for li ∈ level_info_list]
+    schur_complement_buffer_list =
+        [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
+                                             lai, li.block_sizes,
+                                             li.bottom_vector_indices,
+                                             li.bottom_vector_indices)
+         for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
+                                  level_allocate_shared_float_list[1:end-1],
+                                  level_allocate_shared_int_list[1:end-1])]
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
@@ -1435,6 +1443,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
+                                             schur_complement_buffer_list,
                                              this_level_schur_solver, use_shared_blocks,
                                              sparse_C_blocks, this_level_shared_comm,
                                              level_synchronize_shared,
