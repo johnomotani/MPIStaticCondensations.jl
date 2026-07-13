@@ -41,8 +41,13 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
         shared_comm_rank = MPI.Comm_rank(shared_comm)
         shared_comm_size = MPI.Comm_size(shared_comm)
         block_comm = level_info.block_comm
-        block_comm_rank = MPI.Comm_rank(block_comm)
-        block_comm_size = MPI.Comm_size(block_comm)
+        if block_comm == MPI.COMM_NULL
+            block_comm_rank = 0
+            block_comm_size = 1
+        else
+            block_comm_rank = MPI.Comm_rank(block_comm)
+            block_comm_size = MPI.Comm_size(block_comm)
+        end
 
         C_buffer_ncopies = 2^length(dimensions)
 
