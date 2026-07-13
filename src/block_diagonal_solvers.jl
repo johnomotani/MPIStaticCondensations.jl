@@ -591,6 +591,10 @@ function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T}
         return nothing
     end
 end
+function ldiv_block_Bmatrix!(block_diagonal_solver::MPIStaticCondensationNull{T},
+                             B) where T
+    return nothing
+end
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
                        B::Matrix{T}) where T
     # When not using BlockAinvDotBShared, this function will use a different

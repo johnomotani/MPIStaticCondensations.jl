@@ -1639,7 +1639,9 @@ function lu!(solver::MPIStaticCondensationNull, A::AbstractMatrix)
     return nothing
 end
 
-function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationNull{T},
+# Here `X` might be `Vector{T}` or `Vector{Vector{T}}`, so don't make type specification
+# for it any stricter.
+function ldiv!(X::AbstractVector, solver::MPIStaticCondensationNull{T},
                U::AbstractVector{T}) where T
     return nothing
 end
