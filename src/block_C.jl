@@ -413,14 +413,14 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
         vector_intermediate_buffer = C.vector_intermediate_buffer
         vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
         vec_buffer_block_out = C.vector_buffer_block_out
-        block_rowinds = C.block_rowinds
+        bottom_block_rowinds = C.bottom_block_rowinds
         synchronize_shared = C.synchronize_shared
 
         # The rows are labelled by block_hypercube_position, so there are no overlaps, and
         # we can directly set entries, instead of adding to them, and so do not need to
         # zero-initialise the output buffer.
         mul!(vec_buffer_block_out, block, Ainv_dot_u)
-        for (i2, i1) ∈ enumerate(block_rowinds)
+        for (i2, i1) ∈ enumerate(bottom_block_rowinds)
             vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
         end
 
