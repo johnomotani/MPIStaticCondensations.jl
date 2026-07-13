@@ -130,7 +130,6 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu}
                                         C_vector_range,
                                         block_synchronize_shared,
                                         synchronize_shared)
-end
         end
 
         if use_shared_blocks

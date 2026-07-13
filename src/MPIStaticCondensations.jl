@@ -677,7 +677,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),
                              a_block_off_diagonal_indices=Vector{Ti}[],
-                             a_block_off_diagonal_block_diagonal_indices=Vector{Ti}[],
+                             a_block_off_diagonal_bottom_vector_indices=Vector{Ti}[],
                              n_subgroups=0, subgroup_i=-1, subgroup_size=0,
                              block_comm=shared_comm, bottom_vector_indices=Ti[],
                              local_bottom_vector_indices=Ti[],
@@ -1319,35 +1319,39 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                   && length(last_level_info.local_top_vector_a_block_indices) == 1
                                   && MPI.Comm_size(last_level_info.block_comm) > 1)
         # Always use 'shared memory' solver on last level
-        block_comm_rank = MPI.Comm_rank(last_level_info.block_comm)
-        block_comm_size = MPI.Comm_size(last_level_info.block_comm)
-        if block_comm_size == shared_comm_size
-            last_block_allocate_shared_float = allocate_shared_float
-            last_block_allocate_shared_int = allocate_shared_int
-            if synchronize_shared === nothing
-                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+        if last_level_info.block_comm != MPI.COMM_NULL
+            block_comm_rank = MPI.Comm_rank(last_level_info.block_comm)
+            block_comm_size = MPI.Comm_size(last_level_info.block_comm)
+            if block_comm_size == shared_comm_size
+                last_block_allocate_shared_float = allocate_shared_float
+                last_block_allocate_shared_int = allocate_shared_int
+                if synchronize_shared === nothing
+                    last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+                else
+                    last_block_synchronize_shared = synchronize_shared
+                end
             else
-                last_block_synchronize_shared = synchronize_shared
+                last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info.block_comm)
+                last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info.block_comm)
+                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
             end
+            # Fake the LevelInfo argument here, because this solver will be passed
+            # matrices and rhs/solution vectors that do not need the 'top vector' entries
+            # selecting out of them.
+            ntop = length(last_level_info.local_top_vector_indices)
+            fake_level_info = (global_size=ntop, global_bottom_vector_size=0,
+                               local_top_vector_a_block_indices=(1:ntop,),
+                               a_block_off_diagonal_indices=(1:0,),
+                               block_comm=last_level_info.block_comm)
+            last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
+                                                            length(level_info_list) == 1,
+                                                            true, timer, check_lu,
+                                                            last_block_allocate_shared_float,
+                                                            last_block_allocate_shared_int,
+                                                            last_block_synchronize_shared)
         else
-            last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info.block_comm)
-            last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info.block_comm)
-            last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+            last_A_block_solver = MPIStaticCondensationNull{data_type}()
         end
-        # Fake the LevelInfo argument here, because this solver will be passed
-        # matrices and rhs/solution vectors that do not need the 'top vector' entries
-        # selecting out of them.
-        ntop = length(last_level_info.local_top_vector_indices)
-        fake_level_info = (global_size=ntop, global_bottom_vector_size=0,
-                           local_top_vector_a_block_indices=(1:ntop,),
-                           a_block_off_diagonal_indices=(1:0,),
-                           block_comm=last_level_info.block_comm)
-        last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
-                                                        length(level_info_list) == 1,
-                                                        true, timer, check_lu,
-                                                        last_block_allocate_shared_float,
-                                                        last_block_allocate_shared_int,
-                                                        last_block_synchronize_shared)
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
