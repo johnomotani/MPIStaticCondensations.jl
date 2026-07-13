@@ -225,6 +225,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
 
             @sc_timeit timer "Ainv.u" begin
                 ldiv!(Ainv_dot_u, A_factorization, U)
+                synchronize_shared()
             end
 
             @sc_timeit timer "v-C.Ainv.u" begin
