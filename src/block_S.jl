@@ -5,14 +5,16 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
     column_range_partial::UnitRange{Ti}
     flat_range_partial::UnitRange{Ti}
 
-    function BlockS(matrix, local_bottom_vector_indices, C_buffer_ncopies, shared_comm,
-                    allocate_shared_float::F) where {F}
+    function BlockS(matrix, local_bottom_vector_indices, C_buffer_ncopies,
+                    C_buffer_storage, shared_comm, allocate_shared_float::F) where {F}
         Ti = eltype(local_bottom_vector_indices)
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
 
         n_flat = nnz(matrix)
-        C_dot_Ainv_dot_B = allocate_shared_float(C_buffer_ncopies, n_flat)
+        C_buffer_length = n_flat * C_buffer_ncopies
+        C_dot_Ainv_dot_B = reshape(@view(C_buffer_storage[1:C_buffer_length]),
+                                   C_buffer_ncopies, n_flat)
         if shared_comm_rank == 0
             C_dot_Ainv_dot_B .= 0.0
         end

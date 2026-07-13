@@ -1394,6 +1394,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                   level_allocate_shared_float_list[1:end-1],
                                   level_allocate_shared_int_list[1:end-1])]
 
+    max_schur_complement_nnz = maximum(nnz(sc) for sc ∈ schur_complement_buffer_list[1:end])
+    C_buffer_ncopies = 2^length(dimensions)
+    C_buffer_storage = allocate_shared_float(C_buffer_ncopies * max_schur_complement_nnz)
+
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
     for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
@@ -1444,7 +1448,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
-                                             this_level_schur_solver, use_shared_blocks,
+                                             this_level_schur_solver, C_buffer_ncopies,
+                                             C_buffer_storage, use_shared_blocks,
                                              sparse_C_blocks, this_level_shared_comm,
                                              level_synchronize_shared,
                                              level_allocate_shared_float,

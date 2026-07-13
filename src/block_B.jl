@@ -217,6 +217,15 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
         C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B
         synchronize_shared = C.synchronize_shared
 
+        flat_range_partial = schur_complement.flat_range_partial
+        if !isempty(flat_range_partial)
+            # Need to zero this buffer as other levels might put non-zeros in places that
+            # will not be filled (by any process) in the following loop.
+            C_dot_Ainv_dot_B[:,flat_range_partial] .= 0.0
+        end
+
+        synchronize_shared()
+
         if length(C_blocks) > 0
             mul_blocks = C.right_multiplication_buffer_blocks
             Ainv_dot_B_blocks = Ainv_dot_B.blocks
@@ -262,7 +271,6 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
 
         synchronize_shared()
 
-        flat_range_partial = schur_complement.flat_range_partial
         if !isempty(flat_range_partial)
             @views sum!(sc_matrix.nzval[flat_range_partial]', C_dot_Ainv_dot_B[:,flat_range_partial])
         end
@@ -285,6 +293,15 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
         block_output_inds = C.bottom_block_rowinds
         block_output_colinds = C.block_right_multiplication_output_colinds
         Ainv_dot_B_block = Ainv_dot_B.block
+
+        flat_range_partial = schur_complement.flat_range_partial
+        if !isempty(flat_range_partial)
+            # Need to zero this buffer as other levels might put non-zeros in places that
+            # will not be filled (by any process) in the following loop.
+            C_dot_Ainv_dot_B[:,flat_range_partial] .= 0.0
+        end
+
+        synchronize_shared()
 
         if !(isempty(block_output_inds) || isempty(block_output_colinds))
             colptr = sc_matrix.colptr
@@ -320,7 +337,6 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
 
         synchronize_shared()
 
-        flat_range_partial = schur_complement.flat_range_partial
         if !isempty(flat_range_partial)
             @views sum!(sc_matrix.nzval[flat_range_partial]', C_dot_Ainv_dot_B[:,flat_range_partial])
         end
