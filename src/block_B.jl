@@ -212,50 +212,48 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
     # `schur_complement.matrix` buffer is full size on every rank.
     @inbounds begin
         C_blocks = C.blocks
-        if length(C_blocks) == 0
-            # Nothing to do.
-            return nothing
-        end
-
         sc_matrix = schur_complement.matrix
         C_dot_Ainv_dot_B = schur_complement.C_dot_Ainv_dot_B
         synchronize_shared = C.synchronize_shared
 
-        mul_blocks = C.right_multiplication_buffer_blocks
-        Ainv_dot_B_blocks = Ainv_dot_B.blocks
-        block_output_inds = C.bottom_block_rowinds
+        if length(C_blocks) > 0
+            mul_blocks = C.right_multiplication_buffer_blocks
+            Ainv_dot_B_blocks = Ainv_dot_B.blocks
+            block_output_inds = C.bottom_block_rowinds
 
-        colptr = sc_matrix.colptr
-        rowval = sc_matrix.rowval
+            colptr = sc_matrix.colptr
+            rowval = sc_matrix.rowval
 
-        # The rows are labelled by block_hypercube_position, so there are no overlaps, and we
-        # can directly set entries, instead of adding to them, and so do not need to
-        # zero-initialise the output buffer.
-        block_hypercube_positions = C.block_hypercube_positions
-        for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                   Ainv_dot_B_blocks, block_output_inds,
-                                                   block_hypercube_positions)
-            nzval = @view C_dot_Ainv_dot_B[bhp,:]
+            # The rows are labelled by block_hypercube_position, so there are no overlaps,
+            # and we can directly set entries, instead of adding to them, and so do not
+            # need to zero-initialise the output buffer.
+            block_hypercube_positions = C.block_hypercube_positions
+            for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                       Ainv_dot_B_blocks,
+                                                       block_output_inds,
+                                                       block_hypercube_positions)
+                nzval = @view C_dot_Ainv_dot_B[bhp,:]
 
-            mul!(mb, Cb, AiBb, -1.0, 0.0)
+                mul!(mb, Cb, AiBb, -1.0, 0.0)
 
-            # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
-            first_row = first(output_inds)
-            nrows = length(output_inds)
-            for (j, col) ∈ enumerate(output_inds)
-                first_i = colptr[col]
-                last_i = colptr[col+1] - 1
-                col_rv = @view rowval[first_i:last_i]
-                flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
-                i = 1
-                while flat_i ≤ last_i && i ≤ nrows
-                    if rowval[flat_i] == output_inds[i]
-                        nzval[flat_i] = mb[i,j]
-                        flat_i += 1
-                        i += 1
-                    else
-                        # rowval[flat_i] must be less than output_inds[i]
-                        flat_i += 1
+                # Copy result from mb into the sparse output buffer C_dot_Ainv_dot_B.
+                first_row = first(output_inds)
+                nrows = length(output_inds)
+                for (j, col) ∈ enumerate(output_inds)
+                    first_i = colptr[col]
+                    last_i = colptr[col+1] - 1
+                    col_rv = @view rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+                    i = 1
+                    while flat_i ≤ last_i && i ≤ nrows
+                        if rowval[flat_i] == output_inds[i]
+                            nzval[flat_i] = mb[i,j]
+                            flat_i += 1
+                            i += 1
+                        else
+                            # rowval[flat_i] must be less than output_inds[i]
+                            flat_i += 1
+                        end
                     end
                 end
             end

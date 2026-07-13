@@ -1436,7 +1436,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              this_level_schur_solver, use_shared_blocks,
-                                             sparse_C_blocks, level_shared_comm,
+                                             sparse_C_blocks, this_level_shared_comm,
                                              level_synchronize_shared,
                                              level_allocate_shared_float,
                                              level_allocate_shared_int,
