@@ -282,7 +282,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
         synchronize_shared = C.synchronize_shared
         C_block = C.block
         mul_block = C.right_multiplication_buffer_block
-        block_output_inds = C.block_rowinds
+        block_output_inds = C.bottom_block_rowinds
         block_output_colinds = C.block_right_multiplication_output_colinds
         Ainv_dot_B_block = Ainv_dot_B.block
 

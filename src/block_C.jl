@@ -179,9 +179,10 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
                    block, block_rowinds, bottom_block_rowinds, block_colinds,
                    partial_block_colinds, partial_col_range, block_hypercube_position,
                    output_buffer_ncopies, right_multiplication_buffer_block,
-                   block_rowinds_full, vector_buffer_block_in, vector_buffer_block_out,
-                   vector_intermediate_buffer_local, vector_intermediate_buffer,
-                   vector_range, block_synchronize_shared, synchronize_shared)
+                   bottom_block_rowinds_full, vector_buffer_block_in,
+                   vector_buffer_block_out, vector_intermediate_buffer_local,
+                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
+                   synchronize_shared)
     end
 end
 
