@@ -63,6 +63,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
         end
 
         data_type = eltype(schur_complement.matrix)
+        nbottom = length(level_info.local_bottom_vector_indices)
 
         if use_shared_blocks
             if level_info.block_comm == MPI.COMM_NULL
@@ -83,13 +84,12 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                                    block_allocate_shared_float,
                                                    block_synchronize_shared)
                 C_vector_intermediate_buffer =
-                    level_allocate_shared_float(C_buffer_ncopies,
-                                                level_info.local_bottom_vector_size)
+                    allocate_shared_float(C_buffer_ncopies, nbottom)
                 if shared_comm_rank == 0
                     C_vector_intermediate_buffer .= 0.0
                 end
-                C_vector_points_per_proc = (level_info.local_bottom_vector_size + shared_comm_size - 1) ÷ shared_comm_size
-                C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,level_info.local_bottom_vector_size)
+                C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
+                C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
                 C_block_row_inds_full = level_info.a_block_off_diagonal_indices[1]
 
                C_nrow = length(level_info.a_block_off_diagonal_indices[1])
@@ -130,7 +130,6 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             B = BlockAinvDotBSerial{data_type}(level_info.local_top_vector_a_block_indices,
                                                level_info.a_block_off_diagonal_indices,
                                                level_info.a_block_off_diagonal_bottom_vector_indices)
-            nbottom = length(level_info.local_bottom_vector_indices)
             C_vector_intermediate_buffer =
                 allocate_shared_float(C_buffer_ncopies, nbottom)
             if shared_comm_rank == 0
