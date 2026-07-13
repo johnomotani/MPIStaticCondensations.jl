@@ -84,9 +84,10 @@ struct BlockAinvDotBShared{Tf,Ti,Tb,Trange,Tsync}
 
         return new{Tf,Ti,typeof(block),typeof(block_rowinds),Fs}(
                    block, partial_block, block_rowinds, block_partial_rowinds,
-                   block_colinds, block_partial_colinds, bottom_block_partial_colinds,
-                   buffer, partial_col_range, partial_row_range, vector_buffer_block_in,
-                   vector_buffer_block_out, synchronize_shared)
+                   block_colinds, block_partial_colinds, bottom_block_colinds,
+                   bottom_block_partial_colinds, buffer, partial_col_range,
+                   partial_row_range, vector_buffer_block_in, vector_buffer_block_out,
+                   synchronize_shared)
     end
 end
 

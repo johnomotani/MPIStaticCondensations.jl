@@ -107,7 +107,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                     get_C_hypercube_position(level_info.iblock_list[:,1])
 
                 C = BlockCShared{data_type}(level_info.a_block_off_diagonal_indices[1],
-                                            level_info.a_block_off_diagonal_bottom_vector_indices,
+                                            level_info.a_block_off_diagonal_bottom_vector_indices[1],
                                             C_partial_row_range,
                                             level_info.local_top_vector_a_block_indices[1],
                                             level_info.local_top_vector_indices,
