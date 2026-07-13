@@ -362,6 +362,7 @@ function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
         vector_buffer_block_in = Ainv_dot_B.vector_buffer_block_in
         vector_buffer_block_out = Ainv_dot_B.vector_buffer_block_out
         block_partial_rowinds = Ainv_dot_B.block_partial_rowinds
+        partial_row_range = Ainv_dot_B.partial_row_range
         bottom_block_partial_colinds = Ainv_dot_B.bottom_block_partial_colinds
         partial_col_range = Ainv_dot_B.partial_col_range
         synchronize_shared = Ainv_dot_B.synchronize_shared
@@ -372,8 +373,8 @@ function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
         synchronize_shared()
 
         mul!(vector_buffer_block_out, partial_block, vector_buffer_block_in)
-        for (i2, i1) ∈ enumerate(block_partial_rowinds)
-            x[i1] = Ainv_dot_u[i2] - vector_buffer_block_out[i2]
+        for (i3, (i1, i2)) ∈ enumerate(zip(block_partial_rowinds, partial_row_range))
+            x[i1] = Ainv_dot_u[i2] - vector_buffer_block_out[i3]
         end
         return nothing
     end
