@@ -286,45 +286,43 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
         block_output_colinds = C.block_right_multiplication_output_colinds
         Ainv_dot_B_block = Ainv_dot_B.block
 
-        if isempty(block_output_inds) || isempty(block_output_colinds)
-            return nothing
-        end
+        if !(isempty(block_output_inds) || isempty(block_output_colinds))
+            colptr = sc_matrix.colptr
+            rowval = sc_matrix.rowval
+            nzval = @view C_dot_Ainv_dot_B[C.block_hypercube_position,:]
 
-        colptr = sc_matrix.colptr
-        rowval = sc_matrix.rowval
-        nzval = @view C_dot_Ainv_dot_B[C.block_hypercube_position,:]
+            # Output buffer columns are divided by 'hypercube position' so there are no
+            # overlaps, and we can directly set entries, instead of adding to them, and so do
+            # not need to zero-initialise the output buffer.
+            mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
 
-        # Output buffer columns are divided by 'hypercube position' so there are no
-        # overlaps, and we can directly set entries, instead of adding to them, and so do
-        # not need to zero-initialise the output buffer.
-        mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
-
-        # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
-        first_row = first(block_output_inds)
-        nrows = length(block_output_inds)
-        for (j, col) ∈ enumerate(block_output_colinds)
-            first_i = colptr[col]
-            last_i = colptr[col+1] - 1
-            col_rv = @view rowval[first_i:last_i]
-            flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
-            i = 1
-            while flat_i ≤ last_i && i ≤ nrows
-                if rowval[flat_i] == block_output_inds[i]
-                    nzval[flat_i] = mul_block[i,j]
-                    flat_i += 1
-                    i += 1
-                else
-                    # rowval[flat_i] must be less than block_output_inds[i].
-                    flat_i += 1
+            # Copy result from mul_block into the sparse output buffer C_dot_Ainv_dot_B.
+            first_row = first(block_output_inds)
+            nrows = length(block_output_inds)
+            for (j, col) ∈ enumerate(block_output_colinds)
+                first_i = colptr[col]
+                last_i = colptr[col+1] - 1
+                col_rv = @view rowval[first_i:last_i]
+                flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_i - 1
+                i = 1
+                while flat_i ≤ last_i && i ≤ nrows
+                    if rowval[flat_i] == block_output_inds[i]
+                        nzval[flat_i] = mul_block[i,j]
+                        flat_i += 1
+                        i += 1
+                    else
+                        # rowval[flat_i] must be less than block_output_inds[i].
+                        flat_i += 1
+                    end
                 end
             end
         end
 
         synchronize_shared()
 
-        flat_range = schur_complement.flat_range
-        if !isempty(flat_range)
-            @views sum!(sc_matrix.nzval[flat_range]', C_dot_Ainv_dot_B[:,flat_range])
+        flat_range_partial = schur_complement.flat_range_partial
+        if !isempty(flat_range_partial)
+            @views sum!(sc_matrix.nzval[flat_range_partial]', C_dot_Ainv_dot_B[:,flat_range_partial])
         end
 
         return nothing
