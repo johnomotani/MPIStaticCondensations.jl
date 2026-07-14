@@ -103,7 +103,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                end
 
                 block_hypercube_position =
-                    get_C_hypercube_position(level_info.iblock_list[:,1])
+                    get_C_hypercube_position(level_info.iblock_list[:,1],
+                                             level_info.nblock)
 
                 C = BlockCShared{data_type}(level_info.a_block_off_diagonal_indices[1],
                                             level_info.a_block_off_diagonal_bottom_vector_indices[1],
@@ -138,7 +139,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
 
             C_block_hypercube_positions =
-                [get_C_hypercube_position(iblock)
+                [get_C_hypercube_position(iblock, level_info.nblock)
                  for iblock ∈ eachcol(level_info.iblock_list)]
 
             C = BlockCSerial{data_type}(level_info.a_block_off_diagonal_indices,

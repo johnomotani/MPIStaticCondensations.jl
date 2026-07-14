@@ -631,6 +631,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     #level_dimensions::Vector{Dimension{Ti}}
     has_periodic::Bool
     block_sizes::Vector{Ti}
+    nblock::Vector{Ti}
     global_size::Ti
     global_bottom_vector_size::Ti
     top_vector_indices::Vector{Ti}
@@ -657,8 +658,8 @@ end
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
 # for testing of the index generation.
 function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti},
-                      block_sizes::Vector{Ti}, global_size::Ti, is_top_level::Bool,
-                      is_bottom_level::Bool,
+                      block_sizes::Vector{Ti}, nblock::Vector{Ti}, global_size::Ti,
+                      is_top_level::Bool, is_bottom_level::Bool,
                       distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
                       shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
@@ -671,7 +672,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         if shared_comm == MPI.COMM_NULL
             # This processor does no work on this level, so just fill level_info with dummy
             # values.
-            return LevelInfo(; has_periodic, block_sizes, global_size=0,
+            return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
                              global_bottom_vector_size=0, top_vector_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
@@ -1125,7 +1126,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             end
         end
 
-        return LevelInfo(; has_periodic, block_sizes, global_size, global_bottom_vector_size,
+        return LevelInfo(; has_periodic, block_sizes, nblock, global_size,
+                         global_bottom_vector_size,
                          top_vector_indices=global_top_vector_indices,
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
@@ -1255,6 +1257,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     block_sizes_list = [ones(ind_type, length(dimensions))]
     nelement_list = [d.nelement for d ∈ dimensions]
     nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+    nblock_list = [nelement_local_list]
     total_local_nblock = prod(nelement_local_list)
     total_local_nblock_list = [total_local_nblock]
     while total_local_nblock > 1
@@ -1263,6 +1266,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
         total_local_nblock = prod(local_nblock_list)
         push!(total_local_nblock_list, total_local_nblock)
+        push!(nblock_list, local_nblock_list)
         push!(block_sizes_list, this_block_sizes)
     end
 
@@ -1279,8 +1283,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_global_size = prod(d.n for d ∈ dimensions)
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
-    for (level, (block_sizes, total_local_nblock)) ∈ enumerate(zip(block_sizes_list,
-                                                                   total_local_nblock_list))
+    for (level, (block_sizes, nblock, total_local_nblock)) ∈
+            enumerate(zip(block_sizes_list, nblock_list, total_local_nblock_list))
         if level == 1 || level == n_levels
             # Only handle periodicity on the final level
             dims = dimensions
@@ -1302,7 +1306,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         # Keep selecting the subset of `1:prod(d.n_local for d ∈ dimensions)` that is
         # involved in each successive level.
-        this_level_info = split_matrix(dims, level_indices, block_sizes,
+        this_level_info = split_matrix(dims, level_indices, block_sizes, nblock,
                                        level_global_size, level==1, level==n_levels,
                                        distributed_comm, level_shared_comm)
         level_info_list[level] = this_level_info
@@ -1394,9 +1398,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                   level_allocate_shared_float_list[1:end-1],
                                   level_allocate_shared_int_list[1:end-1])]
 
-    max_schur_complement_nnz = maximum(nnz(sc) for sc ∈ schur_complement_buffer_list[1:end])
-    C_buffer_ncopies = 2^length(dimensions)
-    C_buffer_storage = allocate_shared_float(C_buffer_ncopies * max_schur_complement_nnz)
+    schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
+    # The size of the sides 'hypercube' is 2 for any dimension with more than one block,
+    # and 1 for any dimension with only one block - the size can decrease at higher
+    # levels.
+    C_buffer_ncopies_list = [2^sum(nblock .> 1) for nblock ∈ nblock_list[1:end-1]]
+    C_buffer_storage_length = Ref(maximum(C_buffer_ncopies_list .* schur_complement_nnz_list; init=0))
+    MPI.Allreduce!(C_buffer_storage_length, max, shared_comm)
+    C_buffer_storage = allocate_shared_float(C_buffer_storage_length[])
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
@@ -1448,7 +1457,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
-                                             this_level_schur_solver, C_buffer_ncopies,
+                                             this_level_schur_solver,
+                                             C_buffer_ncopies_list[level],
                                              C_buffer_storage, use_shared_blocks,
                                              sparse_C_blocks, this_level_shared_comm,
                                              level_synchronize_shared,

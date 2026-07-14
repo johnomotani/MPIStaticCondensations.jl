@@ -183,8 +183,16 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
     end
 end
 
-function get_C_hypercube_position(iblock)
-    return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock)) + 1
+function get_C_hypercube_position(iblock, nblock)
+    # Use `block_sizes .> 1` filter so that we only increment the 'hypercube position' in
+    # dimensions with a block size greater than one. For dimensions where the block size
+    # is 1, there cannot be overlap between different blocks (there is only one block!),
+    # so there is no need to allow for different positions in the output buffer.
+    if all(nblock .== 1)
+        return 1
+    else
+        return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock[nblock .> 1])) + 1
+    end
 end
 
 # copy_C_submatrix!() is identical to copy_B_submatrix!(), but keep as a separate function
