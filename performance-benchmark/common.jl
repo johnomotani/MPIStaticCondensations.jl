@@ -136,6 +136,22 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                comm, distributed_comm, shared_comm, allocate_shared_float,
                allocate_shared_int, 1, 1, 1, 1, timer, global_data, global_i, global_j)
 
+    if local_win_store_float !== nothing
+        # Free the MPI.Win objects, because if they are free'd by the garbage collector
+        # it may cause an MPI error or hang.
+        for w ∈ local_win_store_float
+            MPI.free(w)
+        end
+    end
+    if local_win_store_int !== nothing
+        # Free the MPI.Win objects, because if they are free'd by the garbage collector
+        # it may cause an MPI error or hang.
+        for w ∈ local_win_store_int
+            MPI.free(w)
+        end
+    end
+    MPI.Barrier(shared_comm)
+
     if timer !== nothing
         reset_timer!(timer)
     end
