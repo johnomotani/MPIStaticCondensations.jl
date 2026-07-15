@@ -57,8 +57,7 @@ struct BlockAinvDotBShared{Tf,Ti,Tb,Trange,Tsync}
             return new{Tf,Ti,Matrix{Tf},typeof(block_colinds),Fs}(
                        zeros(Tf, 0, 0), zeros(Tf, 0, 0), block_rowinds, zeros(Ti, 0),
                        block_colinds, zeros(Ti, 0), bottom_block_colinds, zeros(Ti, 0),
-                       zeros(Tf, 0, 0), 1:0, 1:0, zeros(Tf, 0), zeros(Tf, 0),
-                       synchronize_shared)
+                       1:0, 1:0, zeros(Tf, 0), zeros(Tf, 0), synchronize_shared)
         end
 
         nrow = length(block_rowinds)
