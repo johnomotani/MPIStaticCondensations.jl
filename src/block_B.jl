@@ -381,6 +381,15 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                 @views sum!(sc_matrix.nzval[flat_range_partial]', C_dot_Ainv_dot_B[:,flat_range_partial])
             end
         else
+            column_range_partial = schur_complement.flat_range_partial
+            if !isempty(column_range_partial)
+                # Need to zero this buffer as other levels might put non-zeros in places that
+                # will not be filled (by any process) in the following loop.
+                C_dot_Ainv_dot_B[:,:,column_range_partial] .= 0.0
+            end
+
+            synchronize_shared()
+
             if !(isempty(block_output_inds) || isempty(block_output_colinds))
                 # Output buffer columns are divided by 'hypercube position' so there are no
                 # overlaps, and we can directly set entries, instead of adding to them, and so do
@@ -389,8 +398,8 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
 
                 # Copy result from mul_block into the output buffer C_dot_Ainv_dot_B.
                 CAiB_buffer = @view C_dot_Ainv_dot_B[C.block_hypercube_position,:,:]
-                for (j, col) ∈ enumerate(output_inds), (i, row) ∈ enumerate(output_inds)
-                    CAiB_buffer[row,col] = mb[i,j]
+                for (j, col) ∈ enumerate(block_output_colinds), (i, row) ∈ enumerate(block_output_inds)
+                    CAiB_buffer[row,col] = mul_block[i,j]
                 end
             end
 

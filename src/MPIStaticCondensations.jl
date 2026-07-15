@@ -1376,6 +1376,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
+                                 copy_input_to_dense_buffers=(n_levels == 1 && last_level_info.has_periodic),
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
@@ -1396,7 +1397,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
          for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
                                   level_allocate_shared_float_list[1:end-2],
                                   level_allocate_shared_int_list[1:end-2])]
-    if n_levels > 1
+    if n_levels > 1 && level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
         nbuff = length(level_info_list[end-1].bottom_vector_indices)
         second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
     else
@@ -1697,12 +1698,6 @@ function lu!(solver::MPIStaticCondensationParallel, A)
             if isa(schur_complement_solver, BlockedSchurComplementSolver)
                 lu!(schur_complement_solver, A)
             else
-                if isa(A, FixedSparseCSC)
-                    # This should only happen when there is only a single block in the
-                    # grid, which probably only happens in the test suite, as in that case
-                    # this is not an optimal solver!
-                    A = Matrix(A)
-                end
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
                 a = @view A[local_top_vector_indices,local_top_vector_indices]
