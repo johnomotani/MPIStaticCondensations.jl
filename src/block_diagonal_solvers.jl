@@ -117,7 +117,6 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
             ipiv = allocate_shared_int(block_size)
             if MPI.Comm_rank(block_comm) == 0
                 copyto!(factors, I)
-                getrf!(factors, ipiv; check=check_lu)
                 local_block_solver = LU(factors, ipiv, block_size)
                 local_block_serial_solver = local_block_solver
             else
