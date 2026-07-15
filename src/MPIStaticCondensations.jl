@@ -1397,17 +1397,20 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
          for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
                                   level_allocate_shared_float_list[1:end-2],
                                   level_allocate_shared_int_list[1:end-2])]
-    if n_levels > 1 && level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
-        nbuff = length(level_info_list[end-1].bottom_vector_indices)
-        second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
+    schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
+    if n_levels > 1
+        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
+            nbuff = length(level_info_list[end-1].bottom_vector_indices)
+            second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
+            push!(schur_complement_nnz_list, length(second_last_schur_complement_buffer))
+        else
+            second_last_schur_complement_buffer = nothing
+            push!(schur_complement_nnz_list, 0)
+        end
     else
         second_last_schur_complement_buffer = nothing
     end
 
-    schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
-    if second_last_schur_complement_buffer !== nothing
-        push!(schur_complement_nnz_list, length(second_last_schur_complement_buffer))
-    end
     # The size of the sides 'hypercube' is 2 for any dimension with more than one block,
     # and 1 for any dimension with only one block - the size can decrease at higher
     # levels.
