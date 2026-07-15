@@ -1406,6 +1406,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     C_buffer_storage_length = Ref(maximum(C_buffer_ncopies_list .* schur_complement_nnz_list; init=0))
     MPI.Allreduce!(C_buffer_storage_length, max, shared_comm)
     C_buffer_storage = allocate_shared_float(C_buffer_storage_length[])
+    if shared_comm_rank == 0
+        C_buffer_storage .= 0.0
+    end
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)

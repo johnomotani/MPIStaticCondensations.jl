@@ -15,9 +15,6 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
         C_buffer_length = n_flat * C_buffer_ncopies
         C_dot_Ainv_dot_B = reshape(@view(C_buffer_storage[1:C_buffer_length]),
                                    C_buffer_ncopies, n_flat)
-        if shared_comm_rank == 0
-            C_dot_Ainv_dot_B .= 0.0
-        end
 
         ncol = length(local_bottom_vector_indices)
         cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
