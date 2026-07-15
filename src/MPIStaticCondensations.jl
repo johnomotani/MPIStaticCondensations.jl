@@ -1376,7 +1376,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
-                                 copy_input_to_dense_buffers=last_level_info.has_periodic,
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
@@ -1395,10 +1394,19 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              li.bottom_vector_indices,
                                              li.bottom_vector_indices)
          for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
-                                  level_allocate_shared_float_list[1:end-1],
-                                  level_allocate_shared_int_list[1:end-1])]
+                                  level_allocate_shared_float_list[1:end-2],
+                                  level_allocate_shared_int_list[1:end-2])]
+    if n_levels > 1
+        nbuff = length(level_info_list[end-1].bottom_vector_indices)
+        second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
+    else
+        second_last_schur_complement_buffer = nothing
+    end
 
     schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
+    if second_last_schur_complement_buffer !== nothing
+        push!(schur_complement_nnz_list, length(second_last_schur_complement_buffer))
+    end
     # The size of the sides 'hypercube' is 2 for any dimension with more than one block,
     # and 1 for any dimension with only one block - the size can decrease at higher
     # levels.
@@ -1460,6 +1468,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
+                                             second_last_schur_complement_buffer,
                                              this_level_schur_solver,
                                              C_buffer_ncopies_list[level],
                                              C_buffer_storage, use_shared_blocks,
@@ -1688,6 +1697,12 @@ function lu!(solver::MPIStaticCondensationParallel, A)
             if isa(schur_complement_solver, BlockedSchurComplementSolver)
                 lu!(schur_complement_solver, A)
             else
+                if isa(A, FixedSparseCSC)
+                    # This should only happen when there is only a single block in the
+                    # grid, which probably only happens in the test suite, as in that case
+                    # this is not an optimal solver!
+                    A = Matrix(A)
+                end
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
                 a = @view A[local_top_vector_indices,local_top_vector_indices]

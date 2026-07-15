@@ -10,12 +10,13 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
     function BlockedSchurComplementSolver(
                  dimensions::Vector{<:Dimension}, level::Integer, level_info,
-                 schur_complement_buffer_list, schur_complement_factorization,
-                 C_buffer_ncopies, C_buffer_storage, use_shared_blocks::Bool,
-                 sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
-                 allocate_shared_float::Faf, allocate_shared_int::Fai,
-                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
-                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
+                 schur_complement_buffer_list, second_last_schur_complement_buffer,
+                 schur_complement_factorization, C_buffer_ncopies, C_buffer_storage,
+                 use_shared_blocks::Bool, sparse_C_blocks::Bool, shared_comm,
+                 synchronize_shared::Fsync, allocate_shared_float::Faf,
+                 allocate_shared_int::Fai, block_synchronize_shared::Fbsync,
+                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
+                 right_multiplication_buffer_storage,
                  check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
@@ -50,8 +51,12 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             block_comm_size = MPI.Comm_size(block_comm)
         end
 
-        schur_complement = BlockS(schur_complement_buffer_list[level],
-                                  level_info.local_bottom_vector_indices,
+        if level ≤ length(schur_complement_buffer_list)
+            this_sc_buffer = schur_complement_buffer_list[level]
+        else
+            this_sc_buffer = second_last_schur_complement_buffer
+        end
+        schur_complement = BlockS(this_sc_buffer, level_info.local_bottom_vector_indices,
                                   C_buffer_ncopies, C_buffer_storage, shared_comm,
                                   allocate_shared_float)
 
