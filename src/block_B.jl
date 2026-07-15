@@ -41,7 +41,6 @@ struct BlockAinvDotBShared{Tf,Ti,Tb,Trange,Tsync}
     block_partial_colinds::Vector{Ti}
     bottom_block_colinds::Trange
     bottom_block_partial_colinds::Vector{Ti}
-    buffer::Tb
     partial_col_range::UnitRange{Ti}
     partial_row_range::UnitRange{Ti}
     vector_buffer_block_in::Vector{Tf}
@@ -65,7 +64,6 @@ struct BlockAinvDotBShared{Tf,Ti,Tb,Trange,Tsync}
         nrow = length(block_rowinds)
         ncol = length(block_colinds)
         block = allocate_shared_float(length(block_rowinds), length(block_colinds))
-        buffer = allocate_shared_float(length(block_rowinds), length(block_colinds))
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
         block_partial_colinds = block_colinds[partial_col_range]
@@ -85,9 +83,8 @@ struct BlockAinvDotBShared{Tf,Ti,Tb,Trange,Tsync}
         return new{Tf,Ti,typeof(block),typeof(block_rowinds),Fs}(
                    block, partial_block, block_rowinds, block_partial_rowinds,
                    block_colinds, block_partial_colinds, bottom_block_colinds,
-                   bottom_block_partial_colinds, buffer, partial_col_range,
-                   partial_row_range, vector_buffer_block_in, vector_buffer_block_out,
-                   synchronize_shared)
+                   bottom_block_partial_colinds, partial_col_range, partial_row_range,
+                   vector_buffer_block_in, vector_buffer_block_out, synchronize_shared)
     end
 end
 
