@@ -4,7 +4,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     bottom_block_rowinds::Vector{Trange}
     block_colinds::Vector{Trange}
     block_hypercube_positions::Vector{Ti}
-    output_buffer_ncopies::Ti
+    n_hypercube_positions::Ti
     right_multiplication_buffer_blocks::Trmbb
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
@@ -20,7 +20,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
                               local_bottom_vector_indices::Vector{Ti},
                               matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
                               block_hypercube_positions::Vector{Ti},
-                              output_buffer_ncopies::Ti,
+                              n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
@@ -43,6 +43,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
         # the buffer blocks.
         right_multiplication_buffer_blocks = []
 
+        offset = 0
         for (ri, ci) ∈ zip(block_rowinds, block_colinds)
             nrow = length(ri)
             ncol = length(ci)
@@ -54,14 +55,15 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
             end
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
-            right_multiplication_buffer_size = nrow^2
-            if length(right_multiplication_buffer_storage) < right_multiplication_buffer_size
+            right_multiplication_block_size = nrow^2
+            if length(right_multiplication_buffer_storage) < offset + right_multiplication_block_size
                 resize!(right_multiplication_buffer_storage,
-                        right_multiplication_buffer_size)
+                        offset + right_multiplication_block_size)
             end
             push!(right_multiplication_buffer_blocks,
-                  reshape(@view(right_multiplication_buffer_storage[1:right_multiplication_buffer_size]),
+                  reshape(@view(right_multiplication_buffer_storage[offset+1:offset+right_multiplication_block_size]),
                           nrow, nrow))
+            offset += right_multiplication_block_size
         end
 
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
@@ -69,7 +71,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
 
         return new{eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(vector_intermediate_buffer),Fsb,Fs}(
                    blocks, block_rowinds, bottom_block_rowinds, block_colinds,
-                   block_hypercube_positions, output_buffer_ncopies,
+                   block_hypercube_positions, n_hypercube_positions,
                    right_multiplication_buffer_blocks, vector_buffer_blocks_in,
                    vector_buffer_blocks_out, vector_intermediate_buffer, vector_range,
                    block_synchronize_shared, synchronize_shared)
@@ -84,7 +86,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
     partial_block_colinds::Vector{Ti}
     partial_col_range::UnitRange{Ti}
     block_hypercube_position::Ti
-    output_buffer_ncopies::Ti
+    n_hypercube_positions::Ti
     right_multiplication_buffer_block::Trmbb
     block_right_multiplication_output_colinds::Vector{Ti}
     vector_buffer_block_in::Tbi
@@ -134,8 +136,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
                               local_top_vector_indices::AbstractVector{Ti},
                               local_bottom_vector_indices::AbstractVector{Ti},
                               matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
-                              block_hypercube_position::Ti,
-                              output_buffer_ncopies::Ti,
+                              block_hypercube_position::Ti, n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
@@ -175,23 +176,11 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
         return new{typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, bottom_block_rowinds, block_colinds,
                    partial_block_colinds, partial_col_range, block_hypercube_position,
-                   output_buffer_ncopies, right_multiplication_buffer_block,
+                   n_hypercube_positions, right_multiplication_buffer_block,
                    bottom_block_rowinds_full, vector_buffer_block_in,
                    vector_buffer_block_out, vector_intermediate_buffer_local,
                    vector_intermediate_buffer, vector_range, block_synchronize_shared,
                    synchronize_shared)
-    end
-end
-
-function get_C_hypercube_position(iblock, nblock)
-    # Use `block_sizes .> 1` filter so that we only increment the 'hypercube position' in
-    # dimensions with a block size greater than one. For dimensions where the block size
-    # is 1, there cannot be overlap between different blocks (there is only one block!),
-    # so there is no need to allow for different positions in the output buffer.
-    if all(nblock .== 1)
-        return 1
-    else
-        return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock[nblock .> 1])) + 1
     end
 end
 

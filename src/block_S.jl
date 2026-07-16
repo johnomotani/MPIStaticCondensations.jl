@@ -1,12 +1,11 @@
-struct BlockS{Ti,Tm,TCAiB,Trange}
+struct BlockS{Ti,Tm,Trange}
     matrix::Tm
-    C_dot_Ainv_dot_B::TCAiB
     indices::Trange
     column_range_partial::UnitRange{Ti}
     flat_range_partial::UnitRange{Ti}
 
-    function BlockS(matrix, local_bottom_vector_indices, C_buffer_ncopies,
-                    C_buffer_storage, shared_comm, allocate_shared_float::F) where {F}
+    function BlockS(matrix, local_bottom_vector_indices, shared_comm,
+                    allocate_shared_float::F) where {F}
         Ti = eltype(local_bottom_vector_indices)
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -17,23 +16,15 @@ struct BlockS{Ti,Tm,TCAiB,Trange}
 
         if isa(matrix, FixedSparseCSC)
             n_flat = nnz(matrix)
-            C_buffer_length = n_flat * C_buffer_ncopies
-            C_dot_Ainv_dot_B = reshape(@view(C_buffer_storage[1:C_buffer_length]),
-                                       C_buffer_ncopies, n_flat)
-
             entries_per_proc = (n_flat + shared_comm_size - 1) ÷ shared_comm_size
             flat_range_partial = shared_comm_rank*entries_per_proc+1:min((shared_comm_rank+1)*entries_per_proc,n_flat)
         else
-            C_buffer_length = length(matrix) * C_buffer_ncopies
-            C_dot_Ainv_dot_B = reshape(@view(C_buffer_storage[1:C_buffer_length]),
-                                       C_buffer_ncopies, size(matrix)...)
-
             flat_range_partial = column_range_partial
         end
 
-        return new{Ti,typeof(matrix),typeof(C_dot_Ainv_dot_B),typeof(local_bottom_vector_indices)}(
-                   matrix, C_dot_Ainv_dot_B, local_bottom_vector_indices,
-                   column_range_partial, flat_range_partial)
+        return new{Ti,typeof(matrix),typeof(local_bottom_vector_indices)}(
+                   matrix, local_bottom_vector_indices, column_range_partial,
+                   flat_range_partial)
     end
 end
 

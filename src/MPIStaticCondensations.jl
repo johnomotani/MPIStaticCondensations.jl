@@ -616,6 +616,33 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
     end
 end
 
+function get_hypercube_position(iblock::AbstractVector{<:Integer}, nblock)
+    # Use `block_sizes .> 1` filter so that we only increment the 'hypercube position' in
+    # dimensions with a block size greater than one. For dimensions where the block size
+    # is 1, there cannot be overlap between different blocks (there is only one block!),
+    # so there is no need to allow for different positions in the output buffer.
+    if all(nblock .== 1)
+        return 1
+    else
+        return sum(((i - 1) % 2) * 2^(d-1) for (d, i) ∈ enumerate(iblock[nblock .> 1])) + 1
+    end
+end
+function get_hypercube_position(flat_iblock::Integer, nblock)
+    iblock = zeros(typeof(flat_iblock), length(nblock))
+
+    # Convert flat_iblock to 0-based index for convenience.
+    flat_iblock -= 1
+
+    for (d, n) ∈ collect(enumerate(nblock))
+        flat_iblock, iblock[d] = divrem(flat_iblock, n)
+    end
+
+    # Convert iblock back to 1-based indices.
+    iblock .+= 1
+
+    return get_hypercube_position(iblock, nblock)
+end
+
 struct FakeComm
     rank::Int64
     size::Int64
@@ -783,7 +810,19 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         if subgroup_i < 0
             this_proc_blocks = 1:0
         else
-            this_proc_blocks = subgroup_i*blocks_per_proc+1:min((subgroup_i+1)*blocks_per_proc,total_nblocks)
+            # To ensure the best possible load balance, we want to have as close as
+            # possible to the same number of blocks from each hypercube position on each
+            # process (when there are multiple processes per subgroup there is only one
+            # block per subgroup, so this load balance optimisation is only relevant when
+            # there is one process per subgroup and multiple blocks per subgroup). To
+            # achieve this, first sort the blocks by hypercube position, then assign the
+            # blocks to subgroups in round-robin style from the sorted list.
+            flat_iblock_list = collect(1:total_nblocks)
+            all_hypercube_positions = [get_hypercube_position(iblock, nblock)
+                                       for iblock ∈ flat_iblock_list]
+            hp_sortinds = sortperm(all_hypercube_positions)
+            flat_iblock_list = flat_iblock_list[hp_sortinds]
+            this_proc_blocks = flat_iblock_list[subgroup_i+1:n_subgroups:end]
         end
         block_interior_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
         block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
@@ -1411,17 +1450,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         second_last_schur_complement_buffer = nothing
     end
 
-    # The size of the sides 'hypercube' is 2 for any dimension with more than one block,
-    # and 1 for any dimension with only one block - the size can decrease at higher
-    # levels.
-    C_buffer_ncopies_list = [2^sum(nblock .> 1) for nblock ∈ nblock_list[1:end-1]]
-    C_buffer_storage_length = Ref(maximum(C_buffer_ncopies_list .* schur_complement_nnz_list; init=0))
-    MPI.Allreduce!(C_buffer_storage_length, max, shared_comm)
-    C_buffer_storage = allocate_shared_float(C_buffer_storage_length[])
-    if shared_comm_rank == 0
-        C_buffer_storage .= 0.0
-    end
-
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
     for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
@@ -1473,9 +1501,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
                                              second_last_schur_complement_buffer,
-                                             this_level_schur_solver,
-                                             C_buffer_ncopies_list[level],
-                                             C_buffer_storage, use_shared_blocks,
+                                             this_level_schur_solver, use_shared_blocks,
                                              sparse_C_blocks, this_level_shared_comm,
                                              level_synchronize_shared,
                                              level_allocate_shared_float,

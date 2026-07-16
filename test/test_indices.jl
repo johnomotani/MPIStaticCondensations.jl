@@ -45,6 +45,7 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
     level_indices = get_global_indices(dimensions_without_periodic, collect(1:local_size))
     n_levels = length(block_sizes_list)
     level_info = Any[]
+    nelement_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
     for (level, bs) ∈ enumerate(block_sizes_list)
         if level == 1 || level == n_levels
             # Only handle periodicity on the final level
@@ -52,7 +53,8 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
         else
             dims = dimensions_without_periodic
         end
-        li = split_matrix(dims, level_indices, bs, this_global_size, level==1,
+        nblock = @. (nelement_list + bs - 1) ÷ bs
+        li = split_matrix(dims, level_indices, bs, nblock, this_global_size, level==1,
                           level==n_levels, distributed_comm, shared_comm)
         push!(level_info, li)
         this_global_size = li.global_bottom_vector_size
@@ -82,10 +84,10 @@ function test_split_indices_1d_1proc_remove_boundaries()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].local_top_vector_indices == [2, 4, 6]
-            @test li[1].iblock_list == [1 2 3;]
-            @test li[1].local_top_vector_a_block_indices == [[2], [4], [6]]
-            @test li[1].a_block_off_diagonal_indices == [[1, 3], [3, 5], [5, 7]]
-            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2], [2, 3], [3, 4]]
+            @test li[1].iblock_list == [1 3 2;]
+            @test li[1].local_top_vector_a_block_indices == [[2], [6], [4]]
+            @test li[1].a_block_off_diagonal_indices == [[1, 3], [5, 7], [3, 5]]
+            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2], [3, 4], [2, 3]]
             @test li[1].bottom_vector_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5, 7]
@@ -174,10 +176,10 @@ function test_split_indices_1d_1proc_periodic()
                                    [irank÷n_shared], n_shared, irank)
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].local_top_vector_indices == [2, 4, 6]
-            @test li[1].iblock_list == [1 2 3;]
-            @test li[1].local_top_vector_a_block_indices == [[2], [4], [6]]
-            @test li[1].a_block_off_diagonal_indices == [[1, 3], [3, 5], [5, 7]]
-            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2], [2, 3], [3, 4]]
+            @test li[1].iblock_list == [1 3 2;]
+            @test li[1].local_top_vector_a_block_indices == [[2], [6], [4]]
+            @test li[1].a_block_off_diagonal_indices == [[1, 3], [5, 7], [3, 5]]
+            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2], [3, 4], [2, 3]]
             @test li[1].bottom_vector_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5]
