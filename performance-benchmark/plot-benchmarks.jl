@@ -6,12 +6,17 @@ const solvers = ("UMFPACK", "MPIStaticCondensations", "MUMPS")
 const cases = ("1d", "2d", "3d")
 
 function load_data(filename; count_shared_blocks=true)
-    file = CSV.File(filename; delim=" ", header=false, comment="#")
     setup_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
     lu_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
     solve_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
     sizes_set = String[]
     sizes_dict = Dict{String,String}()
+
+    if !isfile(filename)
+        return setup_dict, lu_dict, solve_dict, sizes_dict
+    end
+
+    file = CSV.File(filename; delim=" ", header=false, comment="#")
     for row in file
         nproc, n_shared, ndim, total_size, level_multiplier, tsetup, tlu, tsolve,
             nelement_list, ngrid_list, periodic_list, remove_boundaries_list = row
@@ -152,9 +157,15 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
 
         setup_fig = Figure()
         setup_ax = Axis(setup_fig[1,1]; xscale=log2, yscale=log10, title="$p setup")
-        plot_scaling!(setup_ax, p, setup_dict)
-        plot_scaling!(setup_ax, p, MUMPS_setup_dict; label="MUMPS", linestyle=:dash)
-        plot_serial_reference!(setup_ax, p, UMFPACK_setup_dict)
+        if setup_dict !== nothing
+            plot_scaling!(setup_ax, p, setup_dict)
+        end
+        if MUMPS_setup_dict !== nothing
+            plot_scaling!(setup_ax, p, MUMPS_setup_dict; label="MUMPS", linestyle=:dash)
+        end
+        if UMFPACK_setup_dict !== nothing
+            plot_serial_reference!(setup_ax, p, UMFPACK_setup_dict)
+        end
         if interactive_plot
             DataInspector(setup_fig; datainspector_kwargs...)
             display(backend.Screen(), setup_fig)
@@ -165,9 +176,15 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
 
         lu_fig = Figure()
         lu_ax = Axis(lu_fig[1,1]; xscale=log2, yscale=log10, title="$p lu")
-        plot_scaling!(lu_ax, p, lu_dict)
-        plot_scaling!(lu_ax, p, MUMPS_lu_dict; label="MUMPS", linestyle=:dash)
-        plot_serial_reference!(lu_ax, p, UMFPACK_lu_dict)
+        if lu_dict !== nothing
+            plot_scaling!(lu_ax, p, lu_dict)
+        end
+        if MUMPS_lu_dict !== nothing
+            plot_scaling!(lu_ax, p, MUMPS_lu_dict; label="MUMPS", linestyle=:dash)
+        end
+        if UMFPACK_lu_dict !== nothing
+            plot_serial_reference!(lu_ax, p, UMFPACK_lu_dict)
+        end
         if interactive_plot
             DataInspector(lu_fig; datainspector_kwargs...)
             display(backend.Screen(), lu_fig)
@@ -178,9 +195,15 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
 
         solve_fig = Figure()
         solve_ax = Axis(solve_fig[1,1]; xscale=log2, yscale=log10, title="$p solve")
-        plot_scaling!(solve_ax, p, solve_dict)
-        plot_scaling!(solve_ax, p, MUMPS_solve_dict; label="MUMPS", linestyle=:dash)
-        plot_serial_reference!(solve_ax, p, UMFPACK_solve_dict)
+        if solve_dict !== nothing
+            plot_scaling!(solve_ax, p, solve_dict)
+        end
+        if MUMPS_solve_dict !== nothing
+            plot_scaling!(solve_ax, p, MUMPS_solve_dict; label="MUMPS", linestyle=:dash)
+        end
+        if UMFPACK_solve_dict !== nothing
+            plot_serial_reference!(solve_ax, p, UMFPACK_solve_dict)
+        end
         if interactive_plot
             DataInspector(solve_fig; datainspector_kwargs...)
             display(backend.Screen(), solve_fig)
