@@ -1432,7 +1432,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
                                              lai, li.block_sizes,
                                              li.bottom_vector_indices,
-                                             li.bottom_vector_indices)
+                                             li.bottom_vector_indices; ind_type)
          for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
                                   level_allocate_shared_float_list[1:end-2],
                                   level_allocate_shared_int_list[1:end-2])]
