@@ -116,11 +116,19 @@ function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer
         firstrow = first(row_range)
         lastrow = last(row_range)
         existing_colptr = existing_buffer.colptr
-        existing_rowval = existing_buffer.rowval
+        if isa(existing_buffer, SharedSparseBuffer)
+            existing_rowval_list = existing_buffer.rowval_list
+        else
+            existing_rowval = existing_buffer.rowval
+        end
         for j ∈ col_range
             existing_col_start = existing_colptr[j]
             existing_col_end = existing_colptr[j+1]-1
-            existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+            if isa(existing_buffer, SharedSparseBuffer)
+                existing_col_rowval = existing_rowval_list[j]
+            else
+                existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+            end
             n_existing = existing_col_end - existing_col_start + 1
             if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
                 # Definitely no overlapping entries in this column, so skip.
@@ -278,12 +286,12 @@ function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
                      remove_boundaries)
 end
 
+include("shared_sparse_buffers.jl")
 include("block_S.jl")
 include("block_C.jl")
 include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
-include("shared_sparse_buffers.jl")
 
 struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
@@ -1220,23 +1228,52 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_allocate_shared_int_list =
         [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
          for li ∈ level_info_list]
-    schur_complement_buffer_list =
-        [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
-                                             lai, li.block_sizes,
-                                             li.bottom_vector_indices,
-                                             li.bottom_vector_indices; ind_type)
-         for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
-                                  level_allocate_shared_float_list[1:end-2],
-                                  level_allocate_shared_int_list[1:end-2])]
-    schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
+    schur_complement_buffer_info_list =
+        [get_shared_sparse_matrix_info(dimensions, li.level_shared_comm, lai,
+                                       li.block_sizes, li.bottom_vector_indices,
+                                       li.bottom_vector_indices; ind_type)
+         for (li, lai) ∈ zip(level_info_list[1:end-2],
+                             level_allocate_shared_int_list[1:end-2])]
+    schur_complement_nnz_list = [sc.nzval_length
+                                 for sc ∈ schur_complement_buffer_info_list]
+    odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
+    even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
     if n_levels > 1
         if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
             nbuff = length(level_info_list[end-1].bottom_vector_indices)
-            second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
-            push!(schur_complement_nnz_list, length(second_last_schur_complement_buffer))
+            if n_levels % 2 == 0
+                odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
+            else
+                even_buffer_size[] = max(even_buffer_size[], nbuff^2)
+            end
+        end
+    end
+    MPI.Allreduce!(odd_buffer_size, max, shared_comm)
+    MPI.Allreduce!(even_buffer_size, max, shared_comm)
+    if odd_buffer_size[] > 0
+        odd_buffer = allocate_shared_float(odd_buffer_size[])
+    else
+        odd_buffer = zeros(data_type, 0)
+    end
+    if even_buffer_size[] > 0
+        even_buffer = allocate_shared_float(even_buffer_size[])
+    else
+        even_buffer = zeros(data_type, 0)
+    end
+    schur_complement_buffer_list =
+        [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
+         for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
+    if n_levels > 1
+        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
+            if n_levels % 2 == 0
+                second_last_buffer = odd_buffer
+            else
+                second_last_buffer = even_buffer
+            end
+            second_last_schur_complement_buffer =
+                reshape(@view(second_last_buffer[1:nbuff^2]), nbuff, nbuff)
         else
             second_last_schur_complement_buffer = nothing
-            push!(schur_complement_nnz_list, 0)
         end
     else
         second_last_schur_complement_buffer = nothing
@@ -1455,6 +1492,52 @@ function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti},
         return nothing
     end
 end
+function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SharedSparseBuffer,
+                               rowinds, colinds) where {Tf,Ti}
+    @inbounds begin
+        colptr = A.colptr
+        rowval = A.rowval
+        nzval = A.nzval
+        new_colptr = new_A.colptr
+        new_rowval_list = new_A.rowval_list
+        new_nzval = new_A.nzval
+        resize!(colptr, 1)
+        resize!(rowval, 0)
+        resize!(nzval, 0)
+        count = 1
+        n_rowinds = length(rowinds)
+        for col ∈ colinds
+            colstart = new_colptr[col]
+            colend = new_colptr[col+1] - 1
+            if colend < colstart
+                continue
+            end
+            col_new_rowval = new_rowval_list[col]
+            row_count = max(searchsortedlast(rowinds, col_new_rowval[1]) - 1, 1)
+            for (row_i, new_i) ∈ enumerate(colstart:colend)
+                rv = col_new_rowval[row_i]
+                while row_count ≤ n_rowinds && rowinds[row_count] < rv
+                    row_count += 1
+                end
+                if row_count > n_rowinds
+                    break
+                end
+                if rowinds[row_count] == rv
+                    newval = new_nzval[new_i]
+                    if !iszero(newval)
+                        push!(rowval, row_count)
+                        push!(nzval, newval)
+                        count += 1
+                        row_count += 1
+                    end
+                end
+            end
+            push!(colptr, count)
+        end
+
+        return nothing
+    end
+end
 function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{Tf},
                                rowinds, colinds) where {Tf,Ti}
     @inbounds begin
@@ -1481,7 +1564,7 @@ function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{
     end
 end
 @inline function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
-                               rowinds, colinds) where {Tf,Ti}
+                                       rowinds, colinds) where {Tf,Ti}
     @inbounds begin
         full_rowinds, full_colinds = new_A.indices
         return @views update_sparse_matrix!(A, parent(new_A), full_rowinds[rowinds],
@@ -1493,7 +1576,7 @@ function ldiv_Bmatrix!(::MPIStaticCondensationNull, B)
     return nothing
 end
 
-function lu!(solver::MPIStaticCondensationNull, A::AbstractMatrix)
+function lu!(solver::MPIStaticCondensationNull, A)
     return nothing
 end
 

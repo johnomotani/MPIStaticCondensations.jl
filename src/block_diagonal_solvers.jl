@@ -166,7 +166,8 @@ function get_block_diagonal_solver(level_info, data_type, is_top_level, use_shar
     end
 end
 
-function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, full_A::AbstractMatrix)
+function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
+             full_A::Union{AbstractMatrix,SharedSparseBuffer})
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         check_lu = block_diagonal_solver.check_lu
@@ -178,8 +179,52 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, full_A::AbstractM
                     lu!(s, buffer; reuse_symbolic=false, check=check_lu)
                 else
                     factors = s.factors
-                    for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
-                        factors[i1,j1] = full_A[i2,j2]
+                    if isa(full_A, AbstractSparseMatrixCSC)
+                        colptr = full_A.colptr
+                        rowval = full_A.rowval
+                        nzval = full_A.nzval
+                        first_row = inds[1]
+                        for (j1, j2) ∈ enumerate(inds)
+                            first_i = colptr[j2]
+                            last_i = colptr[j2+1]-1
+                            flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
+                            for (i1, i2) ∈ enumerate(inds)
+                                while flat_i ≤ last_i && rowval[flat_i] < i2
+                                    flat_i += 1
+                                end
+                                if rowval[flat_i] == i2
+                                    factors[i1,j1] = nzval[flat_i]
+                                else
+                                    factors[i1,j1] = 0.0
+                                end
+                            end
+                        end
+                    elseif isa(full_A, SharedSparseBuffer)
+                        colptr = full_A.colptr
+                        rowval_list = full_A.rowval_list
+                        nzval = full_A.nzval
+                        first_row = inds[1]
+                        for (j1, j2) ∈ enumerate(inds)
+                            first_i = colptr[j2]
+                            col_rowval = rowval_list[j2]
+                            row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
+                            last_row = length(col_rowval)
+                            flat_i = row_i + first_i - 1
+                            for (i1, i2) ∈ enumerate(inds)
+                                while row_i < last_row && col_rowval[row_i] < i2
+                                    row_i += 1
+                                end
+                                if col_rowval[row_i] == i2
+                                    factors[i1,j1] = nzval[row_i+first_i-1]
+                                else
+                                    factors[i1,j1] = 0.0
+                                end
+                            end
+                        end
+                    else
+                        for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
+                            factors[i1,j1] = full_A[i2,j2]
+                        end
                     end
                     getrf!(factors, s.ipiv; check=check_lu)
                 end
@@ -188,7 +233,8 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial, full_A::AbstractM
         return nothing
     end
 end
-function lu!(block_diagonal_solver::BlockDiagonalSolverShared, full_A::AbstractMatrix)
+function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
+             full_A::Union{AbstractMatrix,SharedSparseBuffer})
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         factors = block_diagonal_solver.factors
@@ -197,8 +243,54 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared, full_A::AbstractM
         partial_col_range = block_diagonal_solver.partial_col_range
         synchronize_shared = block_diagonal_solver.synchronize_shared
 
-        for (j1, j2) ∈ zip(partial_col_range, partial_block_indices), (i1, i2) ∈ enumerate(block_indices)
-            factors[i1,j1] = full_A[i2,j2]
+        if isempty(block_indices)
+            # Nothing to do.
+        elseif isa(full_A, AbstractSparseMatrixCSC)
+            colptr = full_A.colptr
+            rowval = full_A.rowval
+            nzval = full_A.nzval
+            first_row = block_indices[1]
+            for (j1, j2) ∈ zip(partial_col_range, partial_block_indices)
+                first_i = colptr[j2]
+                last_i = colptr[j2+1]-1
+                flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
+                for (i1, i2) ∈ enumerate(block_indices)
+                    while flat_i ≤ last_i && rowval[flat_i] < i2
+                        flat_i += 1
+                    end
+                    if rowval[flat_i] == i2
+                        factors[i1,j1] = nzval[flat_i]
+                    else
+                        factors[i1,j1] = 0.0
+                    end
+                end
+            end
+        elseif isa(full_A, SharedSparseBuffer)
+            colptr = full_A.colptr
+            rowval_list = full_A.rowval_list
+            nzval = full_A.nzval
+            first_row = block_indices[1]
+            for (j1, j2) ∈ zip(partial_col_range, partial_block_indices)
+                first_i = colptr[j2]
+                col_rowval = rowval_list[j2]
+                row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
+                last_row = length(col_rowval)
+                flat_i = row_i + first_i - 1
+                for (i1, i2) ∈ enumerate(block_indices)
+                    while row_i < last_row && col_rowval[row_i] < i2
+                        row_i += 1
+                    end
+                    if col_rowval[row_i] == i2
+                        factors[i1,j1] = nzval[row_i+first_i-1]
+                    else
+                        factors[i1,j1] = 0.0
+                    end
+                end
+            end
+        else
+            for (j1, j2) ∈ zip(partial_col_range, partial_block_indices), (i1, i2) ∈ enumerate(block_indices)
+                factors[i1,j1] = full_A[i2,j2]
+            end
         end
 
         synchronize_shared()
