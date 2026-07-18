@@ -211,7 +211,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
                             last_row = length(col_rowval)
                             flat_i = row_i + first_i - 1
                             for (i1, i2) ∈ enumerate(inds)
-                                while row_i ≤ last_row && col_rowval[row_i] < i2
+                                while row_i < last_row && col_rowval[row_i] < i2
                                     row_i += 1
                                 end
                                 if col_rowval[row_i] == i2
