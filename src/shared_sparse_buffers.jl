@@ -304,7 +304,7 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
         nzval_length = sum(n < 0 ? colptr[-n] : n for n ∈ @view(colptr[1:end-1]))
         rowval_length = sum(n for n ∈ @view(colptr[1:end-1]) if n > 0)
 
-        rowval_list = typeof(colptr)[]
+        rowval_list = typeof(@view(colptr[1:1]))[]
         rowval_storage = allocate_shared_int(rowval_length)
         offset = 0
         for (icol, n) ∈ enumerate(@view(colptr[1:end-1]))
