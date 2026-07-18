@@ -5,6 +5,7 @@ struct SharedSparseBuffer{Tf,Ti,Tcp<:AbstractVector{Ti},Trv<:AbstractVector{Ti},
     rowval_list::Vector{Trv}
     nzval::Tnz
 end
+Base.eltype(::SharedSparseBuffer{Tf}) where Tf = Tf
 
 function get_shared_sparse_buffer(buffer_info::NamedTuple,
                                   storage::AbstractVector{<:AbstractFloat})

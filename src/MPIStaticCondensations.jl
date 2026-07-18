@@ -278,12 +278,12 @@ function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
                      remove_boundaries)
 end
 
+include("shared_sparse_buffers.jl")
 include("block_S.jl")
 include("block_C.jl")
 include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
-include("shared_sparse_buffers.jl")
 
 struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
@@ -1482,6 +1482,52 @@ function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti},
         return nothing
     end
 end
+function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SharedSparseBuffer,
+                               rowinds, colinds) where {Tf,Ti}
+    @inbounds begin
+        colptr = A.colptr
+        rowval = A.rowval
+        nzval = A.nzval
+        new_colptr = new_A.colptr
+        new_rowval_list = new_A.rowval_list
+        new_nzval = new_A.nzval
+        resize!(colptr, 1)
+        resize!(rowval, 0)
+        resize!(nzval, 0)
+        count = 1
+        n_rowinds = length(rowinds)
+        for col ∈ colinds
+            colstart = new_colptr[col]
+            colend = new_colptr[col+1] - 1
+            if colend < colstart
+                continue
+            end
+            col_new_rowval = new_rowval[col]
+            row_count = max(searchsortedlast(rowinds, col_new_rowval[1]) - 1, 1)
+            for (row_i, new_i) ∈ enumerate(colstart:colend)
+                rv = new_rowval[row_i]
+                while row_count ≤ n_rowinds && rowinds[row_count] < rv
+                    row_count += 1
+                end
+                if row_count > n_rowinds
+                    break
+                end
+                if rowinds[row_count] == rv
+                    newval = new_nzval[new_i]
+                    if !iszero(newval)
+                        push!(rowval, row_count)
+                        push!(nzval, newval)
+                        count += 1
+                        row_count += 1
+                    end
+                end
+            end
+            push!(colptr, count)
+        end
+
+        return nothing
+    end
+end
 function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{Tf},
                                rowinds, colinds) where {Tf,Ti}
     @inbounds begin
@@ -1508,7 +1554,7 @@ function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::AbstractMatrix{
     end
 end
 @inline function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SubArray{Tf,2},
-                               rowinds, colinds) where {Tf,Ti}
+                                       rowinds, colinds) where {Tf,Ti}
     @inbounds begin
         full_rowinds, full_colinds = new_A.indices
         return @views update_sparse_matrix!(A, parent(new_A), full_rowinds[rowinds],

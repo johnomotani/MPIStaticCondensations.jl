@@ -78,6 +78,50 @@ function add_D_to_schur_complement!(schur_complement::BlockS, full_A)
                     end
                 end
             end
+        elseif isa(sc_matrix, SharedSparseBuffer)
+            sc_colptr = sc_matrix.colptr
+            sc_rowval_list = sc_matrix.rowval_list
+            sc_nzval = sc_matrix.nzval
+            sc_column_range_partial = schur_complement.column_range_partial
+            sc_indices = schur_complement.indices
+
+            nrow = length(sc_indices)
+            for j ∈ sc_column_range_partial
+                first_i = sc_colptr[j]
+                last_i = sc_colptr[j+1] - 1
+                if last_i < first_i
+                    continue
+                end
+                # Assume D and schur_complement have a similar pattern of non-zeros, so no
+                # significant gain from using searchsortedlast() to find the first row_i that
+                # will be within the non-zeros of D.
+                row_i = 1
+
+                full_j = sc_indices[j]
+                full_first_i = full_A_colptr[full_j]
+                full_last_i = full_A_colptr[full_j+1]-1
+                if full_last_i < full_first_i
+                    continue
+                end
+
+                sc_col_rv = sc_rowval_list[j]
+                first_row = sc_col_rv[1]
+                last_row_i = length(sc_col_rv)
+                full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
+                while row_i ≤ last_row_i && full_flat_i ≤ full_last_i
+                    row = sc_indices[sc_col_rv[row_i]]
+                    full_row = full_A_rowval[full_flat_i]
+                    if row == full_row
+                        sc_nzval[row_i+first_i-1] += full_A_nzval[full_flat_i]
+                        row_i += 1
+                        full_flat_i += 1
+                    elseif row < full_row
+                        row_i += 1
+                    else
+                        full_flat_i += 1
+                    end
+                end
+            end
         else
             sc_column_range_partial = schur_complement.column_range_partial
             sc_indices = schur_complement.indices
