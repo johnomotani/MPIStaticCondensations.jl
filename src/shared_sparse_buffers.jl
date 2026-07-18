@@ -1,3 +1,24 @@
+struct SharedSparseBuffer{Tf,Ti,Tcp<:AbstractVector{Ti},Trv<:AbstractVector{Ti},Tnz<:AbstractVector{Tf}}
+    m::Ti
+    n::Ti
+    colptr::Tcp
+    rowval_list::Vector{Trv}
+    nzval::Tnz
+end
+
+function get_shared_sparse_buffer(buffer_info::NamedTuple,
+                                  storage::AbstractVector{<:AbstractFloat})
+    flat_n = buffer_info.nzval_length
+    if length(storage) < flat_n
+        error("Construction of SharedSparseBuffer requires a storage array of at least "
+              * "length $(flat_n), but got array with length $(length(storage)).")
+    end
+    nzval = @view storage[1:flat_n]
+
+    return SharedSparseBuffer(buffer_info.m, buffer_info.n, buffer_info.colptr,
+                              buffer_info.rowval_list, nzval)
+end
+
 function get_dim_indices!(dimensions, block_sizes, flat_i)
     @inbounds begin
         block_inds = zeros(Int64, length(dimensions))
@@ -118,13 +139,12 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
     end
 end
 
-function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
-                                             shared_comm, allocate_shared_float::F1,
-                                             allocate_shared_int::F2,
-                                             block_sizes::Union{Vector{<:Integer},Nothing}=nothing,
-                                             row_indices::Union{Vector{<:Integer},Nothing}=nothing,
-                                             column_indices::Union{Vector{<:Integer},Nothing}=nothing;
-                                             ind_type::Type=Int64) where {F1, F2}
+function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_comm,
+                                       allocate_shared_int::F,
+                                       block_sizes::Union{Vector{<:Integer},Nothing}=nothing,
+                                       row_indices::Union{Vector{<:Integer},Nothing}=nothing,
+                                       column_indices::Union{Vector{<:Integer},Nothing}=nothing;
+                                       ind_type::Type=Int64) where F
     @inbounds begin
         n_local_list = [d.n_local for d ∈ dimensions]
         n_total = prod(n_local_list; init=1)
@@ -157,8 +177,8 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
         end
 
         shared_comm_rank = MPI.Comm_rank(shared_comm)
-        n_colptr = Ref(-1)
         n_rowval = Ref(-1)
+        colptr = allocate_shared_int(n + 1)
         if shared_comm_rank == 0
             # Columns can be 'equivalent' in the sense that they have exactly the same
             # non-empty row indices. In a single dimension, two points are equivalent if
@@ -245,15 +265,20 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                 return eq_ind
             end
 
+            # We temporarily use colptr as a buffer to store the sizes of rowval vectors,
+            # or the positions of the first occurence of repeated rowval vectors.
             cp = ind_type[]
             rv = ind_type[]
             row_count = Ref(1)
-            rv_lookup = Dict{ind_type,Vector{ind_type}}()
-            for col ∈ column_indices
+            rv_lookup = Dict{ind_type,Tuple{Vector{ind_type},ind_type}}()
+            rv_list = Vector{ind_type}[]
+            for (icol, col) ∈ enumerate(column_indices)
                 push!(cp, length(rv) + 1)
                 col_eq = equivalence_ind(col)
                 if col_eq ∈ keys(rv_lookup)
-                    col_rv = rv_lookup[col_eq]
+                    col_rv, origin_icol = rv_lookup[col_eq]
+                    push!(rv_list, ind_type[])
+                    colptr[icol] = -origin_icol
                 else
                     col_rv = ind_type[]
                     block_inds, inner_inds = get_dim_indices!(dimensions, block_sizes,
@@ -262,40 +287,62 @@ function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                     add_row_inds!(col_rv, length(dimensions), dimensions, block_sizes,
                                   nblock_list, row_indices, block_inds, inner_inds, 0,
                                   row_count)
-                    rv_lookup[col_eq] = col_rv
+                    rv_lookup[col_eq] = (col_rv, icol)
+                    push!(rv_list, col_rv)
+                    colptr[icol] = length(col_rv)
                 end
                 new_n = length(col_rv)
                 resize!(rv, length(rv) + new_n)
                 rv[end-new_n+1:end] .= col_rv
             end
             push!(cp, length(rv) + 1)
-
-            n_colptr[] = length(cp)
-            n_rowval[] = length(rv)
-
-            MPI.Bcast!(n_colptr, shared_comm; root=0)
-            MPI.Bcast!(n_rowval, shared_comm; root=0)
-
-            colptr = allocate_shared_int(n_colptr[])
-            rowval = allocate_shared_int(n_rowval[])
-            nzval = allocate_shared_float(n_rowval[])
-
-            colptr .= cp
-            rowval .= rv
-            nzval .= 0.0
-        else
-            MPI.Bcast!(n_colptr, shared_comm; root=0)
-            MPI.Bcast!(n_rowval, shared_comm; root=0)
-
-            colptr = allocate_shared_int(n_colptr[])
-            rowval = allocate_shared_int(n_rowval[])
-            nzval = allocate_shared_float(n_rowval[])
         end
 
         MPI.Barrier(shared_comm)
 
-        # Use the 'experimental' FixedSparseCSC instead of SparseMatrixCSC to ensure that
-        # the Vectors are not resized, reallocated, etc.
-        return FixedSparseCSC(m, n, colptr, rowval, nzval)
+        nzval_length = sum(n < 0 ? colptr[-n] : n for n ∈ @view(colptr[1:end-1]))
+        rowval_length = sum(n for n ∈ @view(colptr[1:end-1]) if n > 0)
+
+        rowval_list = typeof(colptr)[]
+        rowval_storage = allocate_shared_int(rowval_length)
+        offset = 0
+        for (icol, n) ∈ enumerate(@view(colptr[1:end-1]))
+            if n > 0
+                this_rv = @view rowval_storage[offset+1:offset+n]
+                offset += n
+                if shared_comm_rank == 0
+                    this_rv .= rv_list[icol]
+                end
+            else
+                this_rv = rowval_list[-n]
+            end
+            push!(rowval_list, this_rv)
+        end
+
+        MPI.Barrier(shared_comm)
+
+        if shared_comm_rank == 0
+            colptr .= cp
+        end
+
+        MPI.Barrier(shared_comm)
+
+        return (; m, n, colptr, rowval_list, nzval_length)
     end
+end
+
+function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
+                                             shared_comm, allocate_shared_float::F1,
+                                             allocate_shared_int::F2,
+                                             block_sizes::Union{Vector{<:Integer},Nothing}=nothing,
+                                             row_indices::Union{Vector{<:Integer},Nothing}=nothing,
+                                             column_indices::Union{Vector{<:Integer},Nothing}=nothing;
+                                             ind_type::Type=Int64) where {F1, F2}
+    buffer_info = get_shared_sparse_matrix_info(dimensions, shared_comm,
+                                                allocate_shared_int, block_sizes,
+                                                row_indices, column_indices; ind_type)
+    rowval = vcat(buffer_info.rowval_list...)
+    nzval = allocate_shared_float(buffer_info.nzval_length)
+
+    return FixedSparseCSC(buffer_info.m, buffer_info.n, buffer_info.colptr, rowval, nzval)
 end

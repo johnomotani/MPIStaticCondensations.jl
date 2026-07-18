@@ -1220,23 +1220,50 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_allocate_shared_int_list =
         [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
          for li ∈ level_info_list]
-    schur_complement_buffer_list =
-        [get_shared_sparse_matrix_csc_buffer(dimensions, li.level_shared_comm, laf,
-                                             lai, li.block_sizes,
-                                             li.bottom_vector_indices,
-                                             li.bottom_vector_indices; ind_type)
-         for (li, laf, lai) ∈ zip(level_info_list[1:end-1],
-                                  level_allocate_shared_float_list[1:end-2],
-                                  level_allocate_shared_int_list[1:end-2])]
-    schur_complement_nnz_list = [nnz(sc) for sc ∈ schur_complement_buffer_list]
+    schur_complement_buffer_info_list =
+        [get_shared_sparse_matrix_info(dimensions, li.level_shared_comm, lai,
+                                       li.block_sizes, li.bottom_vector_indices,
+                                       li.bottom_vector_indices; ind_type)
+         for (li, lai) ∈ zip(level_info_list[1:end-1],
+                             level_allocate_shared_int_list[1:end-2])]
+    schur_complement_nnz_list = [sc.nzval_length
+                                 for sc ∈ schur_complement_buffer_info_list]
+    odd_buffer_size = maximum(schur_complement_nnz_list[1:2:end]; init=0)
+    even_buffer_size = maximum(schur_complement_nnz_list[2:2:end]; init=0)
     if n_levels > 1
         if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
             nbuff = length(level_info_list[end-1].bottom_vector_indices)
-            second_last_schur_complement_buffer = level_allocate_shared_float_list[end-1](nbuff, nbuff)
-            push!(schur_complement_nnz_list, length(second_last_schur_complement_buffer))
+            if n_levels % 2 == 0
+                odd_buffer_size = max(odd_buffer_size, nbuff^2)
+            else
+                even_buffer_size = max(even_buffer_size, nbuff^2)
+            end
+        end
+    end
+    if length(odd_buffer_size) > 0
+        odd_buffer = allocate_shared_float(maximum(odd_buffer_size))
+    else
+        odd_buffer = zeros(data_type, 0)
+    end
+    if length(even_buffer_size) > 0
+        even_buffer = allocate_shared_float(maximum(even_buffer_size))
+    else
+        even_buffer = zeros(data_type, 0)
+    end
+    schur_complement_buffer_list =
+        [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
+         for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
+    if n_levels > 1
+        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
+            if n_levels % 2 == 0
+                second_last_buffer = odd_buffer
+            else
+                second_last_buffer = even_buffer
+            end
+            second_last_schur_complement_buffer =
+                reshape(@view(second_last_buffer[1:nbuff^2]), nbuff, nbuff)
         else
             second_last_schur_complement_buffer = nothing
-            push!(schur_complement_nnz_list, 0)
         end
     else
         second_last_schur_complement_buffer = nothing
