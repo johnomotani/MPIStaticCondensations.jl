@@ -34,7 +34,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS, full_A)
         # `schur_complement`.
         sc_matrix = schur_complement.matrix
         if isa(sc_matrix, SharedSparseBuffer)
-            if isa(full_A, FixedSparseCSC)
+            if isa(full_A, AbstractSparseMatrixCSC)
                 full_A_colptr = full_A.colptr
                 full_A_rowval = full_A.rowval
                 full_A_nzval = full_A.nzval
@@ -135,7 +135,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS, full_A)
                 error("Unsupported type '$(typeof(full_A))' for `full_A`.")
             end
         else
-            if isa(full_A, FixedSparseCSC)
+            if isa(full_A, AbstractSparseMatrixCSC)
                 full_A_colptr = full_A.colptr
                 full_A_rowval = full_A.rowval
                 full_A_nzval = full_A.nzval
