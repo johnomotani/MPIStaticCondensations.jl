@@ -452,7 +452,7 @@ function copy_C_submatrix!(block_C::BlockCShared, full_A::SharedSparseBuffer)
         end
         block = block_C.block
         full_A_colptr = full_A.colptr
-        full_A_rowval = full_A.rowval
+        full_A_rowval_list = full_A.rowval_list
         full_A_nzval = full_A.nzval
 
         block_nrow = length(block_rowinds)

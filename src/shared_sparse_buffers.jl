@@ -164,9 +164,9 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
         m = length(row_indices)
         n = length(column_indices)
         if m == 0 || n == 0
-            # FixedSparseCSC constructor errors when one of the matrix sizes is zero, and
-            # there are no entries anyway so do not need shared-memory allocation.
-            return spzeros(m, n)
+            # No entries so do not need shared-memory allocation.
+            return (; m, n, colptr=ind_type[1], rowval_list=Vector{ind_type}[],
+                    nzval_length=0)
         end
 
         for (idim, d) ∈ enumerate(dimensions)

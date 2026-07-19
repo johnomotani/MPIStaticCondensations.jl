@@ -243,7 +243,9 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
         partial_col_range = block_diagonal_solver.partial_col_range
         synchronize_shared = block_diagonal_solver.synchronize_shared
 
-        if isa(full_A, AbstractSparseMatrixCSC)
+        if isempty(block_indices)
+            # Nothing to do.
+        elseif isa(full_A, AbstractSparseMatrixCSC)
             colptr = full_A.colptr
             rowval = full_A.rowval
             nzval = full_A.nzval

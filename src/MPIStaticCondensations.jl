@@ -1224,29 +1224,31 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         [get_shared_sparse_matrix_info(dimensions, li.level_shared_comm, lai,
                                        li.block_sizes, li.bottom_vector_indices,
                                        li.bottom_vector_indices; ind_type)
-         for (li, lai) ∈ zip(level_info_list[1:end-1],
+         for (li, lai) ∈ zip(level_info_list[1:end-2],
                              level_allocate_shared_int_list[1:end-2])]
     schur_complement_nnz_list = [sc.nzval_length
                                  for sc ∈ schur_complement_buffer_info_list]
-    odd_buffer_size = maximum(schur_complement_nnz_list[1:2:end]; init=0)
-    even_buffer_size = maximum(schur_complement_nnz_list[2:2:end]; init=0)
+    odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
+    even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
     if n_levels > 1
         if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
             nbuff = length(level_info_list[end-1].bottom_vector_indices)
             if n_levels % 2 == 0
-                odd_buffer_size = max(odd_buffer_size, nbuff^2)
+                odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
             else
-                even_buffer_size = max(even_buffer_size, nbuff^2)
+                even_buffer_size[] = max(even_buffer_size[], nbuff^2)
             end
         end
     end
-    if length(odd_buffer_size) > 0
-        odd_buffer = allocate_shared_float(maximum(odd_buffer_size))
+    MPI.Allreduce!(odd_buffer_size, max, shared_comm)
+    MPI.Allreduce!(even_buffer_size, max, shared_comm)
+    if odd_buffer_size[] > 0
+        odd_buffer = allocate_shared_float(odd_buffer_size[])
     else
         odd_buffer = zeros(data_type, 0)
     end
-    if length(even_buffer_size) > 0
-        even_buffer = allocate_shared_float(maximum(even_buffer_size))
+    if even_buffer_size[] > 0
+        even_buffer = allocate_shared_float(even_buffer_size[])
     else
         even_buffer = zeros(data_type, 0)
     end
@@ -1566,7 +1568,7 @@ function ldiv_Bmatrix!(::MPIStaticCondensationNull, B)
     return nothing
 end
 
-function lu!(solver::MPIStaticCondensationNull, A::AbstractMatrix)
+function lu!(solver::MPIStaticCondensationNull, A)
     return nothing
 end
 
