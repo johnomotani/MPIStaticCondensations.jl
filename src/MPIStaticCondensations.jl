@@ -1504,10 +1504,10 @@ function update_sparse_matrix!(A::SparseMatrixCSC{Tf,Ti}, new_A::SharedSparseBuf
             if colend < colstart
                 continue
             end
-            col_new_rowval = new_rowval[col]
+            col_new_rowval = new_rowval_list[col]
             row_count = max(searchsortedlast(rowinds, col_new_rowval[1]) - 1, 1)
             for (row_i, new_i) ∈ enumerate(colstart:colend)
-                rv = new_rowval[row_i]
+                rv = col_new_rowval[row_i]
                 while row_count ≤ n_rowinds && rowinds[row_count] < rv
                     row_count += 1
                 end
