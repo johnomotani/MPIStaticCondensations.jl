@@ -51,6 +51,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
                 push!(blocks, zeros(Tf, nrow, ncol))
             else
                 b = get_partial_FixedSparseCSC_buffer(ri, ci, matrix_template, Tf)
+                b.nzval .= 0.0
                 push!(blocks, b)
             end
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
@@ -154,6 +155,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
         else
             block = get_partial_FixedSparseCSC_buffer(block_rowinds, block_colinds,
                                                       matrix_template, Tf)
+            block.nzval .= 0.0
         end
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
@@ -236,13 +238,11 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractSparseMatrixCS
                             i1 += 1
                             flat_i += 1
                         elseif full_A_row > block_global_row
-                            block[i1,j1] = 0.0
                             i1 += 1
                         else
                             flat_i += 1
                         end
                         if flat_i > last_i
-                            block[i1:end,j1] .= 0.0
                             break
                         end
                     end
@@ -270,13 +270,11 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractSparseMatrixCS
                             block_i += 1
                             flat_i += 1
                         elseif full_A_row > block_global_row
-                            block_nzval[block_i] = 0.0
                             block_i += 1
                         else
                             flat_i += 1
                         end
                         if flat_i > last_i
-                            block_nzval[block_i:block_last_i] .= 0.0
                             break
                         end
                     end
@@ -317,13 +315,11 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::SharedSparseBuffer)
                             i1 += 1
                             row_i += 1
                         elseif full_A_row > block_global_row
-                            block[i1,j1] = 0.0
                             i1 += 1
                         else
                             row_i += 1
                         end
                         if row_i > last_row
-                            block[i1:end,j1] .= 0.0
                             break
                         end
                     end
@@ -351,13 +347,11 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::SharedSparseBuffer)
                             block_i += 1
                             row_i += 1
                         elseif full_A_row > block_global_row
-                            block_nzval[block_i] = 0.0
                             block_i += 1
                         else
                             row_i += 1
                         end
                         if row_i > last_row
-                            block_nzval[block_i:block_last_i] .= 0.0
                             break
                         end
                     end
@@ -397,13 +391,11 @@ function copy_C_submatrix!(block_C::BlockCShared, full_A::AbstractSparseMatrixCS
                         i1 += 1
                         flat_i += 1
                     elseif full_A_row > block_global_row
-                        block[i1,j1] = 0.0
                         i1 += 1
                     else
                         flat_i += 1
                     end
                     if flat_i > last_i
-                        block[i1:end,j1] .= 0.0
                         break
                     end
                 end
@@ -427,13 +419,11 @@ function copy_C_submatrix!(block_C::BlockCShared, full_A::AbstractSparseMatrixCS
                         block_i += 1
                         flat_i += 1
                     elseif full_A_row > block_global_row
-                        block_nzval[block_i] = 0.0
                         block_i += 1
                     else
                         flat_i += 1
                     end
                     if flat_i > last_i
-                        block_nzval[block_i:block_last_i] .= 0.0
                         break
                     end
                 end
@@ -472,13 +462,11 @@ function copy_C_submatrix!(block_C::BlockCShared, full_A::SharedSparseBuffer)
                         i1 += 1
                         row_i += 1
                     elseif full_A_row > block_global_row
-                        block[i1,j1] = 0.0
                         i1 += 1
                     else
                         row_i += 1
                     end
                     if row_i > last_row
-                        block[i1:end,j1] .= 0.0
                         break
                     end
                 end
@@ -502,13 +490,11 @@ function copy_C_submatrix!(block_C::BlockCShared, full_A::SharedSparseBuffer)
                         block_i += 1
                         row_i += 1
                     elseif full_A_row > block_global_row
-                        block_nzval[block_i] = 0.0
                         block_i += 1
                     else
                         row_i += 1
                     end
                     if row_i > last_row
-                        block_nzval[block_i:block_last_i] .= 0.0
                         break
                     end
                 end
