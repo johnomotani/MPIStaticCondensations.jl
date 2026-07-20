@@ -1,4 +1,4 @@
-struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
+struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
     blocks::Vector{Tb}
     block_rowinds::Vector{Trange}
     bottom_block_rowinds::Vector{Trange}
@@ -6,6 +6,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
     block_hypercube_positions::Vector{Ti}
     n_hypercube_positions::Ti
     right_multiplication_buffer_blocks::Trmbb
+    dense_buffer_storage::Tdbs
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
     vector_intermediate_buffer::Tib
@@ -22,6 +23,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
                               block_hypercube_positions::Vector{Ti},
                               n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
+                              dense_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
                               block_synchronize_shared::Fsb,
@@ -44,6 +46,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
         right_multiplication_buffer_blocks = []
 
         offset = 0
+        max_length = 0
         for (ri, ci) ∈ zip(block_rowinds, block_colinds)
             nrow = length(ri)
             ncol = length(ci)
@@ -65,21 +68,31 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
                   reshape(@view(right_multiplication_buffer_storage[offset+1:offset+right_multiplication_block_size]),
                           nrow, nrow))
             offset += right_multiplication_block_size
+            max_length = max(max_length, nrow * ncol)
+        end
+
+        if matrix_template === nothing
+            dense_buffer_storage = nothing
+        else
+            if length(dense_buffer_storage) < max_length
+                resize!(dense_buffer_storage, max_length)
+            end
         end
 
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(vector_intermediate_buffer),Fsb,Fs}(
+        return new{eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
                    blocks, block_rowinds, bottom_block_rowinds, block_colinds,
                    block_hypercube_positions, n_hypercube_positions,
-                   right_multiplication_buffer_blocks, vector_buffer_blocks_in,
-                   vector_buffer_blocks_out, vector_intermediate_buffer, vector_range,
-                   block_synchronize_shared, synchronize_shared)
+                   right_multiplication_buffer_blocks, dense_buffer_storage,
+                   vector_buffer_blocks_in, vector_buffer_blocks_out,
+                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
+                   synchronize_shared)
     end
 end
 
-struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
     block_rowinds::Trange
     bottom_block_rowinds::Trange
@@ -89,6 +102,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
     block_hypercube_position::Ti
     n_hypercube_positions::Ti
     right_multiplication_buffer_block::Trmbb
+    dense_buffer::Tdb
     block_right_multiplication_output_colinds::Vector{Ti}
     vector_buffer_block_in::Tbi
     vector_buffer_block_out::Vector{Tf}
@@ -139,6 +153,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
                               matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
                               block_hypercube_position::Ti, n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
+                              dense_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
                               subgroup_i::Ti, block_allocate_shared_float::Fa,
@@ -152,10 +167,15 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
         ncol = length(block_colinds)
         if matrix_template === nothing
             block = zeros(Tf, nrow, ncol)
+            dense_buffer = nothing
         else
             block = get_partial_FixedSparseCSC_buffer(block_rowinds, block_colinds,
                                                       matrix_template, Tf)
             block.nzval .= 0.0
+            if length(dense_buffer_storage) < nrow * ncol
+                resize!(dense_buffer_storage, nrow * ncol)
+            end
+            dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow, ncol)
         end
         cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
@@ -175,10 +195,10 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+        return new{typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, bottom_block_rowinds, block_colinds,
                    partial_block_colinds, partial_col_range, block_hypercube_position,
-                   n_hypercube_positions, right_multiplication_buffer_block,
+                   n_hypercube_positions, right_multiplication_buffer_block, dense_buffer,
                    bottom_block_rowinds_full, vector_buffer_block_in,
                    vector_buffer_block_out, vector_intermediate_buffer_local,
                    vector_intermediate_buffer, vector_range, block_synchronize_shared,

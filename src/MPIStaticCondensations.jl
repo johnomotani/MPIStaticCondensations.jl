@@ -1339,7 +1339,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              block_allocate_shared_float,
                                              block_allocate_shared_int,
                                              right_multiplication_buffer_storage,
-                                             check_lu)
+                                             C_dense_buffer_storage, check_lu)
         end
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
