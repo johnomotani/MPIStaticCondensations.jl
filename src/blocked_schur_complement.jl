@@ -16,6 +16,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                  allocate_shared_float::Faf, allocate_shared_int::Fai,
                  block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
                  block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
+                 C_dense_buffer_storage,
                  check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
@@ -119,6 +120,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             matrix_template, block_hypercube_position,
                                             n_hypercube_positions,
                                             right_multiplication_buffer_storage,
+                                            C_dense_buffer_storage,
                                             C_vector_intermediate_buffer, C_vector_range,
                                             level_info.subgroup_i,
                                             block_allocate_shared_float,
@@ -152,6 +154,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                         matrix_template, block_hypercube_positions,
                                         n_hypercube_positions,
                                         right_multiplication_buffer_storage,
+                                        C_dense_buffer_storage,
                                         C_vector_intermediate_buffer, C_vector_range,
                                         block_synchronize_shared, synchronize_shared)
         end

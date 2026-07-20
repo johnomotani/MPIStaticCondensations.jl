@@ -303,6 +303,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
         sc_matrix = schur_complement.matrix
         synchronize_shared = C.synchronize_shared
         n_hypercube_positions = C.n_hypercube_positions
+        dense_buffer_storage = C.dense_buffer_storage
 
         if isa(sc_matrix, FixedSparseCSC)
             flat_range_partial = schur_complement.flat_range_partial
@@ -324,11 +325,35 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
             # and we can directly set entries, instead of adding to them, and so do not
             # need to zero-initialise the output buffer.
             block_hypercube_positions = C.block_hypercube_positions
-            for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                       Ainv_dot_B_blocks,
-                                                       block_output_inds,
-                                                       block_hypercube_positions)
-                mul!(mb, Cb, AiBb, -1.0, 0.0)
+            if dense_buffer_storage === nothing
+                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                           Ainv_dot_B_blocks,
+                                                           block_output_inds,
+                                                           block_hypercube_positions)
+                    mul!(mb, Cb, AiBb, -1.0, 0.0)
+                end
+            else
+                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                           Ainv_dot_B_blocks,
+                                                           block_output_inds,
+                                                           block_hypercube_positions)
+                    nrow, ncol = size(Cb)
+                    dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
+                                           ncol)
+                    C_colptr = Cb.colptr
+                    C_rowval = Cb.rowval
+                    C_nzval = Cb.nzval
+                    dense_buffer .= 0.0
+                    for j ∈ 1:ncol
+                        col_start = C_colptr[j]
+                        col_end = C_colptr[j+1]-1
+                        for flat_i ∈ col_start:col_end
+                            i = C_rowval[flat_i]
+                            dense_buffer[i,j] = C_nzval[flat_i]
+                        end
+                    end
+                    mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
+                end
             end
 
             synchronize_shared()
@@ -392,11 +417,35 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
             # and we can directly set entries, instead of adding to them, and so do not
             # need to zero-initialise the output buffer.
             block_hypercube_positions = C.block_hypercube_positions
-            for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                       Ainv_dot_B_blocks,
-                                                       block_output_inds,
-                                                       block_hypercube_positions)
-                mul!(mb, Cb, AiBb, -1.0, 0.0)
+            if dense_buffer_storage === nothing
+                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                           Ainv_dot_B_blocks,
+                                                           block_output_inds,
+                                                           block_hypercube_positions)
+                    mul!(mb, Cb, AiBb, -1.0, 0.0)
+                end
+            else
+                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                           Ainv_dot_B_blocks,
+                                                           block_output_inds,
+                                                           block_hypercube_positions)
+                    nrow, ncol = size(Cb)
+                    dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
+                                           ncol)
+                    C_colptr = Cb.colptr
+                    C_rowval = Cb.rowval
+                    C_nzval = Cb.nzval
+                    dense_buffer .= 0.0
+                    for j ∈ 1:ncol
+                        col_start = C_colptr[j]
+                        col_end = C_colptr[j+1]-1
+                        for flat_i ∈ col_start:col_end
+                            i = C_rowval[flat_i]
+                            dense_buffer[i,j] = C_nzval[flat_i]
+                        end
+                    end
+                    mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
+                end
             end
 
             synchronize_shared()
@@ -456,11 +505,35 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
             # and we can directly set entries, instead of adding to them, and so do not
             # need to zero-initialise the output buffer.
             block_hypercube_positions = C.block_hypercube_positions
-            for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                       Ainv_dot_B_blocks,
-                                                       block_output_inds,
-                                                       block_hypercube_positions)
-                mul!(mb, Cb, AiBb, -1.0, 0.0)
+            if dense_buffer_storage === nothing
+                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                           Ainv_dot_B_blocks,
+                                                           block_output_inds,
+                                                           block_hypercube_positions)
+                    mul!(mb, Cb, AiBb, -1.0, 0.0)
+                end
+            else
+                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
+                                                           Ainv_dot_B_blocks,
+                                                           block_output_inds,
+                                                           block_hypercube_positions)
+                    nrow, ncol = size(Cb)
+                    dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
+                                           ncol)
+                    C_colptr = Cb.colptr
+                    C_rowval = Cb.rowval
+                    C_nzval = Cb.nzval
+                    dense_buffer .= 0.0
+                    for j ∈ 1:ncol
+                        col_start = C_colptr[j]
+                        col_end = C_colptr[j+1]-1
+                        for flat_i ∈ col_start:col_end
+                            i = C_rowval[flat_i]
+                            dense_buffer[i,j] = C_nzval[flat_i]
+                        end
+                    end
+                    mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
+                end
             end
 
             current_hypercube_position = 1
@@ -502,6 +575,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
         synchronize_shared = C.synchronize_shared
         C_block = C.block
         mul_block = C.right_multiplication_buffer_block
+        dense_C = C.dense_buffer
         block_output_inds = C.bottom_block_rowinds
         block_output_colinds = C.block_right_multiplication_output_colinds
         block_hypercube_position = C.block_hypercube_position
@@ -518,7 +592,24 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
             end
 
             if !(isempty(block_output_inds) || isempty(block_output_colinds))
-                mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                if dense_C === nothing
+                    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                else
+                    ncol = size(C_block, 2)
+                    C_colptr = C_block.colptr
+                    C_rowval = C_block.rowval
+                    C_nzval = C_block.nzval
+                    dense_C .= 0.0
+                    for j ∈ 1:ncol
+                        col_start = C_colptr[j]
+                        col_end = C_colptr[j+1]-1
+                        for flat_i ∈ col_start:col_end
+                            i = C_rowval[flat_i]
+                            dense_C[i,j] = C_nzval[flat_i]
+                        end
+                    end
+                    mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
+                end
             end
 
             for hp ∈ 1:n_hypercube_positions
@@ -556,7 +647,24 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
             end
 
             if !(isempty(block_output_inds) || isempty(block_output_colinds))
-                mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                if dense_C === nothing
+                    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                else
+                    ncol = size(C_block, 2)
+                    C_colptr = C_block.colptr
+                    C_rowval = C_block.rowval
+                    C_nzval = C_block.nzval
+                    dense_C .= 0.0
+                    for j ∈ 1:ncol
+                        col_start = C_colptr[j]
+                        col_end = C_colptr[j+1]-1
+                        for flat_i ∈ col_start:col_end
+                            i = C_rowval[flat_i]
+                            dense_C[i,j] = C_nzval[flat_i]
+                        end
+                    end
+                    mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
+                end
             end
 
             for hp ∈ 1:n_hypercube_positions
@@ -591,7 +699,24 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
             end
 
             if !(isempty(block_output_inds) || isempty(block_output_colinds))
-                mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                if dense_C === nothing
+                    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                else
+                    ncol = size(C_block, 2)
+                    C_colptr = C_block.colptr
+                    C_rowval = C_block.rowval
+                    C_nzval = C_block.nzval
+                    dense_C .= 0.0
+                    for j ∈ 1:ncol
+                        col_start = C_colptr[j]
+                        col_end = C_colptr[j+1]-1
+                        for flat_i ∈ col_start:col_end
+                            i = C_rowval[flat_i]
+                            dense_C[i,j] = C_nzval[flat_i]
+                        end
+                    end
+                    mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
+                end
             end
 
             for hp ∈ 1:n_hypercube_positions

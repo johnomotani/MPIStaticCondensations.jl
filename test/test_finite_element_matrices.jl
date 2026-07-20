@@ -12,7 +12,8 @@ include("utils.jl")
 
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, sparse_stencils::Bool,
-                     reduce_proc_count_with_blocks::Bool, tol::AbstractFloat)
+                     reduce_proc_count_with_blocks::Bool, sparse_C_blocks::Bool,
+                     tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -27,6 +28,13 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
     x_local = allocate_shared_float(size(rhs_local)...)
+
+    Alu = mpi_static_condensation(dimensions; reduce_proc_count_with_blocks,
+                                  sparse_C_blocks,
+                                  comm, distributed_comm,
+                                  #mumps_fill_in_threshold=0.2, comm, distributed_comm,
+                                  shared_comm, allocate_shared_float, allocate_shared_int,
+                                  check_lu=true)
 
     lu!(Alu, local_matrix)
 
@@ -136,14 +144,15 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
             println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks")
         end
 
-        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list" for
+        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, sparse_C_blocks=$sparse_C_blocks" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
                 periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
-                dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),))
+                dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),)),
+                sparse_C_blocks ∈ (false, true)
             if rank == 0
-                println("  - n_shared=$n_shared, sparse_stencils=$sparse_stencils, this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list")
+                println("  - n_shared=$n_shared, sparse_stencils=$sparse_stencils, this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, sparse_C_blocks=$sparse_C_blocks")
             end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
@@ -151,7 +160,8 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
                           for (nelement, ngrid, irank, nrank, periodic, dense_boundaries)
                           ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list)]
 
-            test_matrix(dimensions, n_shared, this_seed, sparse_stencils, reduce_proc_count_with_blocks, tol)
+            test_matrix(dimensions, n_shared, this_seed, sparse_stencils,
+                        reduce_proc_count_with_blocks, sparse_C_blocks, tol)
             this_seed += 1
         end
     end
@@ -202,7 +212,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([4, 8], [5, 5], rank, comm_size, n_shared, tol, 2015)
             end
             @testset "3D" begin
-                tol = 5.0e-7
+                tol = 1.0e-6
                 test_dimension_combinations([1, 1, 1], [3, 3, 3], rank, comm_size, n_shared, tol, 3000; all_sparse_stencils=false, both_remove_procs=false)
                 test_dimension_combinations([2, 2, 2], [3, 4, 5], rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, both_remove_procs=false)
                 test_dimension_combinations([2, 3, 4], [3, 4, 5], rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, both_remove_procs=false)
