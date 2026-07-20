@@ -116,11 +116,19 @@ function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer
         firstrow = first(row_range)
         lastrow = last(row_range)
         existing_colptr = existing_buffer.colptr
-        existing_rowval = existing_buffer.rowval
+        if isa(existing_buffer, SharedSparseBuffer)
+            existing_rowval_list = existing_buffer.rowval_list
+        else
+            existing_rowval = existing_buffer.rowval
+        end
         for j ∈ col_range
             existing_col_start = existing_colptr[j]
             existing_col_end = existing_colptr[j+1]-1
-            existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+            if isa(existing_buffer, SharedSparseBuffer)
+                existing_col_rowval = existing_rowval_list[j]
+            else
+                existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+            end
             n_existing = existing_col_end - existing_col_start + 1
             if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
                 # Definitely no overlapping entries in this column, so skip.

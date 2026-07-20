@@ -18,7 +18,7 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tib,Fsb<:Function,Fs<:Function}
                               block_colinds::Vector{<:AbstractVector{Ti}},
                               local_top_vector_indices::Vector{Ti},
                               local_bottom_vector_indices::Vector{Ti},
-                              matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
+                              matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
                               block_hypercube_positions::Vector{Ti},
                               n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
@@ -135,7 +135,7 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Functi
                               partial_row_range::UnitRange{Ti}, block_colinds::AbstractVector{Ti},
                               local_top_vector_indices::AbstractVector{Ti},
                               local_bottom_vector_indices::AbstractVector{Ti},
-                              matrix_template::Union{AbstractSparseMatrixCSC,Nothing},
+                              matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
                               block_hypercube_position::Ti, n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
@@ -356,7 +356,7 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::SharedSparseBuffer)
                         else
                             row_i += 1
                         end
-                        if row_i > last_i
+                        if row_i > last_row
                             block_nzval[block_i:block_last_i] .= 0.0
                             break
                         end
@@ -507,7 +507,7 @@ function copy_C_submatrix!(block_C::BlockCShared, full_A::SharedSparseBuffer)
                     else
                         row_i += 1
                     end
-                    if row_i > last_i
+                    if row_i > last_row
                         block_nzval[block_i:block_last_i] .= 0.0
                         break
                     end
