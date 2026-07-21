@@ -74,6 +74,7 @@ using MPI
 using MPIDenseLUs
 using MPISchurComplements
 using MPISchurComplements: MPISchurComplementAFactorization
+using MUMPS
 using Primes
 using SparseArrays
 using SparseArrays: FixedSparseCSC, AbstractSparseMatrixCSC
@@ -315,6 +316,57 @@ struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Unio
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
 Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
+
+struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:MUMPS{Tf},Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+    n::Ti
+    mumps::Tmumps
+    is_root::Bool
+    timer::Ttimer
+
+    function MPIStaticCondensationMUMPS(matrix_buffer::SharedSparseBuffer, comm)
+        comm_rank = MPI.Comm_rank(comm)
+        comm_size = MPI.Comm_size(comm)
+        is_root = (comm_rank == 0)
+
+        colptr = matrix_buffer.colptr
+        rowval_list = matrix_buffer.rowval_list
+        nzval = matrix_buffer.nzval
+
+        # The matrix is stored in shared memory. For passing to MUMPS, select a subset of
+        # columns to be 'locally owned' - not sure whether this is more or less efficient
+        # than for example passing the whole matrix on the root process.
+        ncol = size(matrix_buffer, 2)
+        cols_per_proc = (ncol + comm_size - 1) ÷ comm_size
+        local_col_range = comm_rank*cols_per_proc+1:min((comm_rank+1)*cols_per_proc,ncol)
+
+        # The row/column indices need to be 32-bit integers for MUMPS.
+        global_i = vcat((fill(Cint(j), colptr[j+1] - colptr[j]) for j ∈ local_col_range)...)
+        global_j = Cint.(global_j)
+
+        # The locally-owned vector entries should be given by the min/max of the matrix
+        # indices in global_i or global_j.
+        indrange = extrema(global_i)
+        irhs = collect(indrange[1]:indrange[2])
+        #isol = similar(irhs)
+
+        t1 = time_ns()
+        icntl = copy(default_icntl)
+        icntl[4] = 1 # Non-verbose, only error messages.
+        icntl[14] = 100 # Percentage increase in the estimated working space (default is between 25 and 35).
+        icntl[18] = 3 # User-provided distributed matrix pattern.
+        #icntl[20] = 11 # Distributed RHS (also 10, not sure which value is best)
+        icntl[20] = 0 # Centralised RHS.
+        #icntl[21] = 1 # Solution is kept distributed.
+        icntl[21] = 0 # Solution is gathered centrally.
+        icntl[4] = 1 # Use 'tree parallelism' when multi-threaded.
+        cntl = copy(default_cntl64)
+        Alu = Mumps{Float64}(0, icntl, cntl)
+
+        return new{Tf,Ti,typeof(solver),typeof(timer)}(n, solver, is_root, timer)
+    end
+end
+Base.size(Alu::MPIStaticCondensationMUMPS) = (Alu.n, Alu.n)
+Base.size(Alu::MPIStaticCondensationMUMPS, d::Integer) = size(Alu)[d]
 
 function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{<:Integer})
     n_local_tuple = Tuple(d.n_local for d ∈ dimensions)
