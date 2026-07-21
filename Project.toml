@@ -12,12 +12,19 @@ Primes = "27ebfcd6-29c5-5fa9-bf4b-fb8fc14df3ae"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 
+[weakdeps]
+MUMPS = "55d2b088-9f4e-11e9-26c0-150b02ea6a46"
+
+[extensions]
+MumpsExt = "MUMPS"
+
 [compat]
 Combinatorics = "1.1.0"
 LinearAlgebra = "1.12.0"
 MPI = "0.20.26"
 MPIDenseLUs = "1.1.0"
 MPISchurComplements = "1.1.3"
+MUMPS = "1.5.1"
 Primes = "0.5.7"
 SparseArrays = "1.13.0"
 StableRNGs = "1.0.4"
@@ -30,4 +37,4 @@ StableRNGs = "860ef19b-820b-49d6-a774-d7a799459cd3"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Combinatorics", "StableRNGs", "Test"]
+test = ["Combinatorics", "MUMPS", "StableRNGs", "Test"]

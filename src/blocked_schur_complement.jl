@@ -3,7 +3,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
     B::TB
     C::TC
     schur_complement::TS
-    schur_complement_factorization::TSF
+    schur_complement_solver::TSF
     Ainv_dot_u::TAiu
     synchronize_shared::Tsync
     timer::Ttimer
@@ -11,7 +11,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
     function BlockedSchurComplementSolver(
                  dimensions::Vector{<:Dimension}, level::Integer, level_info,
                  schur_complement_buffer_list, second_last_schur_complement_buffer,
-                 schur_complement_factorization, use_shared_blocks::Bool,
+                 schur_complement_solver, use_shared_blocks::Bool,
                  sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
                  allocate_shared_float::Faf, allocate_shared_int::Fai,
                  block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
@@ -25,19 +25,19 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             null_B = nothing
             null_C = nothing
             null_schur_complement = nothing
-            null_schur_complement_factorization = MPIStaticCondensationNull{Float64}()
+            null_schur_complement_solver = MPIStaticCondensationNull{Float64}()
             null_Ainv_dot_u = nothing
             null_timer = nothing
-            return new{Float64,typeof(null_A_factorization),typeof(null_B),typeof(null_C),typeof(null_schur_complement),typeof(null_schur_complement_factorization),typeof(null_Ainv_dot_u),Fsync,typeof(null_timer)}(
+            return new{Float64,typeof(null_A_factorization),typeof(null_B),typeof(null_C),typeof(null_schur_complement),typeof(null_schur_complement_solver),typeof(null_Ainv_dot_u),Fsync,typeof(null_timer)}(
                    null_A_factorization, null_B, null_C, null_schur_complement,
-                   null_schur_complement_factorization, null_Ainv_dot_u,
+                   null_schur_complement_solver, null_Ainv_dot_u,
                    synchronize_shared, null_timer)
         end
 
-        if isa(schur_complement_factorization, MPIStaticCondensationNull)
+        if isa(schur_complement_solver, MPIStaticCondensationNull)
             timer = nothing
         else
-            timer = schur_complement_factorization.timer
+            timer = schur_complement_solver.timer
         end
 
         shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -167,8 +167,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                           for bi ∈ level_info.local_top_vector_a_block_indices if !isempty(bi)]
         end
 
-        return new{data_type,typeof(A_factorization),typeof(B),typeof(C),typeof(schur_complement),typeof(schur_complement_factorization),typeof(Ainv_dot_u),Fsync,typeof(timer)}(
-               A_factorization, B, C, schur_complement, schur_complement_factorization,
+        return new{data_type,typeof(A_factorization),typeof(B),typeof(C),typeof(schur_complement),typeof(schur_complement_solver),typeof(Ainv_dot_u),Fsync,typeof(timer)}(
+               A_factorization, B, C, schur_complement, schur_complement_solver,
                Ainv_dot_u, synchronize_shared, timer)
     end
 end
@@ -178,7 +178,7 @@ function lu!(sc::BlockedSchurComplementSolver, full_A)
     B = sc.B
     C = sc.C
     schur_complement = sc.schur_complement
-    schur_complement_factorization = sc.schur_complement_factorization
+    schur_complement_solver = sc.schur_complement_solver
     synchronize_shared = sc.synchronize_shared
     timer = sc.timer
 
@@ -204,7 +204,7 @@ function lu!(sc::BlockedSchurComplementSolver, full_A)
             add_D_to_schur_complement!(schur_complement, full_A)
             synchronize_shared()
 
-            lu!(schur_complement_factorization, schur_complement.matrix)
+            lu!(schur_complement_solver, schur_complement.matrix)
         end
     end
 
@@ -214,7 +214,7 @@ end
 function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementSolver,
                U::AbstractVector, v::AbstractVector)
     @inbounds begin
-        schur_complement_factorization = sc.schur_complement_factorization
+        schur_complement_solver = sc.schur_complement_solver
         synchronize_shared = sc.synchronize_shared
         timer = sc.timer
 
@@ -240,7 +240,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             end
 
             @sc_timeit timer "Sinv.(v-C.Ainv.u)" begin
-                ldiv!(schur_complement_factorization, y)
+                ldiv!(schur_complement_solver, y)
                 synchronize_shared()
                 # MPIStaticCondensation takes care of copying the entries from `y` back
                 # into `X`.

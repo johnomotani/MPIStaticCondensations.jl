@@ -66,7 +66,7 @@ final level each 'local block' is solved in serial.
 """
 module MPIStaticCondensations
 
-export mpi_static_condensation, create_dimension
+export mpi_static_condensation, create_dimension, finalize_mpi_static_condensation!
 
 using LinearAlgebra
 using LinearAlgebra.LAPACK: getrf!
@@ -91,8 +91,6 @@ macro sc_timeit(timer, name, expr)
         end
     end
 end
-
-const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 
 abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
@@ -293,7 +291,10 @@ include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+# Function with no methods that we can import in the MUMPS extension.
+function get_mumps_solver end
+
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     schur_complement_solver::Tsolver
     local_top_vector_indices::Tranget
@@ -1023,6 +1024,11 @@ it might be faster.
 of the 'C' sub-matrices. This will save some memory usage, but probably comes with a
 slight performance penalty.
 
+When the 'fill in' of the matrix (number of non-zeros divided by total number of entries)
+at some level exceeds `mumps_fill_in_threshold`, MUMPS is used to factorize/solve the
+schur_complement matrix at that level instead of using another
+`MPIStaticCondensationParallel`.
+
 `comm` is divided into equally sized shared-memory blocks. `shared_comm` represents the
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
 members must be able to create shared-memory arrays.
@@ -1058,6 +1064,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  level_multiplier::Integer=2,
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=false,
+                                 mumps_fill_in_threshold::Number=1.0,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1084,6 +1091,20 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     if comm_size % shared_comm_size != 0
         error("Size of shared_comm ($shared_comm_size) does not divide the size of comm "
               * "($comm_size).")
+    end
+
+    if mumps_fill_in_threshold < 1.0
+        if reduce_proc_count_with_blocks
+            error("reduce_proc_count_with_blocks=true is not compatible with using a "
+                  * "MUMPS solver for the lowest level.")
+        end
+        if Base.get_extension(MPIStaticCondensations, :MumpsExt) === nothing
+            error("MUMPS must be loaded when `mumps_fill_in_threshold` is set to a value "
+                  * "less than 1.")
+        end
+        if any(d.periodic for d ∈ dimensions)
+            error("MPIStaticCondensationMUMPS does not currently support periodicity.")
+        end
     end
     n_blocks = comm_size ÷ shared_comm_size
 
@@ -1153,11 +1174,91 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_global_size = this_level_info.global_bottom_vector_size
     end
 
-    # Create lowest level MPISchurComplement solver
-    # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
-    # long as the last Schur complement matrix is not too small.
-    last_level_info = level_info_list[end]
-    if last_level_info.level_shared_comm != MPI.COMM_NULL
+    level_allocate_shared_float_list =
+        [(args...) -> allocate_shared_float(args...; comm=li.level_shared_comm)
+         for li ∈ level_info_list]
+    level_allocate_shared_int_list =
+        [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
+         for li ∈ level_info_list]
+    schur_complement_buffer_info_list = []
+    final_sc_solver_is_mumps = false
+    final_level = n_levels
+    for (level, (li, lai)) ∈ enumerate(zip(level_info_list[1:end-2],
+                                           level_allocate_shared_int_list[1:end-2]))
+        sc_info =
+            get_shared_sparse_matrix_info(dimensions, li.level_shared_comm, lai,
+                                          li.block_sizes, li.bottom_vector_indices,
+                                          li.bottom_vector_indices; ind_type)
+        push!(schur_complement_buffer_info_list, sc_info)
+
+        if level < n_levels && sc_info.nzval_length / (sc_info.m * sc_info.n) > mumps_fill_in_threshold
+            final_sc_solver_is_mumps = true
+            final_level = level + 1
+            break
+        end
+    end
+
+    schur_complement_nnz_list = [sc.nzval_length
+                                 for sc ∈ schur_complement_buffer_info_list]
+    odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
+    even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
+    if final_level > 1 && !final_sc_solver_is_mumps
+        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
+            nbuff = length(level_info_list[end-1].bottom_vector_indices)
+            if n_levels % 2 == 0
+                odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
+            else
+                even_buffer_size[] = max(even_buffer_size[], nbuff^2)
+            end
+        end
+    end
+    MPI.Allreduce!(odd_buffer_size, max, shared_comm)
+    MPI.Allreduce!(even_buffer_size, max, shared_comm)
+    if odd_buffer_size[] > 0
+        odd_buffer = allocate_shared_float(odd_buffer_size[])
+    else
+        odd_buffer = zeros(data_type, 0)
+    end
+    if even_buffer_size[] > 0
+        even_buffer = allocate_shared_float(even_buffer_size[])
+    else
+        even_buffer = zeros(data_type, 0)
+    end
+    schur_complement_buffer_list =
+        [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
+         for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
+    if final_level > 1 && !final_sc_solver_is_mumps
+        if level_info_list[final_level-1].level_shared_comm != MPI.COMM_NULL
+            if final_level % 2 == 0
+                second_last_buffer = odd_buffer
+            else
+                second_last_buffer = even_buffer
+            end
+            second_last_schur_complement_buffer =
+                reshape(@view(second_last_buffer[1:nbuff^2]), nbuff, nbuff)
+        else
+            second_last_schur_complement_buffer = nothing
+        end
+    else
+        second_last_schur_complement_buffer = nothing
+    end
+#println("size(second_last_schur_complement_buffer)=", size(second_last_schur_complement_buffer))
+
+    # Create lowest level schur complement solver.
+    # Use MUMPS if `mumps_fill_in_threshold` was exceeded.  Otherwise, use a parallelized
+    # dense-matrix LU solver for the last Schur complement solve as long as the last Schur
+    # complement matrix is not too small.
+    if final_sc_solver_is_mumps
+        if synchronize_shared === nothing
+            level_synchronize_shared = () -> MPI.Barrier(shared_comm)
+        else
+            level_synchronize_shared = synchronize_shared
+        end
+        this_level_sc =
+            get_mumps_solver(dimensions, schur_complement_buffer_list[end], comm,
+                             level_synchronize_shared, timer)
+    elseif level_info_list[end].level_shared_comm != MPI.COMM_NULL
+        last_level_info = level_info_list[end]
         last_use_shared_blocks = (length(level_info_list) > 1
                                   && length(last_level_info.local_top_vector_a_block_indices) == 1
                                   && MPI.Comm_size(last_level_info.block_comm) > 1)
@@ -1222,67 +1323,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_sc = MPIStaticCondensationNull{data_type}()
     end
 
-    level_allocate_shared_float_list =
-        [(args...) -> allocate_shared_float(args...; comm=li.level_shared_comm)
-         for li ∈ level_info_list]
-    level_allocate_shared_int_list =
-        [(args...) -> allocate_shared_int(args...; comm=li.level_shared_comm)
-         for li ∈ level_info_list]
-    schur_complement_buffer_info_list =
-        [get_shared_sparse_matrix_info(dimensions, li.level_shared_comm, lai,
-                                       li.block_sizes, li.bottom_vector_indices,
-                                       li.bottom_vector_indices; ind_type)
-         for (li, lai) ∈ zip(level_info_list[1:end-2],
-                             level_allocate_shared_int_list[1:end-2])]
-    schur_complement_nnz_list = [sc.nzval_length
-                                 for sc ∈ schur_complement_buffer_info_list]
-    odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
-    even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
-    if n_levels > 1
-        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
-            nbuff = length(level_info_list[end-1].bottom_vector_indices)
-            if n_levels % 2 == 0
-                odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
-            else
-                even_buffer_size[] = max(even_buffer_size[], nbuff^2)
-            end
-        end
-    end
-    MPI.Allreduce!(odd_buffer_size, max, shared_comm)
-    MPI.Allreduce!(even_buffer_size, max, shared_comm)
-    if odd_buffer_size[] > 0
-        odd_buffer = allocate_shared_float(odd_buffer_size[])
-    else
-        odd_buffer = zeros(data_type, 0)
-    end
-    if even_buffer_size[] > 0
-        even_buffer = allocate_shared_float(even_buffer_size[])
-    else
-        even_buffer = zeros(data_type, 0)
-    end
-    schur_complement_buffer_list =
-        [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
-         for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
-    if n_levels > 1
-        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
-            if n_levels % 2 == 0
-                second_last_buffer = odd_buffer
-            else
-                second_last_buffer = even_buffer
-            end
-            second_last_schur_complement_buffer =
-                reshape(@view(second_last_buffer[1:nbuff^2]), nbuff, nbuff)
-        else
-            second_last_schur_complement_buffer = nothing
-        end
-    else
-        second_last_schur_complement_buffer = nothing
-    end
-
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
     C_dense_buffer_storage = zeros(data_type, 0)
-    for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
+    for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list[1:final_level])))
         if this_level_info.level_shared_comm == MPI.COMM_NULL
             this_level_schur_solver = MPIStaticCondensationNull{data_type}()
             continue
@@ -1292,7 +1336,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_allocate_shared_int = level_allocate_shared_int_list[level]
         this_level_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_level_comm_rank = MPI.Comm_rank(this_level_shared_comm)
-        if level < n_levels
+        if level < final_level
             if reduce_proc_count_with_blocks || synchronize_shared === nothing
                 level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
             else
@@ -1592,7 +1636,11 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationNull{T},
     return nothing
 end
 function ldiv!(solver::MPIStaticCondensationNull{T},
-               U::AbstractVectorOrMatrix{T}) where T
+               U::AbstractVector{T}) where T
+    return nothing
+end
+function ldiv!(solver::MPIStaticCondensationNull{T},
+               U::AbstractMatrix{T}) where T
     return nothing
 end
 
@@ -1600,9 +1648,7 @@ function lu!(solver::MPIStaticCondensationParallel, A)
     @inbounds begin
         @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
             schur_complement_solver = solver.schur_complement_solver
-            if isa(schur_complement_solver, BlockedSchurComplementSolver)
-                lu!(schur_complement_solver, A)
-            else
+            if isa(schur_complement_solver, MPISchurComplement)
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
                 a = @view A[local_top_vector_indices,local_top_vector_indices]
@@ -1610,6 +1656,8 @@ function lu!(solver::MPIStaticCondensationParallel, A)
                 c = @view A[local_bottom_vector_indices,local_top_vector_indices]
                 d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
                 update_schur_complement!(schur_complement_solver, a, b, c, d)
+            else
+                lu!(schur_complement_solver, A)
             end
         end
         return nothing
@@ -1660,7 +1708,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = y[i2]
                 end
-            else
+            elseif isa(schur_complement_solver, MPISchurComplement)
                 u = solver.u_buffer
                 for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
@@ -1694,6 +1742,8 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = v[i2]
                 end
+            else
+                ldiv!(X, schur_complement_solver, U)
             end
         end
         return nothing
@@ -1743,7 +1793,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                                    this_shared_local_bottom_sub_selection_indices)
                     U[i1] = y[i2]
                 end
-            else
+            elseif isa(schur_complement_solver, MPISchurComplement)
                 u = solver.u_buffer
                 for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
@@ -1778,12 +1828,14 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                                    this_shared_local_bottom_sub_selection_indices)
                     U[i1] = v[i2]
                 end
+            else
+                ldiv!(schur_complement_solver, U)
             end
         end
         return nothing
     end
 end
-function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
+function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensation{T},
                U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         for (this_X, this_U) ∈ zip(eachcol(X), eachcol(U))
@@ -1792,12 +1844,30 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
     end
     return nothing
 end
-function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractMatrix{T}) where T
+function ldiv!(solver::MPIStaticCondensation{T}, U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
         for this_U ∈ eachcol(U)
             ldiv!(solver, this_U)
         end
+    end
+    return nothing
+end
+
+function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)
+    return nothing
+end
+function finalize_mpi_static_condensation!(solver::MPIStaticCondensation)
+    schur_complement_solver = solver.schur_complement_solver
+    if isa(schur_complement_solver, Union{MPIStaticCondensation,BlockedSchurComplementSolver})
+        finalize_mpi_static_condensation!(schur_complement_solver)
+    end
+    return nothing
+end
+function finalize_mpi_static_condensation!(solver::BlockedSchurComplementSolver)
+    schur_complement_solver = solver.schur_complement_solver
+    if isa(schur_complement_solver, MPIStaticCondensation)
+        finalize_mpi_static_condensation!(schur_complement_solver)
     end
     return nothing
 end
