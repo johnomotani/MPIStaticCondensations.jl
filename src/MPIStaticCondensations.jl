@@ -1281,6 +1281,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
+    C_dense_buffer_storage = zeros(data_type, 0)
     for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list)))
         if this_level_info.level_shared_comm == MPI.COMM_NULL
             this_level_schur_solver = MPIStaticCondensationNull{data_type}()
