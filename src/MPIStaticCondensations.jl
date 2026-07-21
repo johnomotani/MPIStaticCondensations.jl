@@ -1632,6 +1632,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
             this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
+            y = solver.y_buffer
             v = solver.v_buffer
             if isa(schur_complement_solver, BlockedSchurComplementSolver)
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
@@ -1655,9 +1656,9 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                         v[i1] += U[i2]
                     end
                 end
-                ldiv!(X, v, schur_complement_solver, U, v)
+                ldiv!(X, y, schur_complement_solver, U, v)
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
-                    X[i1] = v[i2]
+                    X[i1] = y[i2]
                 end
             else
                 u = solver.u_buffer
