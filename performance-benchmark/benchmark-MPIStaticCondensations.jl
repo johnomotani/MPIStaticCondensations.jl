@@ -54,6 +54,7 @@ function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, loc
                  allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer,
                  global_data, global_i, global_j)
 
+    comm_rank = MPI.Comm_rank(comm)
     outer_dim_steps = prod(d.n for d ∈ dimensions[1:end-1]; init=1)
     nelement_local = dimensions[end].nelement ÷ dimensions[end].nrank
     block_sizes, off_diagonals = get_block_sizes(nelement_local, dimensions[end].ngrid,
@@ -73,10 +74,10 @@ function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, loc
     # performance test must be in a separate inner function, that can be compiled knowing
     # the concrete type of Alu.
 
-    return t_setup, run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats)...
+    return t_setup, run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank)...
 end
 
-function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats)
+function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank)
     t_lu = Inf
     t_solve = Inf
     # Run once before the loop to try to ensure that sparse buffer arrays have been filled
@@ -100,6 +101,15 @@ function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats)
             ldiv!(x, Alu, rhs)
             t2 = time_ns()
             t_solve = min(t_solve, (t2 - t1) * 1e-6)
+
+            # Check solution, just to be on the safe side...
+            if comm_rank == 0
+                max_error = maximum(abs.(A * x - rhs))
+                if max_error > 1.0e-3
+                    println("Solution incorrect? Max error $max_error.")
+                    MPI.Abort(MPI.COMM_WORLD, -1)
+                end
+            end
         end
     end
 
