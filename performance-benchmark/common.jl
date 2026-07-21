@@ -20,10 +20,11 @@ struct BenchmarkParams
     periodic_list::Vector{Bool}
     remove_boundaries_list::Vector{Bool}
     sparse_C_blocks::Bool
+    mumps_fill_in_threshold::Float64
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
                              periodic_list=nothing, remove_boundaries_list=nothing,
-                             sparse_C_blocks=false)
+                             sparse_C_blocks=false, mumps_fill_in_threshold=1.0)
         n = length(nelement_list)
         if periodic_list === nothing
             periodic_list = fill(false, n)
@@ -37,7 +38,7 @@ struct BenchmarkParams
         end
 
         return new(nelement_list, ngrid_list, sparse_stencils, periodic_list,
-                   remove_boundaries_list, sparse_C_blocks)
+                   remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold)
     end
 end
 

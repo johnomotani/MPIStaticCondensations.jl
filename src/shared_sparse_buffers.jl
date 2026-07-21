@@ -7,6 +7,8 @@ struct SharedSparseBuffer{Tf,Ti,Tcp<:AbstractVector{Ti},Trv<:AbstractVector{Ti},
 end
 Base.eltype(::SharedSparseBuffer{Tf}) where Tf = Tf
 Base.size(b::SharedSparseBuffer) = (b.m, b.n)
+Base.size(b::SharedSparseBuffer, dim::Integer) = size(b)[dim]
+SparseArrays.nnz(b::SharedSparseBuffer) = length(b.nzval)
 
 function get_shared_sparse_buffer(buffer_info::NamedTuple,
                                   storage::AbstractVector{<:AbstractFloat})

@@ -111,6 +111,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         end
         resize!(local_win_store_int, 0)
     end
+    finalize_mpi_static_condensation!(Alu)
     MPI.Barrier(shared_comm)
     return nothing
 end
