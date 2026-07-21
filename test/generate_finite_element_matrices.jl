@@ -339,7 +339,6 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         local_j = nothing
         n_local = allocate_shared_int(1)
     else
-        local_matrix = allocate_shared_float(local_n, local_n)
         global_matrix = nothing
     end
     if rank == 0
