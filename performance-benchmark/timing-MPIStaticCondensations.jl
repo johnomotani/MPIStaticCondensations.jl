@@ -3,6 +3,7 @@ using TimerOutputComparisons
 
 include("common.jl")
 include("benchmark-MPIStaticCondensations.jl")
+include("print_git_info.jl")
 
 timing_params = BenchmarkParams([32, 32], [5, 5], true)
 
