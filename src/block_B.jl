@@ -343,6 +343,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
                     C_colptr = Cb.colptr
                     C_rowval = Cb.rowval
                     C_nzval = Cb.nzval
+                    dense_buffer .= 0.0
                     for j ∈ 1:ncol
                         col_start = C_colptr[j]
                         col_end = C_colptr[j+1]-1
@@ -434,6 +435,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
                     C_colptr = Cb.colptr
                     C_rowval = Cb.rowval
                     C_nzval = Cb.nzval
+                    dense_buffer .= 0.0
                     for j ∈ 1:ncol
                         col_start = C_colptr[j]
                         col_end = C_colptr[j+1]-1
@@ -521,6 +523,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCSerial,
                     C_colptr = Cb.colptr
                     C_rowval = Cb.rowval
                     C_nzval = Cb.nzval
+                    dense_buffer .= 0.0
                     for j ∈ 1:ncol
                         col_start = C_colptr[j]
                         col_end = C_colptr[j+1]-1
@@ -596,6 +599,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                     C_colptr = C_block.colptr
                     C_rowval = C_block.rowval
                     C_nzval = C_block.nzval
+                    dense_C .= 0.0
                     for j ∈ 1:ncol
                         col_start = C_colptr[j]
                         col_end = C_colptr[j+1]-1
@@ -650,6 +654,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                     C_colptr = C_block.colptr
                     C_rowval = C_block.rowval
                     C_nzval = C_block.nzval
+                    dense_C .= 0.0
                     for j ∈ 1:ncol
                         col_start = C_colptr[j]
                         col_end = C_colptr[j+1]-1
@@ -701,6 +706,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                     C_colptr = C_block.colptr
                     C_rowval = C_block.rowval
                     C_nzval = C_block.nzval
+                    dense_C .= 0.0
                     for j ∈ 1:ncol
                         col_start = C_colptr[j]
                         col_end = C_colptr[j+1]-1
