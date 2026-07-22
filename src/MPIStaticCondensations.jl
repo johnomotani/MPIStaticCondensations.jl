@@ -1175,7 +1175,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           li.bottom_vector_indices; ind_type)
         push!(schur_complement_buffer_info_list, sc_info)
 
-        if 1 < level < n_levels && sc_info.nzval_length / (sc_info.m * sc_info.n) > mumps_fill_in_threshold
+        if level < n_levels && sc_info.nzval_length / (sc_info.m * sc_info.n) > mumps_fill_in_threshold
             final_sc_solver_is_mumps = true
             final_level = level + 1
             break
