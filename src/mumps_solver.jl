@@ -40,6 +40,7 @@ struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf
         t1 = time_ns()
         icntl = copy(default_icntl)
         icntl[4] = 1 # Non-verbose, only error messages.
+        icntl[6] = 1 # A pivoting strategy based only on the pattern of non-zeros - does not require values of matrix entries - so analysis can be done once, and different matrices (with the same non-zero pattern) can be factorised without re-doing analysis.
         icntl[14] = 100 # Percentage increase in the estimated working space (default is between 25 and 35).
         icntl[18] = 3 # User-provided distributed matrix pattern.
         #icntl[20] = 11 # Distributed RHS (also 10, not sure which value is best)
@@ -63,6 +64,10 @@ struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf
             mumps.lrhs = ncol
         end
 
+        # Perform analysis phase without using matrix values.
+        set_job!(Alu, 1)
+        invoke_mumps!(Alu)
+
         return new{Tf,Ti,typeof(mumps),Fs,typeof(timer)}(
                    n, mumps, is_root, local_col_range, global_i, global_j,
                    synchronize_shared, timer)
@@ -76,7 +81,7 @@ function lu!(solver::MPIStaticCondensationMUMPS, A)
         # `A` is the same as the `matrix_buffer` that was used to initialise `solver`, so
         # we do not need to pass/copy anything here.
         mumps = solver.mumps
-        set_job!(mumps, 4)
+        set_job!(mumps, 2)
         invoke_mumps!(mumps)
     end
     return nothing
