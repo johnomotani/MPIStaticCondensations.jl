@@ -13,6 +13,11 @@ function set_matrix!(mumps, data, global_i, global_j)
     mumps.nnz_loc = n
     mumps.irn_loc = pointer(global_i)
     mumps.jcn_loc = pointer(global_j)
+
+    # Perform analysis phase without using matrix values.
+    set_job!(mumps, 1)
+    invoke_mumps!(mumps)
+
     mumps.a_loc = pointer(data)
     return nothing
 end
@@ -74,6 +79,7 @@ function run_MUMPS(x, data, this_block_global_i, this_block_global_j, local_i, l
     t1 = time_ns()
     icntl = copy(default_icntl)
     icntl[4] = 1 # Non-verbose, only error messages.
+    icntl[6] = 1 # A pivoting strategy based only on the pattern of non-zeros - does not require values of matrix entries - so analysis can be done once, and different matrices (with the same non-zero pattern) can be factorised without re-doing analysis.
     icntl[14] = 100 # Percentage increase in the estimated working space (default is between 25 and 35).
     icntl[18] = 3 # User-provided distributed matrix pattern.
     #icntl[20] = 11 # Distributed RHS (also 10, not sure which value is best)
@@ -95,7 +101,7 @@ function run_MUMPS(x, data, this_block_global_i, this_block_global_j, local_i, l
     t_solve = Inf
     for _ ∈ 1:matrix_repeats
         t1 = time_ns()
-        set_job!(Alu, 4)
+        set_job!(Alu, 2)
         invoke_mumps!(Alu)
         t2 = time_ns()
         t_lu = min(t_lu, (t2 - t1) * 1e-6)
