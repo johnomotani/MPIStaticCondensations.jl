@@ -1686,6 +1686,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                         v[i1] += U[i2]
                     end
                 end
+                solver.synchronize_shared()
                 ldiv!(u, v, schur_complement_solver, u, v)
                 for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
                     X[i1] = u[i2]
