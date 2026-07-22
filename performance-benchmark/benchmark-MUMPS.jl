@@ -67,6 +67,9 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
     set_matrix!(Alu, data, global_i, global_j)
     t2 = time_ns()
     t_setup = (t2 - t1) * 1e-6 # in ms
+    if is_root
+        A_sparse = sparse(global_i, global_j, data)
+    end
 
     t_lu = Inf
     t_solve = Inf
@@ -86,10 +89,13 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
         Alu.lsol_loc = nsol_loc
 
         for _ ∈ 1:rhs_repeats
+            if is_root
+                solution = copy(rhs_global)
+            end
             t1 = time_ns()
             #set_rhs_solution!(Alu, x_loc, isol_loc, rhs, irhs)
             if is_root
-                set_global_rhs!(Alu, rhs_global)
+                set_global_rhs!(Alu, solution)
             end
             set_job!(Alu, 3)
             invoke_mumps!(Alu)
@@ -97,6 +103,15 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
             t_solve = min(t_solve, (t2 - t1) * 1e-6)
             if Alu.info[1] != 0
                 error("some MUMPS error occured: $(Alu.info[1:2])")
+            end
+
+            # Check solution, just to be on the safe side...
+            if is_root
+                max_error = maximum(abs.(A_sparse * solution - rhs_global))
+                if max_error > 1.0e-3
+                    println("Solution incorrect? Max error $max_error.")
+                    MPI.Abort(MPI.COMM_WORLD, -1)
+                end
             end
         end
     end
