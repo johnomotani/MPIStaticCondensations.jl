@@ -48,11 +48,11 @@ function get_block_sizes(outer_nelement, outer_ngrid, inner_dims_length)
     return block_sizes, off_diagonals
 end
 
-function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, local_j, rhs,
-                 rhs_global, dimensions, level_multiplier, sparse_C_blocks, comm,
-                 distributed_comm, shared_comm, allocate_shared_float,
-                 allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer,
-                 global_data, global_i, global_j)
+function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, local_j,
+                 rhs, rhs_global, dimensions, level_multiplier, sparse_C_blocks,
+                 mumps_fill_in_threshold, comm, distributed_comm, shared_comm,
+                 allocate_shared_float, allocate_shared_int, nmat, nrhs, matrix_repeats,
+                 rhs_repeats, timer, global_data, global_i, global_j)
 
     comm_rank = MPI.Comm_rank(comm)
     outer_dim_steps = prod(d.n for d ∈ dimensions[1:end-1]; init=1)
@@ -62,10 +62,11 @@ function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, loc
     A = sparse(local_i, local_j, data)
 
     t1 = time_ns()
-    Alu = mpi_static_condensation(dimensions; level_multiplier, sparse_C_blocks, comm,
-                                  distributed_comm, shared_comm, allocate_shared_float,
-                                  allocate_shared_int, schur_tile_size=nothing,
-                                  separate_Ainv_B=false, timer, check_lu=false)
+    Alu = mpi_static_condensation(dimensions; level_multiplier, sparse_C_blocks,
+                                  mumps_fill_in_threshold, comm, distributed_comm,
+                                  shared_comm, allocate_shared_float, allocate_shared_int,
+                                  schur_tile_size=nothing, separate_Ainv_B=false, timer,
+                                  check_lu=false)
     t2 = time_ns()
     t_setup = (t2 - t1) * 1e-6 # in ms
 
