@@ -1303,9 +1303,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     # dense-matrix LU solver for the last Schur complement solve as long as the last Schur
     # complement matrix is not too small.
     if final_sc_solver_is_mumps
-        this_level_sc =
-            MPIStaticCondensationMUMPS(schur_complement_buffer_list[end], comm,
-                                       synchronize_shared, timer)
         if reduce_proc_count_with_blocks
             error("reduce_proc_count_with_blocks=true is not compatible with using a "
                   * "MUMPS solver for the lowest level.")
@@ -1315,6 +1312,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         else
             level_synchronize_shared = synchronize_shared
         end
+        this_level_sc =
+            MPIStaticCondensationMUMPS(schur_complement_buffer_list[end], comm,
+                                       level_synchronize_shared, timer)
     elseif level_info_list[end].level_shared_comm != MPI.COMM_NULL
         last_level_info = level_info_list[end]
         last_use_shared_blocks = (length(level_info_list) > 1
@@ -1951,8 +1951,15 @@ function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)
 end
 function finalize_mpi_static_condensation!(solver::MPIStaticCondensationParallel)
     schur_complement_solver = solver.schur_complement_solver
-    if isa(schur_complement_solver, MPIStaticCondensation)
+    if isa(schur_complement_solver, Union{MPIStaticCondensation,BlockedSchurComplementSolver})
         finalize_mpi_static_condensation!(schur_complement_solver)
+    end
+    return nothing
+end
+function finalize_mpi_static_condensation!(solver::BlockedSchurComplementSolver)
+    schur_complement_factorization = solver.schur_complement_factorization
+    if isa(schur_complement_factorization, MPIStaticCondensation)
+        finalize_mpi_static_condensation!(schur_complement_factorization)
     end
     return nothing
 end
