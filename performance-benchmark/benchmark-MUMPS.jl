@@ -33,21 +33,41 @@ function set_global_rhs!(mumps, rhs_global)
     return nothing
 end
 
-function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                   dimensions, level_multiplier, sparse_C_blocks, comm, distributed_comm,
-                   shared_comm, allocate_shared_float, allocate_shared_int, nmat, nrhs,
-                   matrix_repeats, rhs_repeats, timer)
+function run_MUMPS(x, data, this_block_global_i, this_block_global_j, local_i, local_j,
+                   rhs, rhs_global, dimensions, level_multiplier, sparse_C_blocks, comm,
+                   distributed_comm, shared_comm, allocate_shared_float,
+                   allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer,
+                   global_data, global_i, global_j)
 
     total_size = prod(d.n for d ∈ dimensions)
     is_root = (MPI.Comm_rank(comm) == 0)
+    shared_comm_rank = MPI.Comm_rank(shared_comm)
+    shared_comm_size = MPI.Comm_size(shared_comm)
+
+    # Select a subset of columns from 'this block' to handle on this process, because
+    # MUMPS only uses distributed-memory MPI parallelism, not shared-memory MPI
+    # parallelism (but we want to be able to run MUMPS on any number of processes, not
+    # just those where the number of elements in the 'distributed' dimension is exactly
+    # divisible by the number of processes.
+    first_col, last_col = extrema(this_block_global_j)
+    ncol = last_col - first_col + 1
+    cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
+    first_local_col = min(shared_comm_rank * cols_per_proc + first_col, last_col + 1)
+    last_local_col = min((shared_comm_rank + 1) * cols_per_proc + first_col - 1, last_col)
+    local_filter = first_local_col .≤ this_block_global_j .≤ last_local_col
+    data = data[local_filter]
+    this_block_global_i = this_block_global_i[local_filter]
+    this_block_global_j = this_block_global_j[local_filter]
+    local_i = local_i[local_filter]
+    local_j = local_j[local_filter]
 
     # The row/column indices need to be 32-bit integers for MUMPS.
-    global_i = Cint.(global_i)
-    global_j = Cint.(global_j)
+    this_block_global_i = Cint.(this_block_global_i)
+    this_block_global_j = Cint.(this_block_global_j)
 
     # The locally-owned vector entries should be given by the min/max of the matrix
-    # indices in global_i or global_j.
-    indrange = extrema(global_i)
+    # indices in this_block_global_i or this_block_global_j.
+    indrange = extrema(this_block_global_i)
     irhs = collect(indrange[1]:indrange[2])
     #isol = similar(irhs)
 
@@ -64,9 +84,12 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
     cntl = copy(default_cntl64)
     Alu = Mumps{Float64}(0, icntl, cntl)
     Alu.n = total_size
-    set_matrix!(Alu, data, global_i, global_j)
+    set_matrix!(Alu, data, this_block_global_i, this_block_global_j)
     t2 = time_ns()
     t_setup = (t2 - t1) * 1e-6 # in ms
+    if is_root
+        A_sparse = sparse(global_i, global_j, global_data)
+    end
 
     t_lu = Inf
     t_solve = Inf
@@ -86,10 +109,13 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
         Alu.lsol_loc = nsol_loc
 
         for _ ∈ 1:rhs_repeats
+            if is_root
+                solution = copy(rhs_global)
+            end
             t1 = time_ns()
             #set_rhs_solution!(Alu, x_loc, isol_loc, rhs, irhs)
             if is_root
-                set_global_rhs!(Alu, rhs_global)
+                set_global_rhs!(Alu, solution)
             end
             set_job!(Alu, 3)
             invoke_mumps!(Alu)
@@ -98,12 +124,24 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
             if Alu.info[1] != 0
                 error("some MUMPS error occured: $(Alu.info[1:2])")
             end
+
+            # Check solution, just to be on the safe side...
+            if is_root
+                max_error = maximum(abs.(A_sparse * solution - rhs_global))
+                if max_error > 1.0e-3
+                    println("Solution incorrect? Max error $max_error.")
+                    MPI.Abort(MPI.COMM_WORLD, -1)
+                end
+            end
         end
     end
     if Alu.info[1] != 0
-        # This conditional should never be entered, but seems to prevent global_i and
-        # global_j from being garbage collected (which would cause errors in MUMPS).
-        println("global_i=$(extrema(global_i)), global_j=$(extrema(global_j))")
+        # This conditional should never be entered, but seems to prevent
+        # this_block_global_i, this_block_global_j and data from being garbage collected
+        # (which would cause errors in MUMPS).
+        println("this_block_global_i=$(extrema(this_block_global_i)), "
+                * "this_block_global_j=$(extrema(this_block_global_j)), "
+                * "data=$(extrema(data))")
     end
 
     finalize!(Alu)
