@@ -121,9 +121,9 @@ function finalize_mpi_static_condensation!(solver::MPIStaticCondensation)
     return nothing
 end
 function finalize_mpi_static_condensation!(solver::BlockedSchurComplementSolver)
-    schur_complement_factorization = solver.schur_complement_factorization
-    if isa(schur_complement_factorization, MPIStaticCondensation)
-        finalize_mpi_static_condensation!(schur_complement_factorization)
+    schur_complement_solver = solver.schur_complement_solver
+    if isa(schur_complement_solver, MPIStaticCondensation)
+        finalize_mpi_static_condensation!(schur_complement_solver)
     end
     return nothing
 end
