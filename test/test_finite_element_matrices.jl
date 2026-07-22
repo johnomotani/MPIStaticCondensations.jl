@@ -26,18 +26,20 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     rhs_global, rhs_local =
         assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                         allocate_shared_float, rng)
-
-
-    Alu = mpi_static_condensation(dimensions; reduce_proc_count_with_blocks, comm,
-                                  distributed_comm, shared_comm, allocate_shared_float,
-                                  allocate_shared_int, check_lu=true)
+    x_local = allocate_shared_float(size(rhs_local)...)
 
     lu!(Alu, local_matrix)
 
-    function test_once()
-        ldiv!(Alu, rhs_local)
+    function test_once(two_term::Bool)
+        if two_term
+            ldiv!(Alu, rhs_local)
+            solution = rhs_local
+        else
+            ldiv!(x_local, Alu, rhs_local)
+            solution = x_local
+        end
         MPI.Barrier(shared_comm)
-        x_global = gather_vector(rhs_local, dimensions, comm, distributed_comm,
+        x_global = gather_vector(solution, dimensions, comm, distributed_comm,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
             check_solution = global_matrix \ rhs_global
@@ -49,7 +51,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     end
 
     @testset "solve" begin
-        test_once()
+        test_once(true)
     end
 
     @testset "change b" begin
@@ -58,7 +60,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                                             allocate_shared_float, rng)
         MPI.Barrier(shared_comm)
 
-        test_once()
+        test_once(false)
     end
 
     @testset "change M" begin
@@ -73,7 +75,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
 
         lu!(Alu, local_matrix)
 
-        test_once()
+        test_once(false)
     end
 
     @testset "change M, change b" begin
@@ -82,7 +84,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                                             allocate_shared_float, rng)
         MPI.Barrier(shared_comm)
 
-        test_once()
+        test_once(true)
     end
 
     if local_win_store_float !== nothing
