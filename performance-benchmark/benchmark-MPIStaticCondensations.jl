@@ -48,10 +48,11 @@ function get_block_sizes(outer_nelement, outer_ngrid, inner_dims_length)
     return block_sizes, off_diagonals
 end
 
-function run_MSC(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                 dimensions, level_multiplier, sparse_C_blocks, comm, distributed_comm,
-                 shared_comm, allocate_shared_float, allocate_shared_int, nmat, nrhs,
-                 matrix_repeats, rhs_repeats, timer)
+function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, local_j, rhs,
+                 rhs_global, dimensions, level_multiplier, sparse_C_blocks, comm,
+                 distributed_comm, shared_comm, allocate_shared_float,
+                 allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer,
+                 global_data, global_i, global_j)
 
     comm_rank = MPI.Comm_rank(comm)
     outer_dim_steps = prod(d.n for d ∈ dimensions[1:end-1]; init=1)

@@ -333,6 +333,8 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     if return_sparse
         local_data = nothing
         global_data = nothing
+        global_i = nothing
+        global_j = nothing
         this_block_global_i = nothing
         this_block_global_j = nothing
         local_i = nothing
@@ -455,7 +457,6 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                       local_matrix_rowval, local_matrix_nzval)
     else
         if return_sparse
-            n_local = allocate_shared_int(1)
             if shared_comm_rank == 0
                 MPI.Recv!(n_local, distributed_comm; source=0)
             end
@@ -494,7 +495,7 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     end
 
     if return_sparse
-        return global_data, local_data, this_block_global_i, this_block_global_j, local_i, local_j
+        return global_data, global_i, global_j, local_data, this_block_global_i, this_block_global_j, local_i, local_j
     else
         return global_matrix, local_matrix
     end

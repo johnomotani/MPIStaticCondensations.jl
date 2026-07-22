@@ -69,12 +69,14 @@ include("../test/generate_finite_element_matrices.jl")
 function get_matrix(dimensions, sparse_stencils, rng, comm, distributed_comm, shared_comm,
                     allocate_shared_float, allocate_shared_int)
 
-    _, data, global_i, global_j, local_i, local_j =
+    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+    local_i, local_j =
         assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
                                            shared_comm, allocate_shared_float,
                                            allocate_shared_int, rng, sparse_stencils;
                                            return_sparse=true)
-    return data, global_i, global_j, local_i, local_j
+    return global_data, global_i, global_j, data, this_block_global_i,
+           this_block_global_j, local_i, local_j
 end
 
 function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
@@ -97,7 +99,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     else
         ns = Threads.nthreads()
     end
-    nproc = distributed_nproc * ns
+    nproc = distributed_nproc * n_shared * Threads.nthreads()
     ndim = length(params.nelement_list)
 
     if distributed_rank == 0 && shared_rank == 0
@@ -105,20 +107,15 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     end
 
     nrank_list = ones(Int64, ndim)
-    if use_shared
-        # For now, only distribute the last dimension.
-        if distributed_nproc > params.nelement_list[end] || params.nelement_list[end] % distributed_nproc != 0
-            # Cannot parallelise in this way, so skip.
-            if distributed_rank == 0 && shared_rank == 0
-                println("Parallelisation does not fit this grid, skipping...\n")
-            end
-            return nothing
+    # For now, only distribute the last dimension.
+    if distributed_nproc > params.nelement_list[end] || params.nelement_list[end] % distributed_nproc != 0
+        # Cannot parallelise in this way, so skip.
+        if distributed_rank == 0 && shared_rank == 0
+            println("Parallelisation does not fit this grid, skipping...\n")
         end
-        nrank_list[end] = distributed_nproc
-    else
-        # Generate matrices as though we only use shared-memory, so that MUMPS can run on
-        # any number of processes.
+        return nothing
     end
+    nrank_list[end] = distributed_nproc
     irank_list = get_iranks(nrank_list, distributed_rank)
     dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
                   for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
@@ -127,16 +124,17 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
 
     # First run ensures solver is compiled for these parameters. Do not save these timings
     # as we do not want to measure compilation time.
-    data, global_i, global_j, local_i, local_j =
+    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+    local_i, local_j =
         get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
                    shared_comm, allocate_shared_float, allocate_shared_int)
     rhs, rhs_global = get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
                               allocate_shared_float)
     x_temp = allocate_shared_float(length(rhs))
-    run_solver(x_temp, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-               dimensions, level_multiplier, params.sparse_C_blocks, comm,
-               distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
-               1, 1, 1, 1, timer)
+    run_solver(x_temp, data, this_block_global_i, this_block_global_j, local_i, local_j,
+               rhs, rhs_global, dimensions, level_multiplier, params.sparse_C_blocks,
+               comm, distributed_comm, shared_comm, allocate_shared_float,
+               allocate_shared_int, 1, 1, 1, 1, timer, global_data, global_i, global_j)
 
     if local_win_store_float !== nothing
         # Free the MPI.Win objects, because if they are free'd by the garbage collector
@@ -161,7 +159,8 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     t_lu = Float64[]
     t_solve = Float64[]
     for imat ∈ 1:nmat
-        data, global_i, global_j, local_i, local_j =
+        global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+        local_i, local_j =
             get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
                        shared_comm, allocate_shared_float, allocate_shared_int)
         for irhs ∈ 1:nrhs
@@ -169,11 +168,12 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                                       shared_comm, allocate_shared_float)
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
-                run_solver(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                           dimensions, level_multiplier, params.sparse_C_blocks, comm,
-                           distributed_comm, shared_comm, allocate_shared_float,
-                           allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats,
-                           timer)
+                run_solver(x, data, this_block_global_i, this_block_global_j, local_i,
+                           local_j, rhs, rhs_global, dimensions, level_multiplier,
+                           params.sparse_C_blocks, comm, distributed_comm, shared_comm,
+                           allocate_shared_float, allocate_shared_int, nmat, nrhs,
+                           matrix_repeats, rhs_repeats, timer, global_data, global_i,
+                           global_j)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)
@@ -239,7 +239,9 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
         n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
         level_multiplier_values = collect(2:4)
     else
-        n_shared_values = 1
+        # When use_shared=false, we set up the matrix with shared-memory, but then divide
+        # it into distributed chunks to pass to MUMPS.
+        n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
         level_multiplier_values = [1]
     end
     for n_shared ∈ n_shared_values
