@@ -142,10 +142,12 @@ function run_MUMPS(x, data, this_block_global_i, this_block_global_j, local_i, l
         end
     end
     if Alu.info[1] != 0
-        # This conditional should never be entered, but seems to prevent global_i,
-        # global_j and data from being garbage collected (which would cause errors in
-        # MUMPS).
-        println("global_i=$(extrema(global_i)), global_j=$(extrema(global_j)), data=$(extrema(data))")
+        # This conditional should never be entered, but seems to prevent
+        # this_block_global_i, this_block_global_j and data from being garbage collected
+        # (which would cause errors in MUMPS).
+        println("this_block_global_i=$(extrema(this_block_global_i)), "
+                * "this_block_global_j=$(extrema(this_block_global_j)), "
+                * "data=$(extrema(data))")
     end
 
     finalize!(Alu)
