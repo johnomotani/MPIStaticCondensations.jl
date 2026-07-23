@@ -1014,6 +1014,10 @@ in the multi-dimensional array. For a description of the discretization, see the
 `level_multiplier` gives the factor by which the block size is increased in each dimension
 at each level.
 
+`block_sizes_list` can be passed to explicitly set the block sizes at each level. The
+block size for each dimension must increase or stay the same at each level. If
+`block_sizes_list` is passed, `level_multiplier` is ignored.
+
 `reduce_proc_count_with_blocks` sets whether the number of processes involved in the solve
 at each level is reduced when the number of blocks at that level is less than the total
 number of processes. Usually reducing the number of processes is probably not helpful
@@ -1062,6 +1066,7 @@ matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  level_multiplier::Integer=2,
+                                 block_sizes_list::Union{Vector{<:Vector{<:Integer}},Nothing}=nothing,
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=false,
                                  mumps_fill_in_threshold::Number=1.0,
@@ -1097,23 +1102,42 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     n_blocks_factors = factor(Vector, n_blocks)
     shared_comm_size_factors = factor(Vector, shared_comm_size)
 
-    # Not sure if this is necessarily the most efficient choice for all grids and numbers
-    # of processes - everything following should work for any set of block_sizes, so other
-    # choices could be made here.
-    block_sizes_list = [ones(ind_type, length(dimensions))]
     nelement_list = [d.nelement for d ∈ dimensions]
     nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
-    nblock_list = [nelement_local_list]
-    total_local_nblock = prod(nelement_local_list)
-    total_local_nblock_list = [total_local_nblock]
-    while total_local_nblock > 1
-        previous_block_sizes = block_sizes_list[end]
-        this_block_sizes = @. min(previous_block_sizes .* level_multiplier, nelement_local_list)
-        local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
-        total_local_nblock = prod(local_nblock_list)
-        push!(total_local_nblock_list, total_local_nblock)
-        push!(nblock_list, local_nblock_list)
-        push!(block_sizes_list, this_block_sizes)
+    if block_sizes_list === nothing
+        # Not sure if this is necessarily the most efficient choice for all grids and
+        # numbers of processes - everything following should work for any set of
+        # block_sizes, so other choices could be made here.
+        block_sizes_list = [ones(ind_type, length(dimensions))]
+        nblock_list = [nelement_local_list]
+        total_local_nblock = prod(nelement_local_list)
+        total_local_nblock_list = [total_local_nblock]
+        while total_local_nblock > 1
+            previous_block_sizes = block_sizes_list[end]
+            this_block_sizes = @. min(previous_block_sizes .* level_multiplier, nelement_local_list)
+            local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
+            total_local_nblock = prod(local_nblock_list)
+            push!(total_local_nblock_list, total_local_nblock)
+            push!(nblock_list, local_nblock_list)
+            push!(block_sizes_list, this_block_sizes)
+        end
+    else
+        nblock_list = [nelement_local_list .÷ bs for bs ∈ block_sizes_list]
+        total_local_nblock_list = [prod(nb) for nb ∈ nblock_list]
+        # Check consistency of passed-in list.
+        for i ∈ 1:length(block_sizes_list)-1
+            bs = block_sizes_list[i]
+            bs_next = block_sizes_list[i+1]
+            if !all(bs_next .≥ bs)
+                error("Block size for each dimension must not decrease at any level. "
+                      * "Got block_sizes_list=$block_sizes_list.")
+            end
+        end
+        for (nb, bs) ∈ zip(nblock_list, block_sizes_list)
+            if !all(nb .> 0)
+                error("nb not positive for block_sizes=$bs.")
+            end
+        end
     end
 
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
@@ -1271,6 +1295,19 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info.block_comm)
                 last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info.block_comm)
                 last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+            end
+
+            if !all(nblock_list[length(level_info_list)] .== 1)
+                # In principle we could have multiple blocks on the last level, but we
+                # would need a more complicated setup for the `fake_level_info` below to
+                # support that. It does not seem likely that it is a useful feature
+                # (probably slower than continuing to combine down to one block), so for
+                # simplicity just error if the last entry of block_sizes_list does not
+                # define a single block covering the whole grid.
+                last_level = length(level_info_list)
+                error("Last entry of block_sizes_list should include the whole grid in "
+                      * "one block. Last entry was $(block_sizes_list[last_level]), "
+                      * "which corresponds to nblock=$(nblock_list[last_level]).")
             end
             # Fake the LevelInfo argument here, because this solver will be passed
             # matrices and rhs/solution vectors that do not need the 'top vector' entries
