@@ -2,14 +2,19 @@ module MumpsExt
 
 import LinearAlgebra: lu!, ldiv!
 using MPI
-using MPIStaticCondensations: MPIStaticCondensation, SharedSparseBuffer, @sc_timeit
+using MPIStaticCondensations: Dimension, MPIStaticCondensation, SharedSparseBuffer,
+                              @sc_timeit
 import MPIStaticCondensations: get_mumps_solver, finalize_mpi_static_condensation!
 using MUMPS
 using MUMPS: set_job!, invoke_mumps!, finalize!
 using TimerOutputs
 
-function get_mumps_solver(matrix_buffer::SharedSparseBuffer, comm,
-                          synchronize_shared::Fs, timer) where Fs
+function get_mumps_solver(dimensions::Vector{<:Dimension},
+                          matrix_buffer::SharedSparseBuffer, comm, synchronize_shared::Fs,
+                          timer) where Fs
+    if any(d.periodic for d ∈ dimensions)
+        error("MPIStaticCondensationMUMPS does not currently support periodicity.")
+    end
     return MPIStaticCondensationMUMPS(matrix_buffer, comm, synchronize_shared, timer)
 end
 

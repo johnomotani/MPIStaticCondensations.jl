@@ -1238,13 +1238,17 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             error("reduce_proc_count_with_blocks=true is not compatible with using a "
                   * "MUMPS solver for the lowest level.")
         end
+        if Base.get_extension(MPIStaticCondensations, :MumpsExt) === nothing
+            error("MUMPS must be loaded when `mumps_fill_in_threshold` is set to a value "
+                  * "less than 1.")
+        end
         if synchronize_shared === nothing
             level_synchronize_shared = () -> MPI.Barrier(shared_comm)
         else
             level_synchronize_shared = synchronize_shared
         end
         this_level_sc =
-            get_mumps_solver(schur_complement_buffer_list[end], comm,
+            get_mumps_solver(dimensions, schur_complement_buffer_list[end], comm,
                              level_synchronize_shared, timer)
     elseif level_info_list[end].level_shared_comm != MPI.COMM_NULL
         last_level_info = level_info_list[end]
