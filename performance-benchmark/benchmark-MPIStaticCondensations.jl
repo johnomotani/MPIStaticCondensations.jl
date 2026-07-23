@@ -1,6 +1,7 @@
 using LinearAlgebra
 using MPI
 using MPIStaticCondensations
+using MUMPS
 using SparseArrays
 using StableRNGs
 using StatsBase

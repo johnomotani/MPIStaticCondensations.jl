@@ -290,9 +290,11 @@ include("block_C.jl")
 include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
-include("mumps_solver.jl")
 
-struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensationMUMPS{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+# Function with no methods that we can import in the MUMPS extension.
+function get_mumps_solver end
+
+struct MPIStaticCondensationParallel{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     schur_complement_solver::Tsolver
     local_top_vector_indices::Tranget
@@ -1242,8 +1244,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             level_synchronize_shared = synchronize_shared
         end
         this_level_sc =
-            MPIStaticCondensationMUMPS(schur_complement_buffer_list[end], comm,
-                                       level_synchronize_shared, timer)
+            get_mumps_solver(schur_complement_buffer_list[end], comm,
+                             level_synchronize_shared, timer)
     elseif level_info_list[end].level_shared_comm != MPI.COMM_NULL
         last_level_info = level_info_list[end]
         last_use_shared_blocks = (length(level_info_list) > 1
@@ -1669,9 +1671,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
             y = solver.y_buffer
             v = solver.v_buffer
-            if isa(schur_complement_solver, MPIStaticCondensationMUMPS)
-                ldiv!(X, schur_complement_solver, U)
-            elseif isa(schur_complement_solver, BlockedSchurComplementSolver)
+            if isa(schur_complement_solver, BlockedSchurComplementSolver)
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
                     # This loop uses 'no overlap' indices
                     # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
@@ -1697,7 +1697,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = y[i2]
                 end
-            else
+            elseif isa(schur_complement_solver, MPISchurComplement)
                 u = solver.u_buffer
                 for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
@@ -1731,6 +1731,8 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = v[i2]
                 end
+            else
+                ldiv!(X, schur_complement_solver, U)
             end
         end
         return nothing
@@ -1752,9 +1754,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
             this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
             v = solver.v_buffer
-            if isa(schur_complement_solver, MPIStaticCondensationMUMPS)
-                ldiv!(schur_complement_solver, U)
-            elseif isa(schur_complement_solver, BlockedSchurComplementSolver)
+            if isa(schur_complement_solver, BlockedSchurComplementSolver)
                 y = solver.y_buffer
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
                     # This loop uses 'no overlap' indices
@@ -1782,7 +1782,7 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                                    this_shared_local_bottom_sub_selection_indices)
                     U[i1] = y[i2]
                 end
-            else
+            elseif isa(schur_complement_solver, MPISchurComplement)
                 u = solver.u_buffer
                 for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
@@ -1817,6 +1817,8 @@ function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) w
                                    this_shared_local_bottom_sub_selection_indices)
                     U[i1] = v[i2]
                 end
+            else
+                ldiv!(schur_complement_solver, U)
             end
         end
         return nothing
@@ -1837,6 +1839,24 @@ function ldiv!(solver::MPIStaticCondensation{T}, U::AbstractMatrix{T}) where T
         for this_U ∈ eachcol(U)
             ldiv!(solver, this_U)
         end
+    end
+    return nothing
+end
+
+function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)
+    return nothing
+end
+function finalize_mpi_static_condensation!(solver::MPIStaticCondensation)
+    schur_complement_solver = solver.schur_complement_solver
+    if isa(schur_complement_solver, Union{MPIStaticCondensation,BlockedSchurComplementSolver})
+        finalize_mpi_static_condensation!(schur_complement_solver)
+    end
+    return nothing
+end
+function finalize_mpi_static_condensation!(solver::BlockedSchurComplementSolver)
+    schur_complement_solver = solver.schur_complement_solver
+    if isa(schur_complement_solver, MPIStaticCondensation)
+        finalize_mpi_static_condensation!(schur_complement_solver)
     end
     return nothing
 end

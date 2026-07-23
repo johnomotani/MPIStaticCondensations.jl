@@ -1,5 +1,17 @@
+module MumpsExt
+
+import LinearAlgebra: lu!, ldiv!
+using MPI
+using MPIStaticCondensations: MPIStaticCondensation, SharedSparseBuffer, @sc_timeit
+import MPIStaticCondensations: get_mumps_solver, finalize_mpi_static_condensation!
 using MUMPS
 using MUMPS: set_job!, invoke_mumps!, finalize!
+using TimerOutputs
+
+function get_mumps_solver(matrix_buffer::SharedSparseBuffer, comm,
+                          synchronize_shared::Fs, timer) where Fs
+    return MPIStaticCondensationMUMPS(matrix_buffer, comm, synchronize_shared, timer)
+end
 
 struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf},Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
@@ -65,8 +77,8 @@ struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf
         end
 
         # Perform analysis phase without using matrix values.
-        set_job!(Alu, 1)
-        invoke_mumps!(Alu)
+        set_job!(mumps, 1)
+        invoke_mumps!(mumps)
 
         return new{Tf,Ti,typeof(mumps),Fs,typeof(timer)}(
                    n, mumps, is_root, local_col_range, global_i, global_j,
@@ -110,24 +122,9 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationMUMPS{T},
     end
 end
 
-function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)
-    return nothing
-end
-function finalize_mpi_static_condensation!(solver::MPIStaticCondensation)
-    schur_complement_solver = solver.schur_complement_solver
-    if isa(schur_complement_solver, Union{MPIStaticCondensation,BlockedSchurComplementSolver})
-        finalize_mpi_static_condensation!(schur_complement_solver)
-    end
-    return nothing
-end
-function finalize_mpi_static_condensation!(solver::BlockedSchurComplementSolver)
-    schur_complement_solver = solver.schur_complement_solver
-    if isa(schur_complement_solver, MPIStaticCondensation)
-        finalize_mpi_static_condensation!(schur_complement_solver)
-    end
-    return nothing
-end
 function finalize_mpi_static_condensation!(solver::MPIStaticCondensationMUMPS)
     finalize!(solver.mumps)
     return nothing
+end
+
 end
