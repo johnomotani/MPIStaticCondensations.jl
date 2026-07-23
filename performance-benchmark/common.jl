@@ -21,10 +21,12 @@ struct BenchmarkParams
     remove_boundaries_list::Vector{Bool}
     sparse_C_blocks::Bool
     mumps_fill_in_threshold::Float64
+    block_sizes_list::Union{Vector{Vector{Int64}},Nothing}
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
                              periodic_list=nothing, remove_boundaries_list=nothing,
-                             sparse_C_blocks=false, mumps_fill_in_threshold=1.0)
+                             sparse_C_blocks=false, mumps_fill_in_threshold=1.0,
+                             block_sizes_list=nothing)
         n = length(nelement_list)
         if periodic_list === nothing
             periodic_list = fill(false, n)
@@ -38,7 +40,8 @@ struct BenchmarkParams
         end
 
         return new(nelement_list, ngrid_list, sparse_stencils, periodic_list,
-                   remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold)
+                   remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold,
+                   block_sizes_list)
     end
 end
 
@@ -134,9 +137,9 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     x_temp = allocate_shared_float(length(rhs))
     run_solver(x_temp, data, this_block_global_i, this_block_global_j, local_i, local_j,
                rhs, rhs_global, dimensions, level_multiplier, params.sparse_C_blocks,
-               params.mumps_fill_in_threshold, comm, distributed_comm, shared_comm,
-               allocate_shared_float, allocate_shared_int, 1, 1, 1, 1, timer,
-               global_data, global_i, global_j)
+               params.mumps_fill_in_threshold, params.block_sizes_list, comm,
+               distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
+               1, 1, 1, 1, timer, global_data, global_i, global_j)
 
     if local_win_store_float !== nothing
         # Free the MPI.Win objects, because if they are free'd by the garbage collector
@@ -172,10 +175,11 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             this_t_setup, this_t_lu, this_t_solve =
                 run_solver(x, data, this_block_global_i, this_block_global_j, local_i,
                            local_j, rhs, rhs_global, dimensions, level_multiplier,
-                           params.sparse_C_blocks, params.mumps_fill_in_threshold, comm,
-                           distributed_comm, shared_comm, allocate_shared_int, nmat,
-                           allocate_shared_float, nrhs, matrix_repeats, rhs_repeats,
-                           timer, global_data, global_i, global_j)
+                           params.sparse_C_blocks, params.mumps_fill_in_threshold,
+                           params.block_sizes_list, comm, distributed_comm, shared_comm,
+                           allocate_shared_float, allocate_shared_int, nmat, nrhs,
+                           matrix_repeats, rhs_repeats, timer, global_data, global_i,
+                           global_j)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)

@@ -41,8 +41,8 @@ end
 
 function run_MUMPS(x, data, this_block_global_i, this_block_global_j, local_i, local_j,
                    rhs, rhs_global, dimensions, level_multiplier, sparse_C_blocks,
-                   mumps_fill_in_threshold, comm, distributed_comm, shared_comm,
-                   allocate_shared_float, allocate_shared_int, nmat, nrhs,
+                   mumps_fill_in_threshold, block_sizes_list, comm, distributed_comm,
+                   shared_comm, allocate_shared_float, allocate_shared_int, nmat, nrhs,
                    matrix_repeats, rhs_repeats, timer, global_data, global_i, global_j)
 
     total_size = prod(d.n for d ∈ dimensions)
