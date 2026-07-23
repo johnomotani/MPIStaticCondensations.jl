@@ -95,7 +95,11 @@ function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank)
         t2 = time_ns()
         t_lu = min(t_lu, (t2 - t1) * 1e-6)
 
-        for _ ∈ 1:rhs_repeats
+        #for _ ∈ 1:rhs_repeats
+for irhs ∈ 1:rhs_repeats
+if comm_rank == 0
+    println("rhs $irhs")
+end
             t1 = time_ns()
             ldiv!(x, Alu, rhs)
             t2 = time_ns()

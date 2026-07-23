@@ -11,6 +11,7 @@ using Test
 
 const ngrid = 3
 
+using Debugger
 function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_list,
                         remove_boundaries_list, nrank_list, irank_list, n_shared, irank)
     total_nrank = prod(nrank_list) * n_shared

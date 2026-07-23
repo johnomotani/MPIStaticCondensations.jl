@@ -10,6 +10,7 @@ using Test
 include("generate_finite_element_matrices.jl")
 include("utils.jl")
 
+using Debugger
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, sparse_stencils::Bool,
                      reduce_proc_count_with_blocks::Bool, tol::AbstractFloat)
@@ -29,8 +30,11 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     x_local = allocate_shared_float(size(rhs_local)...)
 
     lu!(Alu, local_matrix)
+#MPI.Barrier(comm)
 
     function test_once(two_term::Bool)
+#println("rhs_global=$rhs_global, rhs_local=$rhs_local")
+#@enter ldiv!(Alu, rhs_local)
         if two_term
             ldiv!(Alu, rhs_local)
             solution = rhs_local
@@ -43,8 +47,10 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
             check_solution = global_matrix \ rhs_global
+#println(extrema(x_global .- check_solution))
             @test isapprox(x_global, check_solution;
                            norm=(x)->NaN, rtol=tol, atol=tol)
+#println(extrema(global_matrix * x_global .- rhs_global))
             @test isapprox(global_matrix * x_global, rhs_global;
                            norm=(x)->NaN, rtol=tol, atol=tol)
         end
@@ -72,6 +78,12 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
             assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
                                             allocate_shared_float, rng)
         MPI.Barrier(shared_comm)
+#MPI.Barrier(shared_comm)
+#println("m = ", Matrix(local_matrix), ";")
+#println("r = ", rhs_local, ";")
+#global_matrix !== nothing && println("mglob = ", Matrix(global_matrix), ";")
+#println("rglob = ", rhs_global, ";")
+#MPI.Barrier(shared_comm)
 
         lu!(Alu, local_matrix)
 
@@ -125,7 +137,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
         sparse_stencils_list = (true,)
     end
     if both_remove_procs
-        reduce_proc_count_with_blocks_list = (false, true)
+        reduce_proc_count_with_blocks_list = (false,) #(false, true)
     else
         reduce_proc_count_with_blocks_list = (false,)
     end

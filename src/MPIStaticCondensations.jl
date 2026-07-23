@@ -65,6 +65,7 @@ the matrix is divided into as many 'local blocks' as there are processes, until 
 final level each 'local block' is solved in serial.
 """
 module MPIStaticCondensations
+using Debugger, Cthulhu, JLD
 
 export mpi_static_condensation, create_dimension
 
@@ -82,6 +83,21 @@ using TimerOutputs
 
 import LinearAlgebra: lu!, ldiv!
 
+function get_unique_column_rowinds_count(m::FixedSparseCSC)
+    unique_rowinds = Vector{Int64}[]
+    colptr = m.colptr
+    rowval = m.rowval
+    for col in 1:size(m,2)
+        first_i = colptr[col]
+        last_i = colptr[col+1]-1
+        rv = rowval[first_i:last_i]
+        if rv ∉ unique_rowinds
+            push!(unique_rowinds, rv)
+        end
+    end
+    return sum(length(rv) for rv in unique_rowinds)
+end
+
 macro sc_timeit(timer, name, expr)
     return quote
         if $(esc(timer)) === nothing
@@ -97,6 +113,69 @@ const AbstractVectorOrMatrix{T} = Union{AbstractVector{T},AbstractMatrix{T}}
 abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
 struct MPIStaticCondensationNull{Tf<:AbstractFloat} <: MPIStaticCondensation{Tf} end
+
+#function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer,
+#                                           allocate_shared_float, allocate_shared_int,
+#                                           shared_comm_rank, shared_comm)
+#    @inbounds begin
+#        # Initialize buffer with the same non-zero pattern as existing_buffer, but only for a
+#        # subset of rows given by row_range and columns given by col_range.
+#        nrow = length(row_range)
+#        ncol = length(col_range)
+#        if nrow == 0 || ncol == 0
+#            return FixedSparseCSC(nrow, ncol, ones(Int64, ncol + 1), Int64[],
+#                                  zeros(eltype(existing_buffer), 0))
+#        end
+#        if shared_comm_rank == 0
+#            colptr = Int64[1]
+#            rowval = Int64[]
+#            firstrow = first(row_range)
+#            lastrow = last(row_range)
+#            existing_colptr = existing_buffer.colptr
+#            existing_rowval = existing_buffer.rowval
+#            for j ∈ col_range
+#                existing_col_start = existing_colptr[j]
+#                existing_col_end = existing_colptr[j+1]-1
+#                existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+#                n_existing = existing_col_end - existing_col_start + 1
+#                if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
+#                    # Definitely no overlapping entries in this column, so skip.
+#                    push!(colptr, length(rowval) + 1)
+#                    continue
+#                end
+#                count = max(searchsortedlast(existing_col_rowval, firstrow) - 1, 1)
+#                for (i, i_global) ∈ enumerate(row_range)
+#                    while count ≤ n_existing && existing_col_rowval[count] < i_global
+#                        count += 1
+#                    end
+#                    if count > n_existing
+#                        break
+#                    end
+#                    if existing_col_rowval[count] == i_global
+#                        push!(rowval, i)
+#                    end
+#                end
+#                push!(colptr, length(rowval) + 1)
+#            end
+#            n = Ref(length(rowval))
+#            MPI.Bcast!(n, shared_comm; root=0)
+#            shared_colptr = allocate_shared_int(ncol + 1)
+#            shared_rowval = allocate_shared_int(n[])
+#            shared_nzval = allocate_shared_float(n[])
+#            shared_colptr .= colptr
+#            shared_rowval .= rowval
+#            shared_nzval .= 0.0
+#        else
+#            n = Ref(-1)
+#            MPI.Bcast!(n, shared_comm; root=0)
+#            shared_colptr = allocate_shared_int(ncol + 1)
+#            shared_rowval = allocate_shared_int(n[])
+#            shared_nzval = allocate_shared_float(n[])
+#        end
+#        buffer = FixedSparseCSC(nrow, ncol, shared_colptr, shared_rowval, shared_nzval)
+#        return buffer
+#    end
+#end
 
 function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer,
                                            float_type=Float64)
@@ -1069,6 +1148,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
+@sc_timeit timer "Init" begin
+@sc_timeit timer "comm setup" begin
     data_type = Float64
     ind_type = Int64
 
@@ -1085,6 +1166,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         error("Size of shared_comm ($shared_comm_size) does not divide the size of comm "
               * "($comm_size).")
     end
+end
+@sc_timeit timer "block sizes" begin
     n_blocks = comm_size ÷ shared_comm_size
 
     n_blocks_factors = factor(Vector, n_blocks)
@@ -1108,13 +1191,20 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         push!(nblock_list, local_nblock_list)
         push!(block_sizes_list, this_block_sizes)
     end
+if MPI.Comm_rank(comm) == 0
+    println("block_sizes_list=$block_sizes_list")
+end
+end
 
+@sc_timeit timer "dimensions without periodic" begin
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
                                              nrank=d.nrank, irank=d.irank, periodic=false,
                                              dense_boundaries=d.dense_boundaries,
                                              remove_boundaries=(d.periodic || d.remove_boundaries))
                                    for d ∈ dimensions]
+end
 
+@sc_timeit timer "level info" begin
     n_levels = length(block_sizes_list)
     level_info_list = Vector{LevelInfo{ind_type,typeof(shared_comm)}}(undef, n_levels)
     level_indices = get_global_indices(dimensions_without_periodic,
@@ -1152,6 +1242,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_indices = this_level_info.bottom_vector_indices
         level_global_size = this_level_info.global_bottom_vector_size
     end
+end
+
+# If we moved the rest of the function into a separate function, with one of the arguments
+# being Tuple(level_info_list), then the rest of the function would be (?) type stable
+# which might improve performance?
 
     # Create lowest level MPISchurComplement solver
     # Use a parallelized dense-matrix LU solver for the last Schur complement solve as
@@ -1195,6 +1290,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         else
             last_A_block_solver = MPIStaticCondensationNull{data_type}()
         end
+@sc_timeit timer "last level MPISchurComplement" begin
         last_level_shared_comm = last_level_info.level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
@@ -1218,6 +1314,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  copy_input_to_dense_buffers=(n_levels == 1 && last_level_info.has_periodic),
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
+end
     else
         this_level_sc = MPIStaticCondensationNull{data_type}()
     end
@@ -1327,6 +1424,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 block_synchronize_shared = () -> MPI.Barrier(this_level_info.block_comm)
             end
 
+@sc_timeit timer "level $level BlockedSchurComplementSolver" begin
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
@@ -1341,7 +1439,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              block_allocate_shared_int,
                                              right_multiplication_buffer_storage,
                                              C_dense_buffer_storage, check_lu)
+end
         end
+@sc_timeit timer "level $level MPIStaticCondensationParallel" begin
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
         if level == n_levels
@@ -1419,10 +1519,16 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_u_buffer, this_v_buffer, this_y_buffer,
                                           this_level_info.has_periodic,
                                           level_synchronize_shared, timer)
+end
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.
     solver = this_level_schur_solver
+end
+#for (l, li) in enumerate(level_info_list)
+#    println("ti$l = ", li.local_top_vector_indices, ";")
+#    println("bi$l = ", li.local_bottom_vector_indices, ";")
+#end
 
     return solver
 end
@@ -1605,10 +1711,12 @@ function lu!(solver::MPIStaticCondensationParallel, A)
             else
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
+@sc_timeit solver.timer "matrix views" begin
                 a = @view A[local_top_vector_indices,local_top_vector_indices]
                 b = @view A[local_top_vector_indices,local_bottom_vector_indices]
                 c = @view A[local_bottom_vector_indices,local_top_vector_indices]
                 d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
+end
                 update_schur_complement!(schur_complement_solver, a, b, c, d)
             end
         end
@@ -1657,11 +1765,14 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                     end
                 end
                 ldiv!(X, y, schur_complement_solver, U, v)
+@sc_timeit solver.timer "copy outputs" begin
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = y[i2]
                 end
+end
             else
                 u = solver.u_buffer
+@sc_timeit solver.timer "copy inputs" begin
                 for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
                     u[i1] = U[i2]
                 end
@@ -1686,14 +1797,17 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
                         v[i1] += U[i2]
                     end
                 end
+end
                 solver.synchronize_shared()
                 ldiv!(u, v, schur_complement_solver, u, v)
+@sc_timeit solver.timer "copy outputs" begin
                 for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
                     X[i1] = u[i2]
                 end
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = v[i2]
                 end
+end
             end
         end
         return nothing

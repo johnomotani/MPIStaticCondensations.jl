@@ -376,6 +376,7 @@ end
 function ldiv!(x::AbstractMatrix{T},
                block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
                u::AbstractMatrix{T}) where T
+#println("AbstractMatrix ldiv! ", size(block_diagonal_solver))
     if block_diagonal_solver.local_block_solver !== nothing
         for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
             ldiv!(this_x, block_diagonal_solver, this_u)
@@ -403,6 +404,7 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T}
 end
 function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
                u::Matrix{T}) where T
+# This is probably a sub-optimal implementation? Parallelise over columns of x/u?
     for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
         ldiv!(this_x, block_diagonal_solver, this_u)
     end
@@ -410,6 +412,7 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{T}
 end
 function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
                u::AbstractMatrix{T}) where T
+# ...and maybe separately parallelise this? This is probably a sub-optimal implementation? Parallelise over columns of x/u?
     return ldiv!(u, block_diagonal_solver, u)
 end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{T}, u::Matrix{T}) where T

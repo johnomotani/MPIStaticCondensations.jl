@@ -6,10 +6,10 @@ using TimerOutputs
 
 include("print_git_info.jl")
 
-const nmat = 1
-const nrhs = 1
+const nmat = 1 #4
+const nrhs = 1 #10
 const matrix_repeats = 4
-const rhs_repeats = 100
+const rhs_repeats = 100 #10
 
 const results_directory = "results-benchmark"
 
@@ -42,24 +42,27 @@ struct BenchmarkParams
 end
 
 const params_1d = (
-    BenchmarkParams([32], [5], true),
-    BenchmarkParams([64], [9], true),
-    BenchmarkParams([128], [17], true),
+#    BenchmarkParams([32], [5], true),
+#    BenchmarkParams([64], [9], true),
+#    BenchmarkParams([128], [17], true),
 )
 const seed_1d = 111
 
 const params_2d = (
-    BenchmarkParams([8, 8], [5, 5], true),
-    BenchmarkParams([16, 16], [9, 9], true),
-    BenchmarkParams([32, 32], [5, 5], true),
-    BenchmarkParams([32, 32], [9, 9], true),
+#    BenchmarkParams([8, 8], [5, 5], true),
+#    BenchmarkParams([16, 16], [9, 9], true),
+#    BenchmarkParams([32, 32], [5, 5], true),
+#    BenchmarkParams([32, 32], [9, 9], true),
 )
 const seed_2d = 222
 
 const params_3d = (
-    BenchmarkParams([8, 4, 8], [5, 5, 5], true),
-    BenchmarkParams([16, 8, 16], [5, 5, 5], true),
-    #BenchmarkParams([32, 16, 32], [5, 5, 5], true),
+#    BenchmarkParams([8, 4, 8], [5, 5, 5], true),
+    BenchmarkParams([8, 4, 8], [5, 5, 5], true; sparse_C_blocks=true),
+#    #BenchmarkParams([8, 4, 16], [5, 5, 5], true),
+#    BenchmarkParams([16, 8, 16], [5, 5, 5], true),
+#    #BenchmarkParams([32, 16, 32], [5, 5, 5], true),
+#    BenchmarkParams([16, 16, 32], [5, 5, 5], true),
 )
 const seed_3d = 333
 
@@ -237,7 +240,7 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
 
     if use_shared
         n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
-        level_multiplier_values = collect(2:4)
+        level_multiplier_values = 2 #collect(2:8) #collect(2:16)
     else
         n_shared_values = 1
         level_multiplier_values = [1]

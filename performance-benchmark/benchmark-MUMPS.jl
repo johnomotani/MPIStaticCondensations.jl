@@ -132,7 +132,7 @@ function run_MUMPS(x, data, global_i, global_j, local_i, local_j, rhs, rhs_globa
     return t_setup, t_lu, t_solve
 end
 
-BLAS.set_num_threads(Threads.nthreads())
+#BLAS.set_num_threads(Threads.nthreads())
 
 if !MPI.Initialized()
     MPI.Init()
