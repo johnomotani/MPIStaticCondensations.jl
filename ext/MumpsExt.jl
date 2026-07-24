@@ -15,6 +15,17 @@ function get_mumps_solver(dimensions::Vector{<:Dimension},
     return MPIStaticCondensationMUMPS(matrix_buffer, comm, synchronize_shared, timer)
 end
 
+# Convert an MPI.Comm to a Fortran communicator.
+# From https://discourse.julialang.org/t/can-i-pass-mpi-jl-communicator-to-the-fortran-side/76547/2
+@static if MPI.MPI_Comm === Cint
+    # some MPI libraries don't define MPI_Comm_c2f, they use a Fortran-like integer
+    # communicator even in the C api
+    comm2f(comm::MPI.Comm) = comm.val
+else
+    comm2f(comm::MPI.Comm) =
+        ccall((:MPI_Comm_c2f, MPI.libmpi), Cint, (MPI.MPI_Comm,), comm)
+end
+
 struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf},Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     n::Ti
     mumps::Tmumps
@@ -63,7 +74,7 @@ struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf
         icntl[21] = 0 # Solution is gathered centrally.
         icntl[4] = 1 # Use 'tree parallelism' when multi-threaded.
         cntl = copy(default_cntl64)
-        mumps = Mumps{Float64}(0, icntl, cntl)
+        mumps = Mumps{Float64}(0, icntl, cntl; comm=comm2f(comm))
         mumps.n = ncol
 
         # Pass matrix storage to MUMPS (does not need to be initialised yet).
