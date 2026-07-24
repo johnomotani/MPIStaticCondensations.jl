@@ -1,7 +1,7 @@
 using CSV
 using GLMakie
 
-const results_directory = "results-benchmark"
+const default_results_directory = "results-benchmark"
 const solvers = ("UMFPACK", "MPIStaticCondensations", "MUMPS")
 const cases = ("1d", "2d", "3d")
 
@@ -134,7 +134,8 @@ function plot_serial_reference!(ax, params, results)
     return nothing
 end
 
-function plot_comparison(case, interactive_parameter=nothing; datainspector_kwargs=Dict())
+function plot_comparison(case, interactive_parameter=nothing; datainspector_kwargs=Dict(),
+                         results_directory=default_results_directory)
     setup_dict, lu_dict, solve_dict, sizes_dict =
         load_data(joinpath(results_directory, "benchmarks_MPIStaticCondensations_$(case).txt"))
     MUMPS_setup_dict, MUMPS_lu_dict, MUMPS_solve_dict, MUMPS_sizes_dict =
@@ -215,6 +216,11 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
     end
 end
 
-for case ∈ cases
-    plot_comparison(case)
+function plot_comparisons(results_directory=default_results_directory)
+    for case ∈ cases
+        plot_comparison(case; results_directory)
+    end
+    return nothing
 end
+
+plot_comparisons()
