@@ -1414,7 +1414,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 block_synchronize_shared = () -> MPI.Barrier(this_level_info.block_comm)
             end
 
-@sc_timeit timer "level $level BlockedSchurComplementSolver" begin
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
