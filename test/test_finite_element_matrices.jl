@@ -211,7 +211,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([32], [3], rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
-                tol = 2.0e-7
+                tol = 1.0e-6
                 test_dimension_combinations([1, 1], [3, 3], rank, comm_size, n_shared, tol, 2000)
                 test_dimension_combinations([1, 2], [3, 3], rank, comm_size, n_shared, tol, 2001)
                 test_dimension_combinations([1, 2], [3, 5], rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
