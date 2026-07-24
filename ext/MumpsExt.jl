@@ -12,9 +12,6 @@ using TimerOutputs
 function get_mumps_solver(dimensions::Vector{<:Dimension},
                           matrix_buffer::SharedSparseBuffer, comm, synchronize_shared::Fs,
                           timer) where Fs
-    if any(d.periodic for d ∈ dimensions)
-        error("MPIStaticCondensationMUMPS does not currently support periodicity.")
-    end
     return MPIStaticCondensationMUMPS(matrix_buffer, comm, synchronize_shared, timer)
 end
 

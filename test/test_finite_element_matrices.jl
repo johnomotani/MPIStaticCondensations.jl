@@ -31,7 +31,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     x_local = allocate_shared_float(size(rhs_local)...)
 
     max_nelement = maximum(d.nelement for d ∈ dimensions)
-    if max_nelement ≥ 3 && mumps_fill_in_threshold < 1.0 && reduce_proc_count_with_blocks
+    if mumps_fill_in_threshold < 1.0 && reduce_proc_count_with_blocks
         @test_throws "reduce_proc_count_with_blocks=true is not compatible with using a MUMPS solver for the lowest level." begin
             mpi_static_condensation(dimensions; reduce_proc_count_with_blocks,
                                     sparse_C_blocks, mumps_fill_in_threshold, comm,
@@ -41,7 +41,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
         return nothing
     end
-    if max_nelement ≥ 3 && mumps_fill_in_threshold < 1.0 && any(d.periodic for d ∈ dimensions)
+    if mumps_fill_in_threshold < 1.0 && any(d.periodic for d ∈ dimensions)
         @test_throws "MPIStaticCondensationMUMPS does not currently support periodicity." begin
             mpi_static_condensation(dimensions; reduce_proc_count_with_blocks,
                                     sparse_C_blocks, mumps_fill_in_threshold, comm,

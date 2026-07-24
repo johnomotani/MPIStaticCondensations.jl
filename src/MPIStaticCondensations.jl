@@ -1103,6 +1103,20 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         error("Size of shared_comm ($shared_comm_size) does not divide the size of comm "
               * "($comm_size).")
     end
+
+    if mumps_fill_in_threshold < 1.0
+        if reduce_proc_count_with_blocks
+            error("reduce_proc_count_with_blocks=true is not compatible with using a "
+                  * "MUMPS solver for the lowest level.")
+        end
+        if Base.get_extension(MPIStaticCondensations, :MumpsExt) === nothing
+            error("MUMPS must be loaded when `mumps_fill_in_threshold` is set to a value "
+                  * "less than 1.")
+        end
+        if any(d.periodic for d ∈ dimensions)
+            error("MPIStaticCondensationMUMPS does not currently support periodicity.")
+        end
+    end
     n_blocks = comm_size ÷ shared_comm_size
 
     n_blocks_factors = factor(Vector, n_blocks)
@@ -1258,20 +1272,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     else
         second_last_schur_complement_buffer = nothing
     end
+#println("size(second_last_schur_complement_buffer)=", size(second_last_schur_complement_buffer))
 
     # Create lowest level schur complement solver.
     # Use MUMPS if `mumps_fill_in_threshold` was exceeded.  Otherwise, use a parallelized
     # dense-matrix LU solver for the last Schur complement solve as long as the last Schur
     # complement matrix is not too small.
     if final_sc_solver_is_mumps
-        if reduce_proc_count_with_blocks
-            error("reduce_proc_count_with_blocks=true is not compatible with using a "
-                  * "MUMPS solver for the lowest level.")
-        end
-        if Base.get_extension(MPIStaticCondensations, :MumpsExt) === nothing
-            error("MUMPS must be loaded when `mumps_fill_in_threshold` is set to a value "
-                  * "less than 1.")
-        end
         if synchronize_shared === nothing
             level_synchronize_shared = () -> MPI.Barrier(shared_comm)
         else
