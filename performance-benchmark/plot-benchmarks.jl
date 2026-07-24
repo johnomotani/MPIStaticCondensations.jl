@@ -6,9 +6,9 @@ const solvers = ("UMFPACK", "MPIStaticCondensations", "MUMPS")
 const cases = ("1d", "2d", "3d")
 
 function load_data(filename; count_shared_blocks=true)
-    setup_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
-    lu_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
-    solve_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
+    setup_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
+    lu_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
+    solve_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
     sizes_set = String[]
     sizes_dict = Dict{String,String}()
 
@@ -18,34 +18,35 @@ function load_data(filename; count_shared_blocks=true)
 
     file = CSV.File(filename; delim=" ", header=false, comment="#")
     for row in file
-        nproc, n_shared, ndim, total_size, level_multiplier, tsetup, tlu, tsolve,
-            nelement_list, ngrid_list, periodic_list, remove_boundaries_list,
-            sparse_C_blocks, mumps_fill_in_threshold, block_sizes_list = row
+        nproc, n_shared, ndim, total_size, tsetup, tlu, tsolve, nelement_list, ngrid_list,
+            periodic_list, remove_boundaries_list, sparse_C_blocks,
+            mumps_fill_in_threshold, block_sizes_heuristic = row
 
         key = join([nelement_list, ngrid_list], ",")
+        other_parameters = join([sparse_C_blocks, mumps_fill_in_threshold, block_sizes_heuristic], ";")
         if count_shared_blocks
             shared_collect_label = nproc ÷ n_shared
         else
             shared_collect_label = n_shared
         end
         if key ∉ keys(setup_dict)
-            setup_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
-            lu_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
-            solve_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
+            setup_dict[key] = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
+            lu_dict[key] = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
+            solve_dict[key] = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
         end
-        if level_multiplier ∉ keys(setup_dict[key])
-            setup_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
-            lu_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
-            solve_dict[key][level_multiplier] = Dict{Int64,Dict{Int64,Float64}}()
+        if other_parameters ∉ keys(setup_dict[key])
+            setup_dict[key][other_parameters] = Dict{Int64,Dict{Int64,Float64}}()
+            lu_dict[key][other_parameters] = Dict{Int64,Dict{Int64,Float64}}()
+            solve_dict[key][other_parameters] = Dict{Int64,Dict{Int64,Float64}}()
         end
-        if shared_collect_label ∉ keys(setup_dict[key][level_multiplier])
-            setup_dict[key][level_multiplier][shared_collect_label] = Dict{Int64,Float64}()
-            lu_dict[key][level_multiplier][shared_collect_label] = Dict{Int64,Float64}()
-            solve_dict[key][level_multiplier][shared_collect_label] = Dict{Int64,Float64}()
+        if shared_collect_label ∉ keys(setup_dict[key][other_parameters])
+            setup_dict[key][other_parameters][shared_collect_label] = Dict{Int64,Float64}()
+            lu_dict[key][other_parameters][shared_collect_label] = Dict{Int64,Float64}()
+            solve_dict[key][other_parameters][shared_collect_label] = Dict{Int64,Float64}()
         end
-        setup_dict[key][level_multiplier][shared_collect_label][nproc] = tsetup
-        lu_dict[key][level_multiplier][shared_collect_label][nproc] = tlu
-        solve_dict[key][level_multiplier][shared_collect_label][nproc] = tsolve
+        setup_dict[key][other_parameters][shared_collect_label][nproc] = tsetup
+        lu_dict[key][other_parameters][shared_collect_label][nproc] = tlu
+        solve_dict[key][other_parameters][shared_collect_label][nproc] = tsolve
 
         if key ∉ keys(sizes_dict)
             base_label = "$total_size"
@@ -76,12 +77,11 @@ function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing
     end
     results = all_results[params]
 
-    level_multipliers = collect(keys(results))
-    sort!(level_multipliers)
+    other_parameters_list = collect(keys(results))
 
     first_plot = true
-    for lm ∈ level_multipliers
-        level_results = results[lm]
+    for op ∈ other_parameters_list
+        level_results = results[op]
         shared_collect_label_list = collect(keys(level_results))
         sort!(shared_collect_label_list)
         for shared_collect_label ∈ shared_collect_label_list
@@ -90,7 +90,7 @@ function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing
             sort!(nprocs)
             times = [nsb_results[n] for n ∈ nprocs]
             if label === nothing
-                this_label = "level_multiplier=$lm"
+                this_label = "other_parameters=$op"
             else
                 this_label = label
             end
@@ -126,7 +126,7 @@ function plot_serial_reference!(ax, params, results)
         # Don't have an UMFPACK result for these parameters, so skip.
         return nothing
     end
-    t = results[params][1][1][1]
+    t = first(values(first(values(first(values(results[params]))))))
     # Not sure if we need to use 10^p[2] here because of a bug, or this is correct
     # behaviour of hlines!()...
     hlines!(ax, t; linestyle=:dash, label="UMFPACK",

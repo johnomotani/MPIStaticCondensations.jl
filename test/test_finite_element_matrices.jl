@@ -1,5 +1,5 @@
 using MPIStaticCondensations
-using MPIStaticCondensations: Dimension
+using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
 using LinearAlgebra
 using MPI
@@ -12,7 +12,7 @@ include("generate_finite_element_matrices.jl")
 include("utils.jl")
 
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
-                     random_seed::Integer, sparse_stencils::Bool,
+                     random_seed::Integer, sparse_stencils::Bool, block_sizes_heuristic,
                      reduce_proc_count_with_blocks::Bool, sparse_C_blocks::Bool,
                      mumps_fill_in_threshold::AbstractFloat, tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
@@ -33,9 +33,10 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     max_nelement = maximum(d.nelement for d ∈ dimensions)
     if mumps_fill_in_threshold < 1.0 && reduce_proc_count_with_blocks
         @test_throws "reduce_proc_count_with_blocks=true is not compatible with using a MUMPS solver for the lowest level." begin
-            mpi_static_condensation(dimensions; reduce_proc_count_with_blocks,
-                                    sparse_C_blocks, mumps_fill_in_threshold, comm,
-                                    distributed_comm, shared_comm, allocate_shared_float,
+            mpi_static_condensation(dimensions; block_sizes_heuristic,
+                                    reduce_proc_count_with_blocks, sparse_C_blocks,
+                                    mumps_fill_in_threshold, comm, distributed_comm,
+                                    shared_comm, allocate_shared_float,
                                     allocate_shared_int, check_lu=true)
         end
         cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
@@ -43,7 +44,8 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     end
     if mumps_fill_in_threshold < 1.0 && any(d.periodic for d ∈ dimensions)
         @test_throws "MPIStaticCondensationMUMPS does not currently support periodicity." begin
-            mpi_static_condensation(dimensions; reduce_proc_count_with_blocks,
+            mpi_static_condensation(dimensions;
+                                    block_sizes_heuristic, reduce_proc_count_with_blocks,
                                     sparse_C_blocks, mumps_fill_in_threshold, comm,
                                     distributed_comm, shared_comm, allocate_shared_float,
                                     allocate_shared_int, check_lu=true)
@@ -51,7 +53,8 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
         return nothing
     end
-    Alu = mpi_static_condensation(dimensions; reduce_proc_count_with_blocks,
+    Alu = mpi_static_condensation(dimensions;
+                                  block_sizes_heuristic, reduce_proc_count_with_blocks,
                                   sparse_C_blocks, mumps_fill_in_threshold, comm,
                                   distributed_comm, shared_comm, allocate_shared_float,
                                   allocate_shared_int, check_lu=true)
@@ -123,7 +126,8 @@ end
 
 function test_dimension_combinations(nelement_list, ngrid_list, rank,
                                      comm_size, n_shared, tol, this_seed;
-                                     all_sparse_stencils=true, all_periodic=true,
+                                     all_sparse_stencils=true,
+                                     all_block_sizes_heuristics=true, all_periodic=true,
                                      all_dense_boundaries=true, both_remove_procs=true)
     if length(nelement_list) != length(ngrid_list)
         error("nelement_list and ngrid_list must have the same length")
@@ -138,6 +142,11 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
     else
         sparse_stencils_list = (true,)
     end
+    if all_block_sizes_heuristics
+        block_sizes_heuristic_list = (FastSlow(), LevelMultiplier())
+    else
+        block_sizes_heuristic_list = (FastSlow(), )
+    end
     if both_remove_procs
         reduce_proc_count_with_blocks_list = (false, true)
     else
@@ -150,16 +159,17 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
             println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks")
         end
 
-        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold" for
+        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, block_sizes_heuristic=$block_sizes_heuristic, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
                 periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
                 dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),)),
+                block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ (1.0, 0.1)
             if rank == 0
-                println("  - n_shared=$n_shared, sparse_stencils=$sparse_stencils, this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold")
+                println("  - n_shared=$n_shared, sparse_stencils=$sparse_stencils, this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, block_sizes_heuristic=$block_sizes_heuristic, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold")
             end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
@@ -168,8 +178,8 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
                           ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list)]
 
             test_matrix(dimensions, n_shared, this_seed, sparse_stencils,
-                        reduce_proc_count_with_blocks, sparse_C_blocks,
-                        mumps_fill_in_threshold, tol)
+                        block_sizes_heuristic, reduce_proc_count_with_blocks,
+                        sparse_C_blocks, mumps_fill_in_threshold, tol)
             this_seed += 1
         end
     end
@@ -190,41 +200,42 @@ function test_finite_element_matrices()
                 test_dimension_combinations([1], [3], rank, comm_size, n_shared, tol, 1000)
                 test_dimension_combinations([2], [3], rank, comm_size, n_shared, tol, 1001)
                 test_dimension_combinations([2], [4], rank, comm_size, n_shared, tol, 1002)
-                test_dimension_combinations([2], [5], rank, comm_size, n_shared, tol, 1003)
-                test_dimension_combinations([3], [3], rank, comm_size, n_shared, tol, 1004)
-                test_dimension_combinations([4], [3], rank, comm_size, n_shared, tol, 1005)
+                test_dimension_combinations([2], [5], rank, comm_size, n_shared, tol, 1003; all_block_sizes_heuristics=false)
+                test_dimension_combinations([3], [3], rank, comm_size, n_shared, tol, 1004; all_block_sizes_heuristics=false)
+                test_dimension_combinations([4], [3], rank, comm_size, n_shared, tol, 1005; all_block_sizes_heuristics=false)
                 test_dimension_combinations([5], [3], rank, comm_size, n_shared, tol, 1006)
-                test_dimension_combinations([6], [3], rank, comm_size, n_shared, tol, 1007)
-                test_dimension_combinations([7], [3], rank, comm_size, n_shared, tol, 1008)
-                test_dimension_combinations([8], [3], rank, comm_size, n_shared, tol, 1009)
-                test_dimension_combinations([16], [3], rank, comm_size, n_shared, tol, 1010)
-                test_dimension_combinations([32], [3], rank, comm_size, n_shared, tol, 1011)
+                test_dimension_combinations([6], [3], rank, comm_size, n_shared, tol, 1007; all_block_sizes_heuristics=false)
+                test_dimension_combinations([7], [3], rank, comm_size, n_shared, tol, 1008; all_block_sizes_heuristics=false)
+                test_dimension_combinations([8], [3], rank, comm_size, n_shared, tol, 1009; all_block_sizes_heuristics=false)
+                test_dimension_combinations([16], [3], rank, comm_size, n_shared, tol, 1010; all_block_sizes_heuristics=false)
+                test_dimension_combinations([32], [3], rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
                 tol = 2.0e-7
                 test_dimension_combinations([1, 1], [3, 3], rank, comm_size, n_shared, tol, 2000)
                 test_dimension_combinations([1, 2], [3, 3], rank, comm_size, n_shared, tol, 2001)
-                test_dimension_combinations([1, 2], [3, 5], rank, comm_size, n_shared, tol, 2002)
-                test_dimension_combinations([1, 3], [3, 5], rank, comm_size, n_shared, tol, 2003)
-                test_dimension_combinations([2, 2], [3, 5], rank, comm_size, n_shared, tol, 2004)
-                test_dimension_combinations([2, 3], [3, 5], rank, comm_size, n_shared, tol, 2005)
-                test_dimension_combinations([2, 4], [3, 5], rank, comm_size, n_shared, tol, 2006)
-                test_dimension_combinations([1, 8], [3, 5], rank, comm_size, n_shared, tol, 2007)
-                test_dimension_combinations([1, 16], [3, 5], rank, comm_size, n_shared, tol, 2008)
-                test_dimension_combinations([2, 8], [3, 5], rank, comm_size, n_shared, tol, 2009)
-                test_dimension_combinations([4, 4], [3, 5], rank, comm_size, n_shared, tol, 2010)
+                test_dimension_combinations([1, 2], [3, 5], rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
+                test_dimension_combinations([1, 3], [3, 5], rank, comm_size, n_shared, tol, 2003; all_block_sizes_heuristics=false)
+                test_dimension_combinations([2, 2], [3, 5], rank, comm_size, n_shared, tol, 2004; all_block_sizes_heuristics=false)
+                test_dimension_combinations([2, 3], [3, 5], rank, comm_size, n_shared, tol, 2005; all_block_sizes_heuristics=false)
+                test_dimension_combinations([2, 4], [3, 5], rank, comm_size, n_shared, tol, 2006; all_block_sizes_heuristics=false)
+                test_dimension_combinations([1, 8], [3, 5], rank, comm_size, n_shared, tol, 2007; all_block_sizes_heuristics=false)
+                test_dimension_combinations([1, 16], [3, 5], rank, comm_size, n_shared, tol, 2008; all_block_sizes_heuristics=false)
+                test_dimension_combinations([2, 8], [3, 5], rank, comm_size, n_shared, tol, 2009; all_block_sizes_heuristics=false)
+                test_dimension_combinations([4, 4], [3, 5], rank, comm_size, n_shared, tol, 2010; all_block_sizes_heuristics=false)
                 test_dimension_combinations([4, 4], [5, 5], rank, comm_size, n_shared, tol, 2011)
-                test_dimension_combinations([1, 32], [3, 5], rank, comm_size, n_shared, tol, 2012)
-                test_dimension_combinations([2, 16], [3, 5], rank, comm_size, n_shared, tol, 2013)
-                test_dimension_combinations([4, 8], [3, 5], rank, comm_size, n_shared, tol, 2014)
-                test_dimension_combinations([4, 8], [5, 5], rank, comm_size, n_shared, tol, 2015)
+                test_dimension_combinations([1, 32], [3, 5], rank, comm_size, n_shared, tol, 2012; all_block_sizes_heuristics=false)
+                test_dimension_combinations([2, 16], [3, 5], rank, comm_size, n_shared, tol, 2013; all_block_sizes_heuristics=false)
+                test_dimension_combinations([4, 8], [3, 5], rank, comm_size, n_shared, tol, 2014; all_block_sizes_heuristics=false)
+                test_dimension_combinations([4, 8], [5, 5], rank, comm_size, n_shared, tol, 2015; all_block_sizes_heuristics=false)
+                test_dimension_combinations([16, 15], [3, 3], rank, comm_size, n_shared, tol, 2016)
             end
             @testset "3D" begin
                 tol = 2.0e-5
-                test_dimension_combinations([1, 1, 1], [3, 3, 3], rank, comm_size, n_shared, tol, 3000; all_sparse_stencils=false, both_remove_procs=false)
-                test_dimension_combinations([2, 2, 2], [3, 4, 5], rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, both_remove_procs=false)
-                test_dimension_combinations([2, 3, 4], [3, 4, 5], rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, both_remove_procs=false)
-                test_dimension_combinations([8, 8, 8], [3, 4, 5], rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
+                test_dimension_combinations([1, 1, 1], [3, 3, 3], rank, comm_size, n_shared, tol, 3000; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_dimension_combinations([2, 2, 2], [3, 4, 5], rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_dimension_combinations([2, 3, 4], [3, 4, 5], rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_dimension_combinations([8, 8, 8], [3, 4, 5], rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 if comm_size ≥ 16
                     test_dimension_combinations([9, 9, 32], [3, 3, 3], rank, comm_size, n_shared, tol, 3004; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
                 end

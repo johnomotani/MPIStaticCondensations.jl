@@ -67,6 +67,7 @@ final level each 'local block' is solved in serial.
 module MPIStaticCondensations
 
 export mpi_static_condensation, create_dimension, finalize_mpi_static_condensation!
+public BlockSizesHeuristic, LevelMultiplier, FastSlow
 
 using LinearAlgebra
 using LinearAlgebra.LAPACK: getrf!
@@ -283,6 +284,137 @@ function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
     return Dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries,
                      remove_boundaries)
 end
+
+"""
+    BlockSizesHeuristic
+
+Abstract type for algorithms that specify or generate the list of block sizes at each
+level in MPIStaticCondensations.
+"""
+abstract type BlockSizesHeuristic end
+
+"""
+    FastSlow{Ti<:Integer} <: BlockSizesHeuristic
+    FastSlow(fast_multiplier::Integer=2, slow_threshold::Ti=8)
+
+Algorithm for generating the block sizes at each level in MPIStaticCondensations.
+
+First in the 'fast' phase, the block size at each level in each dimension is increased by
+`fast_multiplier` from that at the previous level until it is greater than or equal to the
+number of elements in that dimension (if the block size would be greater than the number
+of elements, it is reduced to the number of elements). If the block sizes in all
+dimensions reach the number of elements or if the current (maximum) block size is greater
+than or equal to `slow_threshold`, stop.
+
+Second in the 'slow' phase, the block size in one dimension is increased by a factor of
+two at each level. The dimension chosen at each level:
+1) Must have a block size less than the number of elements.
+2) Of the dimensions satisfying (1), has the smallest block size (to keep the blocks as
+   equally sized as possible).
+3) Of the dimensions satisfying (2), has the most room left to expand (largest nelement).
+4) Of the dimensions satisfying (3), is the left-most dimension, as this means the
+   combined blocks will be as close as possible in the global index-space, which might
+   marginally improve cache efficiency sometimes (??).
+"""
+struct FastSlow{Ti<:Integer} <: BlockSizesHeuristic
+    fast_multiplier::Ti
+    slow_threshold::Ti
+
+    function FastSlow(fast_multiplier::Ti=2, slow_threshold::Ti=8) where Ti
+        return new{Ti}(fast_multiplier, slow_threshold)
+    end
+end
+
+function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
+                         nelement_local_list::Vector{Ti}) where Ti <: Integer
+    fm = fs.fast_multiplier
+    st = fs.slow_threshold
+
+    # 'Fast' expansion - all block sizes increase by the same factor at each level.
+    current_size = Ti(1)
+    block_sizes_list = [fill(current_size, length(dimensions))]
+    max_fast = min(st, maximum(nelement_local_list))
+    while current_size < max_fast
+        current_size *= fm
+        this_block_sizes = @. min(current_size, nelement_local_list)
+        push!(block_sizes_list, this_block_sizes)
+    end
+
+    # 'Slow' expansion - one block size increases a factor of 2 at each level.
+    while any(block_sizes_list[end] .< nelement_local_list)
+        previous_block_size = block_sizes_list[end]
+
+        # Dimension to have block size increased must not already be at the maximum block
+        # size.
+        candidate_dims = findall(previous_block_size .< nelement_local_list)
+
+        # Try to keep block equally sized in each dimension, so pick from the dimensions
+        # that have the smallest current block size.
+        not_full_block_sizes = previous_block_size[candidate_dims]
+        smallest_block_size = minimum(not_full_block_sizes)
+        candidate_dims = candidate_dims[findall(not_full_block_sizes .== smallest_block_size)]
+
+        # Try to increase first the dimensions where the block has the most space left to
+        # expand, i.e. the ones with the largest number of elements.
+        largest_nelement = maximum(nelement_local_list[candidate_dims])
+        candidate_dims = candidate_dims[findall(nelement_local_list[candidate_dims] .== largest_nelement)]
+
+        if isempty(candidate_dims)
+            error("This should not happen - maybe the 'while' condition is incorrect?")
+        end
+
+        # For the tie-breaker, increase the left-most dimension, as then the entries being
+        # combined are closer together in the global index-space, which might improve
+        # cache efficiency (?? although this is probably a small effect if any!).
+        dim_to_increase = first(candidate_dims)
+
+        block_size = copy(previous_block_size)
+        block_size[dim_to_increase] = min(block_size[dim_to_increase] * 2,
+                                          nelement_local_list[dim_to_increase])
+
+        push!(block_sizes_list, block_size)
+    end
+
+    return block_sizes_list
+end
+
+"""
+    LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
+    LevelMultiplier(multiplier::Integer=2)
+
+Algorithm for generating the block sizes at each level in MPIStaticCondensations.
+
+The block size at each level in each dimension is increased by `multiplier` from that at
+the previous level until it is greater than or equal to the number of elements in that
+dimension (if the block size would be greater than the number of elements, it is reduced
+to the number of elements). The last level is where block sizes in all dimensions reach
+the number of elements.
+"""
+struct LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
+    multiplier::Ti
+
+    function LevelMultiplier(multiplier::Ti=2) where Ti
+        return new{Ti}(multiplier)
+    end
+end
+
+function get_block_sizes(lm::LevelMultiplier, dimensions::Vector{<:Dimension},
+                         nelement_local_list::Vector{Ti}) where Ti <: Integer
+    m = lm.multiplier
+
+    current_size = Ti(1)
+    block_sizes_list = [fill(current_size, length(dimensions))]
+    max_nelement = maximum(nelement_local_list)
+    while current_size < max_nelement
+        current_size *= m
+        this_block_sizes = @. min(current_size, nelement_local_list)
+        push!(block_sizes_list, this_block_sizes)
+    end
+
+    return block_sizes_list
+end
+
+DefaultBlockSizesHeuristic = FastSlow
 
 include("shared_sparse_buffers.jl")
 include("block_S.jl")
@@ -988,7 +1120,7 @@ end
 
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
-                            level_multiplier::Integer=2,
+                            block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=$DefaultBlockSizesHeuristic,
                             reduce_proc_count_with_blocks::Bool=false,
                             sparse_C_blocks::Bool=false,
                             comm::MPI.Comm=MPI.COMM_WORLD,
@@ -1011,12 +1143,13 @@ the finite element grid. The order of `dimensions` corresponds to the order of t
 in the multi-dimensional array. For a description of the discretization, see the
 `create_dimensions()` docstring.
 
-`level_multiplier` gives the factor by which the block size is increased in each dimension
-at each level.
-
-`block_sizes_list` can be passed to explicitly set the block sizes at each level. The
-block size for each dimension must increase or stay the same at each level. If
-`block_sizes_list` is passed, `level_multiplier` is ignored.
+`block_sizes_heuristic` determines how to set the block sizes at each level. A heuristic
+(an instance of BlockSizesHeuristic) can be passed; currently `FastSlow` and
+`LevelMultiplier` are available (default is `$DefaultBlockSizesHeuristic`). Alternatively
+a list of block sizes for each level can be passed a `Vector{<:Vector{<:Integer}}` - the
+block size for each dimension must increase or stay the same at each level, and must be an
+integer multiple of the block sizes at the previous level, and at the final level the
+block size in every dimension must be equal to the number of elements.
 
 `reduce_proc_count_with_blocks` sets whether the number of processes involved in the solve
 at each level is reduced when the number of blocks at that level is less than the total
@@ -1070,8 +1203,7 @@ factors of 2).
 matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
-                                 level_multiplier::Integer=2,
-                                 block_sizes_list::Union{Vector{<:Vector{<:Integer}},Nothing}=nothing,
+                                 block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=false,
                                  mumps_fill_in_threshold::Number=1.0,
@@ -1122,28 +1254,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     n_blocks_factors = factor(Vector, n_blocks)
     shared_comm_size_factors = factor(Vector, shared_comm_size)
 
-    nelement_list = [d.nelement for d ∈ dimensions]
-    nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
-    if block_sizes_list === nothing
-        # Not sure if this is necessarily the most efficient choice for all grids and
-        # numbers of processes - everything following should work for any set of
-        # block_sizes, so other choices could be made here.
-        block_sizes_list = [ones(ind_type, length(dimensions))]
-        nblock_list = [nelement_local_list]
-        total_local_nblock = prod(nelement_local_list)
-        total_local_nblock_list = [total_local_nblock]
-        while total_local_nblock > 1
-            previous_block_sizes = block_sizes_list[end]
-            this_block_sizes = @. min(previous_block_sizes .* level_multiplier, nelement_local_list)
-            local_nblock_list = @. (nelement_local_list + this_block_sizes - 1) ÷ this_block_sizes
-            total_local_nblock = prod(local_nblock_list)
-            push!(total_local_nblock_list, total_local_nblock)
-            push!(nblock_list, local_nblock_list)
-            push!(block_sizes_list, this_block_sizes)
-        end
+    nelement_list = [ind_type(d.nelement) for d ∈ dimensions]
+    nelement_local_list = [ind_type(d.nelement ÷ d.nrank) for d ∈ dimensions]
+    if isa(block_sizes_heuristic, BlockSizesHeuristic)
+        block_sizes_list = get_block_sizes(block_sizes_heuristic, dimensions,
+                                           nelement_local_list)
     else
-        nblock_list = [nelement_local_list .÷ bs for bs ∈ block_sizes_list]
-        total_local_nblock_list = [prod(nb) for nb ∈ nblock_list]
+        block_sizes_list = block_sizes_heuristic
         # Check consistency of passed-in list.
         for i ∈ 1:length(block_sizes_list)-1
             bs = block_sizes_list[i]
@@ -1164,6 +1281,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             end
         end
     end
+    nblock_list = [(nelement_local_list .+ bs .- 1) .÷ bs for bs ∈ block_sizes_list]
+    total_local_nblock_list = [prod(nb) for nb ∈ nblock_list]
 
     dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
                                              nrank=d.nrank, irank=d.irank, periodic=false,

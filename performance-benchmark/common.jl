@@ -21,12 +21,12 @@ struct BenchmarkParams
     remove_boundaries_list::Vector{Bool}
     sparse_C_blocks::Bool
     mumps_fill_in_threshold::Float64
-    block_sizes_list::Union{Vector{Vector{Int64}},Nothing}
+    block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}}}
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
                              periodic_list=nothing, remove_boundaries_list=nothing,
                              sparse_C_blocks=false, mumps_fill_in_threshold=1.0,
-                             block_sizes_list=nothing)
+                             block_sizes_heuristic=MPIStaticCondensations.FastSlow())
         n = length(nelement_list)
         if periodic_list === nothing
             periodic_list = fill(false, n)
@@ -41,7 +41,7 @@ struct BenchmarkParams
 
         return new(nelement_list, ngrid_list, sparse_stencils, periodic_list,
                    remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold,
-                   block_sizes_list)
+                   block_sizes_heuristic)
     end
 end
 
@@ -91,7 +91,7 @@ function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
     return rhs, rhs_global
 end
 
-function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, level_multiplier, timer=nothing) where T
+function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, timer=nothing) where T
     rng = StableRNG(seed)
 
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
@@ -107,7 +107,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     ndim = length(params.nelement_list)
 
     if distributed_rank == 0 && shared_rank == 0
-        println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), level_multiplier=$level_multiplier, $params")
+        println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), $params")
     end
 
     nrank_list = ones(Int64, ndim)
@@ -136,8 +136,8 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                               allocate_shared_float)
     x_temp = allocate_shared_float(length(rhs))
     run_solver(x_temp, data, this_block_global_i, this_block_global_j, local_i, local_j,
-               rhs, rhs_global, dimensions, level_multiplier, params.sparse_C_blocks,
-               params.mumps_fill_in_threshold, params.block_sizes_list, comm,
+               rhs, rhs_global, dimensions, params.sparse_C_blocks,
+               params.mumps_fill_in_threshold, params.block_sizes_heuristic, comm,
                distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
                1, 1, 1, 1, timer, global_data, global_i, global_j)
 
@@ -174,12 +174,11 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
                 run_solver(x, data, this_block_global_i, this_block_global_j, local_i,
-                           local_j, rhs, rhs_global, dimensions, level_multiplier,
-                           params.sparse_C_blocks, params.mumps_fill_in_threshold,
-                           params.block_sizes_list, comm, distributed_comm, shared_comm,
-                           allocate_shared_float, allocate_shared_int, nmat, nrhs,
-                           matrix_repeats, rhs_repeats, timer, global_data, global_i,
-                           global_j)
+                           local_j, rhs, rhs_global, dimensions, params.sparse_C_blocks,
+                           params.mumps_fill_in_threshold, params.block_sizes_heuristic,
+                           comm, distributed_comm, shared_comm, allocate_shared_float,
+                           allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats,
+                           timer, global_data, global_i, global_j)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)
@@ -215,6 +214,8 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             function vec2string(v)
                 if v === nothing
                     return "nothing"
+                elseif !isa(v, AbstractVector)
+                    return v
                 elseif eltype(v) <: AbstractVector
                     return "[" * join([vec2string(x) for x ∈ v], ",") * "]"
                 else
@@ -222,7 +223,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                 end
             end
             open(joinpath(run_dir, "benchmarks_$label.txt"), "a") do io
-                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list)) $(params.sparse_C_blocks) $(params.mumps_fill_in_threshold) $(vec2string(params.block_sizes_list))")
+                println(io, "$nproc $ns $ndim $total_size $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list)) $(params.sparse_C_blocks) $(params.mumps_fill_in_threshold) $(vec2string(params.block_sizes_heuristic))")
             end
         end
     end
@@ -249,16 +250,14 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
 
     if use_shared
         n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
-        level_multiplier_values = collect(2:4)
     else
         # When use_shared=false, we set up the matrix with shared-memory, but then divide
         # it into distributed chunks to pass to MUMPS.
         n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
-        level_multiplier_values = [1]
     end
     for n_shared ∈ n_shared_values
-        for p ∈ params, lm ∈ level_multiplier_values
-            run_benchmark(run_solver, p, seed, label, n_shared, use_shared, lm)
+        for p ∈ params
+            run_benchmark(run_solver, p, seed, label, n_shared, use_shared)
             seed += 1
         end
     end
