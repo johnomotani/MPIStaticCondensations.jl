@@ -19,7 +19,8 @@ function load_data(filename; count_shared_blocks=true)
     file = CSV.File(filename; delim=" ", header=false, comment="#")
     for row in file
         nproc, n_shared, ndim, total_size, level_multiplier, tsetup, tlu, tsolve,
-            nelement_list, ngrid_list, periodic_list, remove_boundaries_list = row
+            nelement_list, ngrid_list, periodic_list, remove_boundaries_list,
+            sparse_C_blocks, mumps_fill_in_threshold, block_sizes_list = row
 
         key = join([nelement_list, ngrid_list], ",")
         if count_shared_blocks
