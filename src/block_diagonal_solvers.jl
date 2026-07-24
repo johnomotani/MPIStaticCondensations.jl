@@ -102,7 +102,7 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
                 mpi_dense_lu(factors, 128, block_comm, block_comm, MPI.COMM_SELF,
                              allocate_shared_float, allocate_shared_int;
                              synchronize_shared=synchronize_shared,
-                             skip_factorization=true, check_lu=check_lu, timer=timer)
+                             skip_factorization=true, check_lu=check_lu)
             local_block_serial_solver = LU(factors,
                                            local_block_solver.factorization_shared_lu.ipiv,
                                            block_size)
