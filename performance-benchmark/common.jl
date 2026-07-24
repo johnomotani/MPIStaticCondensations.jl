@@ -213,10 +213,16 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
             run_dir = mkpath(results_directory)
             total_size = prod(d.n for d ∈ dimensions)
             function vec2string(v)
-                return "[" * join(v, ",") * "]"
+                if v === nothing
+                    return "nothing"
+                elseif eltype(v) <: AbstractVector
+                    return "[" * join([vec2string(x) for x ∈ v], ",") * "]"
+                else
+                    return "[" * join(v, ",") * "]"
+                end
             end
             open(joinpath(run_dir, "benchmarks_$label.txt"), "a") do io
-                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list))")
+                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list)) $(params.sparse_C_blocks) $(params.mumps_fill_in_threshold) $(vec2string(params.block_sizes_list))")
             end
         end
     end
