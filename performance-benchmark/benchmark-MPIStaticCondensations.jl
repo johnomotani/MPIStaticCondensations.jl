@@ -64,10 +64,10 @@ function run_MSC(x, data, this_block_global_i, this_block_global_j, local_i, loc
 
     t1 = time_ns()
     Alu = mpi_static_condensation(dimensions; block_sizes_heuristic, sparse_C_blocks,
-                                  mumps_fill_in_threshold, block_sizes_list, comm,
-                                  distributed_comm, shared_comm, allocate_shared_float,
-                                  allocate_shared_int, schur_tile_size=nothing,
-                                  separate_Ainv_B=false, timer, check_lu=false)
+                                  mumps_fill_in_threshold, comm, distributed_comm,
+                                  shared_comm, allocate_shared_float, allocate_shared_int,
+                                  schur_tile_size=nothing, separate_Ainv_B=false, timer,
+                                  check_lu=false)
     t2 = time_ns()
     t_setup = (t2 - t1) * 1e-6 # in ms
 
