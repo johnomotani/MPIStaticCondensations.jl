@@ -1152,6 +1152,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 error("Block size for each dimension must not decrease at any level. "
                       * "Got block_sizes_list=$block_sizes_list.")
             end
+            if !all(bs_next .% bs .== 0)
+                error("Block size for each dimension must be an integer multiple of the "
+                      * "block size at the previous level. "
+                      * "Got block_sizes_list=$block_sizes_list.")
+            end
         end
         for (nb, bs) ∈ zip(nblock_list, block_sizes_list)
             if !all(nb .> 0)
