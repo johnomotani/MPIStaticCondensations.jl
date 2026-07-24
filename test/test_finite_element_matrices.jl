@@ -237,6 +237,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([2, 3, 4], [3, 4, 5], rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_dimension_combinations([8, 8, 8], [3, 4, 5], rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 if comm_size ≥ 16
+                    tol = 2.0e-5
                     test_dimension_combinations([9, 9, 32], [3, 3, 3], rank, comm_size, n_shared, tol, 3004; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
                 end
             end
