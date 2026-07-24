@@ -1122,7 +1122,7 @@ end
     mpi_static_condensation(dimensions::Vector{<:Dimension};
                             block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=$DefaultBlockSizesHeuristic,
                             reduce_proc_count_with_blocks::Bool=false,
-                            sparse_C_blocks::Bool=false,
+                            sparse_C_blocks::Bool=true,
                             comm::MPI.Comm=MPI.COMM_WORLD,
                             distributed_comm::Union{MPI.Comm,Nothing}=missing,
                             shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1157,9 +1157,11 @@ number of processes. Usually reducing the number of processes is probably not he
 (hence the default is `false`), but if MPI communication cost is the dominant bottleneck
 it might be faster.
 
-`sparse_C_blocks=true` can be passed to use sparse-matrix storage for the non-zero blocks
-of the 'C' sub-matrices. This will save some memory usage, but probably comes with a
-slight performance penalty.
+`sparse_C_blocks=false` can be passed to disable using sparse-matrix storage for the
+non-zero blocks of the 'C' sub-matrices, on levels where the sub-blocks are not dense
+matrices. Using sparse 'C' blocks should save some memory usage, and seems to improve the
+'solve' performance slightly (although it should also give a small cost in the
+matrix-processing part, `lu!()`).
 
 When the 'fill in' of the matrix (number of non-zeros divided by total number of entries)
 at some level exceeds `mumps_fill_in_threshold`, MUMPS is used to factorize/solve the
@@ -1205,7 +1207,7 @@ matrices being factorized.
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
                                  reduce_proc_count_with_blocks::Bool=false,
-                                 sparse_C_blocks::Bool=false,
+                                 sparse_C_blocks::Bool=true,
                                  mumps_fill_in_threshold::Number=1.0,
                                  sparse_A_first_level::Bool=false,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
