@@ -1538,12 +1538,21 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 block_synchronize_shared = () -> MPI.Barrier(this_level_info.block_comm)
             end
 
+            if level == 1
+                level_sparse_C_blocks = sparse_C_blocks
+            else
+                # If block_size_change==2, then only two blocks on the previous level
+                # combined into each block on this level, in which case the C blocks will
+                # be dense, and there is no point using 'sparse C blocks'.
+                block_size_change = prod(block_sizes_list[level] .÷ block_sizes_list[level-1])
+                level_sparse_C_blocks = block_size_change > 2 && sparse_C_blocks
+            end
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
                                              schur_complement_buffer_list,
                                              second_last_schur_complement_buffer,
                                              this_level_schur_solver, use_shared_blocks,
-                                             sparse_C_blocks, sparse_A_first_level,
+                                             level_sparse_C_blocks, sparse_A_first_level,
                                              this_level_shared_comm,
                                              level_synchronize_shared,
                                              level_allocate_shared_float,
