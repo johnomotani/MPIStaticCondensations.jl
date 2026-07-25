@@ -3,7 +3,8 @@ using GLMakie
 
 const default_results_directory = "results-benchmark"
 const solvers = ("UMFPACK", "MPIStaticCondensations", "MUMPS")
-const cases = ("1d", "2d", "3d")
+const cases = ("1d", "2d", "3d", "multivariable_1d", "multivariable_2d",
+               "multivariable_3d")
 
 function load_data(filename; count_shared_blocks=true)
     setup_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
@@ -155,7 +156,7 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
         backend = Makie.current_backend()
     end
     for p ∈ parameter_list
-        label = sizes_dict[p]
+        label = case * "-" * sizes_dict[p]
 
         setup_fig = Figure()
         setup_ax = Axis(setup_fig[1,1]; xscale=log2, yscale=log10, title="$p setup")

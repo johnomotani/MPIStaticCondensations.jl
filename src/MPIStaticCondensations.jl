@@ -156,6 +156,7 @@ function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer
 end
 
 struct Dimension{Ti<:Integer}
+    name::String
     n::Ti
     n_local::Ti
     nelement::Ti
@@ -169,8 +170,8 @@ struct Dimension{Ti<:Integer}
     #has_upper_boundary::Bool
     remove_boundaries::Bool
 
-    function Dimension(; nelement::Ti, ngrid::Ti, nrank::Ti, irank::Ti, periodic::Bool,
-                       dense_boundaries::Bool,
+    function Dimension(; name::String, nelement::Ti, ngrid::Ti, nrank::Ti, irank::Ti,
+                       periodic::Bool, dense_boundaries::Bool,
                        remove_boundaries::Union{Bool,Nothing}) where Ti <: Integer
 
         if nelement % nrank != 0
@@ -239,18 +240,22 @@ struct Dimension{Ti<:Integer}
             global_inds[end] = 1
         end
 
-        return new{Ti}(n, n_local, nelement, ngrid, nrank, irank, global_inds, periodic,
-                       dense_boundaries, remove_boundaries)
+        return new{Ti}(name, n, n_local, nelement, ngrid, nrank, irank, global_inds,
+                       periodic, dense_boundaries, remove_boundaries)
     end
 end
 
 """
-    create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
-                     irank::Integer, periodic::Bool, dense_boundaries::Bool=false,
-                     remove_boundaries::Bool=nothing)
+    create_dimension(; name::String, nelement::Integer, ngrid::Integer,
+                     nrank::Integer, irank::Integer, periodic::Bool,
+                     dense_boundaries::Bool=false,
+                     remove_boundaries::Union{Bool,Nothing}=nothing)
 
 Create a `Dimension` object for input to the `dimensions` argument of
 `mpi_static_condensation()`.
+
+`name` is used to test whether two dimensions are the same - different dimensions should
+not ever be given the same `name`.
 
 Assume a continuous-Galerkin finite element discretization where there are `nelement`
 elements and `ngrid` points in each element. The points at the boundary between two
@@ -278,10 +283,11 @@ can be split by removing any element boundary. `remove_boundaries` is set by def
 `true` if `periodic=true` or `dense_boundaries=true`, so it should not usually be
 necessary to pass `remove_boundaries` explicitly.
 """
-function create_dimension(; nelement::Integer, ngrid::Integer, nrank::Integer,
-                          irank::Integer, periodic::Bool, dense_boundaries::Bool=false,
+function create_dimension(; name::String, nelement::Integer, ngrid::Integer,
+                          nrank::Integer, irank::Integer, periodic::Bool,
+                          dense_boundaries::Bool=false,
                           remove_boundaries::Union{Bool,Nothing}=nothing)
-    return Dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries,
+    return Dimension(; name, nelement, ngrid, nrank, irank, periodic, dense_boundaries,
                      remove_boundaries)
 end
 
@@ -1286,8 +1292,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     nblock_list = [(nelement_local_list .+ bs .- 1) .÷ bs for bs ∈ block_sizes_list]
     total_local_nblock_list = [prod(nb) for nb ∈ nblock_list]
 
-    dimensions_without_periodic = [Dimension(; nelement=d.nelement, ngrid=d.ngrid,
-                                             nrank=d.nrank, irank=d.irank, periodic=false,
+    dimensions_without_periodic = [Dimension(; name=d.name, nelement=d.nelement,
+                                             ngrid=d.ngrid, nrank=d.nrank, irank=d.irank,
+                                             periodic=false,
                                              dense_boundaries=d.dense_boundaries,
                                              remove_boundaries=(d.periodic || d.remove_boundaries))
                                    for d ∈ dimensions]
