@@ -6,9 +6,9 @@ const solvers = ("UMFPACK", "MPIStaticCondensations", "MUMPS")
 const cases = ("1d", "2d", "3d")
 
 function load_data(filename; count_shared_blocks=true)
-    setup_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
-    lu_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
-    solve_dict = Dict{String,Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}}()
+    setup_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
+    lu_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
+    solve_dict = Dict{String,Dict{String,Dict{Int64,Dict{Int64,Float64}}}}()
     sizes_set = String[]
     sizes_dict = Dict{String,String}()
 
@@ -30,9 +30,9 @@ function load_data(filename; count_shared_blocks=true)
             shared_collect_label = n_shared
         end
         if key ∉ keys(setup_dict)
-            setup_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
-            lu_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
-            solve_dict[key] = Dict{Int64,Dict{Int64,Dict{Int64,Float64}}}()
+            setup_dict[key] = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
+            lu_dict[key] = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
+            solve_dict[key] = Dict{String,Dict{Int64,Dict{Int64,Float64}}}()
         end
         if other_parameters ∉ keys(setup_dict[key])
             setup_dict[key][other_parameters] = Dict{Int64,Dict{Int64,Float64}}()
@@ -78,7 +78,6 @@ function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing
     results = all_results[params]
 
     other_parameters_list = collect(keys(results))
-    sort!(level_multipliers)
 
     first_plot = true
     for op ∈ other_parameters_list
@@ -127,7 +126,7 @@ function plot_serial_reference!(ax, params, results)
         # Don't have an UMFPACK result for these parameters, so skip.
         return nothing
     end
-    t = results[params][1][1][1]
+    t = first(values(first(values(first(values(results[params]))))))
     # Not sure if we need to use 10^p[2] here because of a bug, or this is correct
     # behaviour of hlines!()...
     hlines!(ax, t; linestyle=:dash, label="UMFPACK",
