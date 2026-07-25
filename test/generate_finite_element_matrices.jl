@@ -393,11 +393,7 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                             allocate_shared_int, rng,
                                             sparse_stencils::Bool; return_separate=false,
                                             row_dimensions=nothing,
-                                            column_dimensions=nothing, stencil="element",
-                                            transpose_result=false)
-    if transpose_result
-        row_dimensions, column_dimensions = column_dimensions, row_dimensions
-    end
+                                            column_dimensions=nothing, stencil="element")
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
@@ -544,17 +540,9 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
             # Assemble global matrix
             m = prod(d.periodic ? d.n - 1 : d.n for d ∈ row_dimensions)
             n = prod(d.periodic ? d.n - 1 : d.n for d ∈ column_dimensions)
-            if transpose_result
-                local_matrix = transpose(FixedSparseCSC(local_m, local_n,
-                                                        local_matrix_colptr,
-                                                        local_matrix_rowval,
-                                                        local_matrix_nzval))
-                global_matrix = transpose(sparse(global_i, global_j, data, m, n))
-            else
-                local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
-                                              local_matrix_rowval, local_matrix_nzval)
-                global_matrix = sparse(global_i, global_j, data, m, n)
-            end
+            local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
+                                          local_matrix_rowval, local_matrix_nzval)
+            global_matrix = sparse(global_i, global_j, data, m, n)
         end
     elseif return_separate && distributed_comm_rank == 0
         MPI.Barrier(shared_comm)
@@ -571,14 +559,8 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         local_matrix_nzval = allocate_shared_float(local_matrix_nnz[])
 
         MPI.Barrier(shared_comm)
-        if transpose_result
-            local_matrix = transpose(FixedSparseCSC(local_m, local_n, local_matrix_colptr,
-                                                    local_matrix_rowval,
-                                                    local_matrix_nzval))
-        else
-            local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
-                                          local_matrix_rowval, local_matrix_nzval)
-        end
+        local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
+                                      local_matrix_rowval, local_matrix_nzval)
     else
         if return_separate
             n_local = allocate_shared_int(1)
@@ -614,24 +596,12 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
             end
 
             MPI.Barrier(shared_comm)
-            if transpose_result
-                local_matrix = tranpsose(FixedSparseCSC(local_m, local_n,
-                                                        local_matrix_colptr,
-                                                        local_matrix_rowval,
-                                                        local_matrix_nzval))
-            else
-                local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
-                                              local_matrix_rowval, local_matrix_nzval)
-            end
+            local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
+                                          local_matrix_rowval, local_matrix_nzval)
         end
     end
 
     if return_separate
-        if transpose_result
-            global_i, global_j = global_j, global_i
-            this_block_global_i, this_block_global_j = this_block_global_j, this_block_global_i
-            local_i, local_j = local_j, local_i
-        end
         return global_data, global_i, global_j, local_data, this_block_global_i,
                this_block_global_j, local_i, local_j
     else
