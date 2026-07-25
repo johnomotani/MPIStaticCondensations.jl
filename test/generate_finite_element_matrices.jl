@@ -425,6 +425,8 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     if return_separate
         local_data = nothing
         global_data = nothing
+        global_i = nothing
+        global_j = nothing
         this_block_global_i = nothing
         this_block_global_j = nothing
         local_i = nothing
