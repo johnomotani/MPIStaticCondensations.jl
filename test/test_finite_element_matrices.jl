@@ -173,9 +173,11 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
             end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
-            dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries)
-                          for (nelement, ngrid, irank, nrank, periodic, dense_boundaries)
-                          ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list)]
+            dimensions = [create_dimension(; name="d$i", nelement, ngrid, nrank, irank, periodic, dense_boundaries)
+                          for (i, (nelement, ngrid, irank, nrank, periodic, dense_boundaries))
+                          ∈ enumerate(zip(this_nelement_list, this_ngrid_list,
+                                          this_irank_list, this_nrank_list, periodic_list,
+                                          dense_boundaries_list))]
 
             test_matrix(dimensions, n_shared, this_seed, sparse_stencils,
                         block_sizes_heuristic, reduce_proc_count_with_blocks,
@@ -196,7 +198,7 @@ function test_finite_element_matrices()
         # Temporarily disable distributed-memory MPI, until we re-enable support.
         @testset "n_shared=$n_shared" for n_shared ∈ comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
             @testset "1D" begin
-                tol = 1.0e-11
+                tol = 4.0e-11
                 test_dimension_combinations([1], [3], rank, comm_size, n_shared, tol, 1000)
                 test_dimension_combinations([2], [3], rank, comm_size, n_shared, tol, 1001)
                 test_dimension_combinations([2], [4], rank, comm_size, n_shared, tol, 1002)

@@ -11,11 +11,21 @@ const nrhs = 1
 const matrix_repeats = 4
 const rhs_repeats = 100
 
+const variable_dimensions_1d = (nothing, [1], [1], [1])
+const variable_dimensions_2d = (nothing, [2], [2], [2])
+const variable_dimensions_3d = (nothing, [3], [3], [3])
+const stencil_matrix = ["element" "empty"   "point"   "element";
+                        "element" "point"   "element" "empty";
+                        "empty"   "element" "element" "point";
+                        "point"   "element" "empty"   "element"]
+
 const results_directory = "results-benchmark"
 
 struct BenchmarkParams
     nelement_list::Vector{Int64}
     ngrid_list::Vector{Int64}
+    variable_dimensions::Union{Vector{Vector{Int64}},Nothing}
+    stencil_matrix::Union{Matrix{String},Nothing}
     sparse_stencils::Bool
     periodic_list::Vector{Bool}
     remove_boundaries_list::Vector{Bool}
@@ -24,6 +34,7 @@ struct BenchmarkParams
     block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}}}
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
+                             variable_dimensions=nothing, stencil_matrix=nothing,
                              periodic_list=nothing, remove_boundaries_list=nothing,
                              sparse_C_blocks=false, mumps_fill_in_threshold=1.0,
                              block_sizes_heuristic=MPIStaticCondensations.FastSlow())
@@ -39,9 +50,15 @@ struct BenchmarkParams
             error("length of all parameter lists must be the same")
         end
 
-        return new(nelement_list, ngrid_list, sparse_stencils, periodic_list,
-                   remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold,
-                   block_sizes_heuristic)
+        if variable_dimensions !== nothing
+            nd = length(nelement_list)
+            variable_dimensions = [vdims === nothing ? (1:nd) : vdims
+                                   for vdims ∈ variable_dimensions]
+        end
+
+        return new(nelement_list, ngrid_list, variable_dimensions, stencil_matrix,
+                   sparse_stencils, periodic_list, remove_boundaries_list,
+                   sparse_C_blocks, mumps_fill_in_threshold, block_sizes_heuristic)
     end
 end
 
@@ -63,35 +80,72 @@ const seed_2d = 222
 const params_3d = (
     BenchmarkParams([8, 4, 8], [5, 5, 5], true),
     BenchmarkParams([16, 8, 16], [5, 5, 5], true),
-    #BenchmarkParams([32, 16, 32], [5, 5, 5], true),
+    BenchmarkParams([32, 16, 32], [5, 5, 5], true),
 )
 const seed_3d = 333
+
+const params_multivariable_1d = (
+    BenchmarkParams([32], [5], true; variable_dimensions=variable_dimensions_1d, stencil_matrix),
+    BenchmarkParams([64], [9], true; variable_dimensions=variable_dimensions_1d, stencil_matrix),
+    BenchmarkParams([128], [17], true; variable_dimensions=variable_dimensions_1d, stencil_matrix),
+)
+const seed_multivariable_1d = 112
+
+const params_multivariable_2d = (
+    BenchmarkParams([8, 8], [5, 5], true; variable_dimensions=variable_dimensions_2d, stencil_matrix),
+    BenchmarkParams([16, 16], [9, 9], true; variable_dimensions=variable_dimensions_2d, stencil_matrix),
+    BenchmarkParams([32, 32], [5, 5], true; variable_dimensions=variable_dimensions_2d, stencil_matrix),
+    BenchmarkParams([32, 32], [9, 9], true; variable_dimensions=variable_dimensions_2d, stencil_matrix),
+)
+const seed_multivariable_2d = 223
+
+const params_multivariable_3d = (
+    BenchmarkParams([8, 4, 8], [5, 5, 5], true; variable_dimensions=variable_dimensions_3d, stencil_matrix),
+    BenchmarkParams([16, 8, 16], [5, 5, 5], true; variable_dimensions=variable_dimensions_3d, stencil_matrix),
+    BenchmarkParams([32, 16, 32], [5, 5, 5], true; variable_dimensions=variable_dimensions_3d, stencil_matrix),
+)
+const seed_multivariable_3d = 334
 
 include("../test/utils.jl")
 include("../test/generate_finite_element_matrices.jl")
 
-function get_matrix(dimensions, sparse_stencils, rng, comm, distributed_comm, shared_comm,
-                    allocate_shared_float, allocate_shared_int)
+function get_matrix(dimensions, variable_dimensions, stencil_matrix, sparse_stencils, rng,
+                    comm, distributed_comm, shared_comm, allocate_shared_float,
+                    allocate_shared_int, matrix_return_separate, matrix_combine_blocks)
 
-    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
-    local_i, local_j =
-        assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
-                                           shared_comm, allocate_shared_float,
-                                           allocate_shared_int, rng, sparse_stencils;
-                                           return_sparse=true)
-    return global_data, global_i, global_j, data, this_block_global_i,
-           this_block_global_j, local_i, local_j
+    if variable_dimensions === nothing
+        return assemble_and_scatter_global_matrix(
+                   dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
+                   allocate_shared_int, rng, sparse_stencils;
+                   return_separate=matrix_return_separate)
+    else
+        return assemble_and_scatter_global_multi_variable_matrix(
+                   dimensions, variable_dimensions, comm, distributed_comm, shared_comm,
+                   allocate_shared_float, allocate_shared_int, rng, sparse_stencils;
+                   return_separate=matrix_return_separate, stencil_matrix=stencil_matrix,
+                   combine_blocks=matrix_combine_blocks)
+    end
 end
 
-function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
-                 allocate_shared_float)
-    rhs_global, rhs =
-        assemble_and_scatter_global_rhs(dimensions, comm, distributed_comm, shared_comm,
-                                        allocate_shared_float, rng)
+function get_rhs(dimensions, variable_dimensions, rng, comm, distributed_comm,
+                 shared_comm, allocate_shared_float)
+    if variable_dimensions === nothing
+        rhs_global, rhs =
+            assemble_and_scatter_global_rhs(
+                dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
+                rng)
+    else
+        rhs_global, rhs =
+            assemble_and_scatter_global_multi_variable_rhs(
+                dimensions, variable_dimensions, comm, distributed_comm, shared_comm,
+                allocate_shared_float, rng)
+    end
     return rhs, rhs_global
 end
 
-function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, timer=nothing) where T
+function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
+                       matrix_return_separate, matrix_combine_blocks,
+                       timer=nothing) where T
     rng = StableRNG(seed)
 
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
@@ -121,25 +175,28 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     end
     nrank_list[end] = distributed_nproc
     irank_list = get_iranks(nrank_list, distributed_rank)
-    dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
-                  for (nelement, ngrid, irank, nrank, periodic, remove_boundaries)
-                  ∈ zip(params.nelement_list, params.ngrid_list, irank_list, nrank_list,
-                        params.periodic_list, params.remove_boundaries_list)]
+    dimensions = [create_dimension(; name="d$i", nelement, ngrid, nrank, irank, periodic,
+                                   remove_boundaries)
+                  for (i, (nelement, ngrid, irank, nrank, periodic, remove_boundaries))
+                  ∈ enumerate(zip(params.nelement_list, params.ngrid_list, irank_list,
+                                  nrank_list, params.periodic_list,
+                                  params.remove_boundaries_list))]
 
     # First run ensures solver is compiled for these parameters. Do not save these timings
     # as we do not want to measure compilation time.
-    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
-    local_i, local_j =
-        get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
-                   shared_comm, allocate_shared_float, allocate_shared_int)
-    rhs, rhs_global = get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
-                              allocate_shared_float)
+    matrix_data =
+        get_matrix(dimensions, params.variable_dimensions, params.stencil_matrix,
+                   params.sparse_stencils, rng, comm, distributed_comm, shared_comm,
+                   allocate_shared_float, allocate_shared_int, matrix_return_separate,
+                   matrix_combine_blocks)
+    rhs, rhs_global = get_rhs(dimensions, params.variable_dimensions, rng, comm,
+                              distributed_comm, shared_comm, allocate_shared_float)
     x_temp = allocate_shared_float(length(rhs))
-    run_solver(x_temp, data, this_block_global_i, this_block_global_j, local_i, local_j,
-               rhs, rhs_global, dimensions, params.sparse_C_blocks,
+    run_solver(x_temp, matrix_data, rhs, rhs_global, dimensions,
+               params.variable_dimensions, params.sparse_C_blocks,
                params.mumps_fill_in_threshold, params.block_sizes_heuristic, comm,
                distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
-               1, 1, 1, 1, timer, global_data, global_i, global_j)
+               1, 1, 1, 1, timer)
 
     if local_win_store_float !== nothing
         # Free the MPI.Win objects, because if they are free'd by the garbage collector
@@ -164,21 +221,23 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     t_lu = Float64[]
     t_solve = Float64[]
     for imat ∈ 1:nmat
-        global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
-        local_i, local_j =
-            get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
-                       shared_comm, allocate_shared_float, allocate_shared_int)
+        matrix_data =
+            get_matrix(dimensions, params.variable_dimensions, params.stencil_matrix,
+                       params.sparse_stencils, rng, comm, distributed_comm, shared_comm,
+                       allocate_shared_float, allocate_shared_int, matrix_return_separate,
+                       matrix_combine_blocks)
         for irhs ∈ 1:nrhs
-            rhs, rhs_global = get_rhs(dimensions, rng, comm, distributed_comm,
-                                      shared_comm, allocate_shared_float)
+            rhs, rhs_global = get_rhs(dimensions, params.variable_dimensions, rng, comm,
+                                      distributed_comm, shared_comm,
+                                      allocate_shared_float)
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
-                run_solver(x, data, this_block_global_i, this_block_global_j, local_i,
-                           local_j, rhs, rhs_global, dimensions, params.sparse_C_blocks,
+                run_solver(x, matrix_data, rhs, rhs_global, dimensions,
+                           params.variable_dimensions, params.sparse_C_blocks,
                            params.mumps_fill_in_threshold, params.block_sizes_heuristic,
                            comm, distributed_comm, shared_comm, allocate_shared_float,
                            allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats,
-                           timer, global_data, global_i, global_j)
+                           timer)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)
@@ -231,7 +290,8 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     return nothing
 end
 
-function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
+function benchmark(run_solver::T, params, seed, label, matrix_return_separate,
+                   matrix_combine_blocks; use_shared=true) where T
     if !MPI.Initialized()
         MPI.Init()
     end
@@ -257,7 +317,8 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
     end
     for n_shared ∈ n_shared_values
         for p ∈ params
-            run_benchmark(run_solver, p, seed, label, n_shared, use_shared)
+            run_benchmark(run_solver, p, seed, label, n_shared, use_shared,
+                          matrix_return_separate, matrix_combine_blocks)
             seed += 1
         end
     end
