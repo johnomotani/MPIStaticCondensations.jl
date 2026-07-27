@@ -834,7 +834,7 @@ function assemble_and_scatter_global_multi_variable_rhs(
         if rhs_global !== nothing
             rhs_global = vcat(rhs_global, new_rhs_global)
         end
-        rhs_local = vcat(rhs_local, rhs_local)
+        rhs_local = vcat(rhs_local, new_rhs_local)
     end
 
     return rhs_global, rhs_local
