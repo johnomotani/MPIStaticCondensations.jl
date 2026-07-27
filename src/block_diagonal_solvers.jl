@@ -2,10 +2,11 @@ import MPISchurComplements: ldiv_Bmatrix!
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Union{Factorization{Tf},Nothing},Trange} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Trange
+    block_ranges::NTuple{Nvar,UnitRange{Ti}}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     B_column_indices::Trange
@@ -13,11 +14,21 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
     check_lu::Bool
     function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, B_column_indices, timer,
                                            check_lu) where {Tf, Ti <: Integer}
+        Nvar = length(block_indices)
+        nblock_unfiltered = length(block_indices[1])
+        empty_blocks = [all(isempty(block_indices[ivar][ib]) for ivar ∈ 1:Nvar)
+                        for ib ∈ 1:nblock_unfiltered]
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
-        block_indices = [bi for bi ∈ block_indices if !isempty(bi)]
-        B_column_indices = [Bc for (Bc, bi) ∈ zip(B_column_indices, block_indices)
-                            if !isempty(bi)]
+        block_range_offsets = [vcat(0, cumsum(block_indices[ivar][ib] for ivar ∈ 1:Nvar-1))
+                               for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+        block_ranges = [Tuple(block_range_offsets[ib][ivar] .+ 1:length(block_indices[ivar][ib])
+                              for ivar ∈ 1:Nvar)
+                        for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+        block_indices = [Tuple(block_indices[ivar][ib] for ivar ∈ 1:Nvar)
+                         for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+        B_column_indices = [Tuple(B_column_indices[ivar][ib] for ivar ∈ 1:Nvar)
+                            for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
         block_sizes = [length(bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
@@ -32,10 +43,11 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
         end
         x_buffer = fill(NaN, block_size)
         u_buffer = fill(NaN, block_size)
+        error("B_buffers_out needs updating")
         B_buffers_out = [zeros(length(bi), length(Bc))
                          for (bi, Bc) ∈ zip(block_indices, B_column_indices)]
-        return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices)}(
-                   n, local_block_solver, block_indices, x_buffer, u_buffer,
+        return new{Tf,Ti,Nvar,eltype(local_block_solver),typeof(first(block_indices))}(
+                   n, local_block_solver, block_indices, block_ranges, x_buffer, u_buffer,
                    B_column_indices, B_buffers_out, check_lu)
     end
 end
@@ -44,17 +56,18 @@ Base.size(Alu::BlockDiagonalSolverSerial, d::Integer) = size(Alu)[d]
 
 # When this solver is used there are more processes than blocks, so we use multiple
 # processes to solve each block, with shared-memory parallelism.
-struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Trange,Tsync} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Trange,Tsync} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_block_serial_solver::Tserialsolver
     factors::Tm
-    block_indices::Trange
-    partial_block_indices::Trange
-    partial_col_range::UnitRange{Ti}
+    block_indices::NTuple{Nvar,Trange}
+    block_ranges::NTuple{Nvar,UnitRange{Ti}}
+    partial_block_indices::NTuple{Nvar,Trange}
+    partial_col_ranges::NTuple{Nvar,UnitRange{Ti}}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
-    B_column_indices::Trange
+    B_column_indices::NTuple{Nvar,Trange}
     block_comm_rank::Ti
     synchronize_shared::Tsync
     check_lu::Bool
@@ -62,9 +75,13 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
                                            block_comm, allocate_shared_float,
                                            allocate_shared_int, synchronize_shared::F,
                                            timer, check_lu) where {Tf, Ti <: Integer, F}
-        block_size = length(block_indices)
+        block_size = sum(length(bi) for bi ∈ block_indices)
         block_comm_rank = MPI.Comm_rank(block_comm)
         block_comm_size = MPI.Comm_size(block_comm)
+
+        block_offsets = vcat(Ti(0), cumsum(length(bi) for bi ∈ block_indices[1:end-1]))
+        block_ranges = Tuple(block_offsets[i] .+ 1:length(bi)
+                             for (i, bi) ∈ enumerate(block_indices))
 
         if block_size == 0
             local_block_solver = nothing
@@ -109,15 +126,16 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
             u_buffer = fill(NaN, block_size)
         end
 
-        cols_per_proc = (block_size + block_comm_size - 1) ÷ block_comm_size
-        partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,block_size)
-        partial_block_indices = block_indices[partial_col_range]
+        cols_per_proc = Tuple((length(bi) + block_comm_size - 1) ÷ block_comm_size for bi ∈ block_indices)
+        partial_col_ranges = Tuple(block_comm_rank*nc+1:min((block_comm_rank+1)*nc,length(bi))
+                                   for (bc, bi) ∈ zip(cols_per_proc, block_indices))
+        partial_block_indices = Tuple(bi[pcr] for (bi, pcr) ∈ zip(block_indices, partial_col_range))
 
-        return new{Tf,Ti,typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),typeof(block_indices),F}(
+        return new{Tf,Ti,length(block_indices),typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),typeof(block_indices),F}(
                    n, local_block_solver, local_block_serial_solver, factors,
-                   block_indices, partial_block_indices, partial_col_range, x_buffer,
-                   u_buffer, B_column_indices, block_comm_rank, synchronize_shared,
-                   check_lu)
+                   block_indices, block_ranges, partial_block_indices, partial_col_ranges,
+                   x_buffer, u_buffer, B_column_indices, block_comm_rank,
+                   synchronize_shared, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
@@ -127,43 +145,119 @@ function get_block_diagonal_solver(level_info, data_type, use_shared_blocks, tim
                                    check_lu, block_allocate_shared_float=nothing,
                                    block_allocate_shared_int=nothing,
                                    block_synchronize_shared=nothing)
-    if isempty(level_info.local_top_vector_a_block_indices)
+    n = sum(li.global_size - li.global_bottom_vector_size for li ∈ level_info)
+    if all(isempty(li.local_top_vector_a_block_indices) for li ∈ level_info)
         return MPIStaticCondensationNull{data_type}()
     elseif use_shared_blocks
-        return BlockDiagonalSolverShared{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
-                                                    level_info.local_top_vector_a_block_indices[1],
-                                                    level_info.a_block_off_diagonal_indices[1],
-                                                    level_info.block_comm,
-                                                    block_allocate_shared_float,
-                                                    block_allocate_shared_int,
-                                                    block_synchronize_shared, timer,
-                                                    check_lu)
+        return BlockDiagonalSolverShared{data_type}(
+                   n,
+                   Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
+                   Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
+                   level_info[1].block_comm, block_allocate_shared_float,
+                   block_allocate_shared_int, block_synchronize_shared, timer, check_lu)
     else
-        return BlockDiagonalSolverSerial{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
-                                                    level_info.local_top_vector_a_block_indices,
-                                                    level_info.a_block_off_diagonal_indices,
-                                                    timer, check_lu)
+        return BlockDiagonalSolverSerial{data_type}(
+                   n, Tuple(li.local_top_vector_a_block_indices for li ∈ level_info),
+                   Tuple(li.a_block_off_diagonal_indices for li ∈ level_info), timer,
+                   check_lu)
     end
 end
 
 function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
-             full_A::Union{AbstractMatrix,SharedSparseBuffer})
+             full_A::NTuple{Nv,<:NTuple{Nv,<:Union{AbstractMatrix,SharedSparseBuffer}}}) where Nv
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         check_lu = block_diagonal_solver.check_lu
-        if solver != [nothing]
-            for (s, inds) ∈ zip(solver, block_diagonal_solver.block_indices)
+        if !(eltype(solver) <: Nothing)
+            for (s, ranges, inds) ∈ zip(solver, block_diagonal_solver.block_ranges,
+                                        block_diagonal_solver.block_indices)
                 factors = s.factors
-                if isa(full_A, AbstractSparseMatrixCSC)
-                    colptr = full_A.colptr
-                    rowval = full_A.rowval
-                    nzval = full_A.nzval
-                    first_row = inds[1]
-                    for (j1, j2) ∈ enumerate(inds)
+                for (vcol, colrange, colinds) ∈ zip(1:Nv, ranges, inds),
+                        (vrow, rowrange, rowinds) ∈ zip(1:Nv, ranges, inds)
+                    A_variable_block = full_A[vrow][vcol]
+                    if isa(A_variable_block, AbstractSparseMatrixCSC)
+                        colptr = A_variable_block.colptr
+                        rowval = A_variable_block.rowval
+                        nzval = A_variable_block.nzval
+                        first_row = rowinds[1]
+                        for (j1, j2) ∈ zip(colrange, colinds)
+                            first_i = colptr[j2]
+                            last_i = colptr[j2+1]-1
+                            flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
+                            for (i1, i2) ∈ zip(rowrange, rowinds)
+                                while flat_i ≤ last_i && rowval[flat_i] < i2
+                                    flat_i += 1
+                                end
+                                if rowval[flat_i] == i2
+                                    factors[i1,j1] = nzval[flat_i]
+                                else
+                                    factors[i1,j1] = 0.0
+                                end
+                            end
+                        end
+                    elseif isa(A_variable_block, SharedSparseBuffer)
+                        colptr = A_variable_block.colptr
+                        rowval_list = A_variable_block.rowval_list
+                        nzval = A_variable_block.nzval
+                        first_row = rowinds[1]
+                        for (j1, j2) ∈ zip(colrange, colinds)
+                            first_i = colptr[j2]
+                            col_rowval = rowval_list[j2]
+                            row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
+                            last_row = length(col_rowval)
+                            flat_i = row_i + first_i - 1
+                            for (i1, i2) ∈ zip(rowrange, rowinds)
+                                while row_i < last_row && col_rowval[row_i] < i2
+                                    row_i += 1
+                                end
+                                if col_rowval[row_i] == i2
+                                    factors[i1,j1] = nzval[row_i+first_i-1]
+                                else
+                                    factors[i1,j1] = 0.0
+                                end
+                            end
+                        end
+                    else
+                        for (j1, j2) ∈ zip(colrange, colinds), (i1, i2) ∈ zip(rowrange, rowinds)
+                            factors[i1,j1] = A_variable_block[i2,j2]
+                        end
+                    end
+                end
+                getrf!(factors, s.ipiv; check=check_lu)
+            end
+        end
+        return nothing
+    end
+end
+function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
+             full_A::NTuple{Nv,<:NTuple{Nv,<:Union{AbstractMatrix,SharedSparseBuffer}}}) where Nv
+    @inbounds begin
+        solver = block_diagonal_solver.local_block_solver
+        factors = block_diagonal_solver.factors
+        block_indices = block_diagonal_solver.block_indices
+        block_ranges = block_diagonal_solver.block_ranges
+        partial_block_indices = block_diagonal_solver.partial_block_indices
+        partial_col_ranges = block_diagonal_solver.partial_col_ranges
+        synchronize_shared = block_diagonal_solver.synchronize_shared
+
+        if solver === nothing
+            # Nothing to do.
+        else
+            for (vcol, colrange, colinds, partial_colrange, partial_colinds) ∈
+                        zip(1:Nv, block_ranges, block_indices, partial_col_ranges,
+                            partial_block_indices),
+                    (vrow, rowrange, rowinds) ∈ zip(1:Nv, block_ranges, block_indices)
+                A_variable_block = full_A[vrow][vcol]
+                if isa(A_variable_block, AbstractSparseMatrixCSC)
+                    colptr = A_variable_block.colptr
+                    rowval = A_variable_block.rowval
+                    nzval = A_variable_block.nzval
+                    first_row = rowinds[1]
+                    for (j1, j2) ∈ zip(partial_colrange, partial_colinds)
                         first_i = colptr[j2]
                         last_i = colptr[j2+1]-1
                         flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
-                        for (i1, i2) ∈ enumerate(inds)
+                        for (i1, i2) ∈ zip(rowrange, rowinds)
                             while flat_i ≤ last_i && rowval[flat_i] < i2
                                 flat_i += 1
                             end
@@ -174,18 +268,18 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
                             end
                         end
                     end
-                elseif isa(full_A, SharedSparseBuffer)
-                    colptr = full_A.colptr
-                    rowval_list = full_A.rowval_list
-                    nzval = full_A.nzval
-                    first_row = inds[1]
-                    for (j1, j2) ∈ enumerate(inds)
+                elseif isa(A_variable_block, SharedSparseBuffer)
+                    colptr = A_variable_block.colptr
+                    rowval_list = A_variable_block.rowval_list
+                    nzval = A_variable_block.nzval
+                    first_row = rowinds[1]
+                    for (j1, j2) ∈ zip(partial_colrange, partial_colinds)
                         first_i = colptr[j2]
                         col_rowval = rowval_list[j2]
                         row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
                         last_row = length(col_rowval)
                         flat_i = row_i + first_i - 1
-                        for (i1, i2) ∈ enumerate(inds)
+                        for (i1, i2) ∈ zip(rowrange, rowinds)
                             while row_i < last_row && col_rowval[row_i] < i2
                                 row_i += 1
                             end
@@ -197,73 +291,11 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
                         end
                     end
                 else
-                    for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
-                        factors[i1,j1] = full_A[i2,j2]
+                    for (j1, j2) ∈ zip(partial_colrange, partial_colinds),
+                            (i1, i2) ∈ zip(rowrange, rowinds)
+                        factors[i1,j1] = A_variable_block[i2,j2]
                     end
                 end
-                getrf!(factors, s.ipiv; check=check_lu)
-            end
-        end
-        return nothing
-    end
-end
-function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
-             full_A::Union{AbstractMatrix,SharedSparseBuffer})
-    @inbounds begin
-        solver = block_diagonal_solver.local_block_solver
-        factors = block_diagonal_solver.factors
-        block_indices = block_diagonal_solver.block_indices
-        partial_block_indices = block_diagonal_solver.partial_block_indices
-        partial_col_range = block_diagonal_solver.partial_col_range
-        synchronize_shared = block_diagonal_solver.synchronize_shared
-
-        if isempty(block_indices)
-            # Nothing to do.
-        elseif isa(full_A, AbstractSparseMatrixCSC)
-            colptr = full_A.colptr
-            rowval = full_A.rowval
-            nzval = full_A.nzval
-            first_row = block_indices[1]
-            for (j1, j2) ∈ zip(partial_col_range, partial_block_indices)
-                first_i = colptr[j2]
-                last_i = colptr[j2+1]-1
-                flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
-                for (i1, i2) ∈ enumerate(block_indices)
-                    while flat_i ≤ last_i && rowval[flat_i] < i2
-                        flat_i += 1
-                    end
-                    if rowval[flat_i] == i2
-                        factors[i1,j1] = nzval[flat_i]
-                    else
-                        factors[i1,j1] = 0.0
-                    end
-                end
-            end
-        elseif isa(full_A, SharedSparseBuffer)
-            colptr = full_A.colptr
-            rowval_list = full_A.rowval_list
-            nzval = full_A.nzval
-            first_row = block_indices[1]
-            for (j1, j2) ∈ zip(partial_col_range, partial_block_indices)
-                first_i = colptr[j2]
-                col_rowval = rowval_list[j2]
-                row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
-                last_row = length(col_rowval)
-                flat_i = row_i + first_i - 1
-                for (i1, i2) ∈ enumerate(block_indices)
-                    while row_i < last_row && col_rowval[row_i] < i2
-                        row_i += 1
-                    end
-                    if col_rowval[row_i] == i2
-                        factors[i1,j1] = nzval[row_i+first_i-1]
-                    else
-                        factors[i1,j1] = 0.0
-                    end
-                end
-            end
-        else
-            for (j1, j2) ∈ zip(partial_col_range, partial_block_indices), (i1, i2) ∈ enumerate(block_indices)
-                factors[i1,j1] = full_A[i2,j2]
             end
         end
 
