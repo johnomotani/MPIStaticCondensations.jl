@@ -2,7 +2,7 @@ import MPISchurComplements: ldiv_Bmatrix!
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Union{Factorization{Tf},Nothing},Tinds,Tvecinds} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Tinds,Tvecinds} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Tinds
@@ -19,26 +19,26 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Uni
                                            check_lu) where {Tf, Ti <: Integer}
         Nvar = length(block_indices)
         nblock_unfiltered = length(block_indices[1])
-        empty_blocks = [all(isempty(block_indices[ivar][ib]) for ivar ∈ 1:Nvar)
-                        for ib ∈ 1:nblock_unfiltered]
+        non_empty_blocks = [!all(isempty(block_indices[ivar][ib]) for ivar ∈ 1:Nvar)
+                            for ib ∈ 1:nblock_unfiltered]
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
         block_range_offsets = [vcat(0, cumsum(block_indices[ivar][ib] for ivar ∈ 1:Nvar-1))
                                for ib ∈ 1:nblock_unfiltered]
         block_ranges = [Tuple(block_range_offsets[ib][ivar] .+ 1:length(block_indices[ivar][ib])
                               for ivar ∈ 1:Nvar)
-                        for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+                        for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         block_indices = [Tuple(block_indices[ivar][ib] for ivar ∈ 1:Nvar)
-                         for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         block_vector_indices = [vcat((block_vector_indices[ivar][ib] for ivar ∈ 1:Nvar)...)
-                                for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+                                for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         B_column_range_offsets = [vcat(0, cumsum(B_column_indices[ivar][ib] for ivar ∈ 1:Nvar-1))
                                   for ib ∈ 1:nblock_unfiltered]
         B_column_ranges = [Tuple(B_column_range_offsets[ib][ivar] .+ 1:length(B_column_indices[ivar][ib])
                                  for ivar ∈ 1:Nvar)
-                           for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+                           for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         B_column_indices = [Tuple(B_column_indices[ivar][ib] for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered if !empty_blocks[ib]]
+                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         block_sizes = [sum(length(vbi) for vbi ∈ bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
@@ -55,7 +55,7 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Uni
         u_buffer = fill(NaN, block_size)
         B_buffers_out = [zeros(sum(length(vbi) for vbi ∈ bi), sum(length(vBc) for vBc ∈ Bc))
                          for (bi, Bc) ∈ zip(block_indices, B_column_indices)]
-        return new{Tf,Ti,Nvar,eltype(local_block_solver),typeof(block_indices),typeof(block_vector_indices)}(
+        return new{Nvar,Tf,Ti,eltype(local_block_solver),typeof(block_indices),typeof(block_vector_indices)}(
                    n, local_block_solver, block_indices, block_vector_indices,
                    block_ranges, x_buffer, u_buffer, B_column_indices, B_column_ranges,
                    B_buffers_out, check_lu)
@@ -66,13 +66,13 @@ Base.size(Alu::BlockDiagonalSolverSerial, d::Integer) = size(Alu)[d]
 
 # When this solver is used there are more processes than blocks, so we use multiple
 # processes to solve each block, with shared-memory parallelism.
-struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Tinds,Tsync} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Tinds,Tsync} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_block_serial_solver::Tserialsolver
     factors::Tm
     block_indices::NTuple{Nvar,Tinds}
-    block_vector_indices::Tinds
+    block_vector_indices::Vector{Ti}
     block_ranges::NTuple{Nvar,UnitRange{Ti}}
     partial_block_indices::NTuple{Nvar,Tinds}
     partial_col_ranges::NTuple{Nvar,UnitRange{Ti}}
@@ -143,10 +143,10 @@ struct BlockDiagonalSolverShared{Tf<:AbstractFloat,Ti<:Integer,Nvar,Tsolver<:Uni
 
         cols_per_proc = Tuple((length(bi) + block_comm_size - 1) ÷ block_comm_size for bi ∈ block_indices)
         partial_col_ranges = Tuple(block_comm_rank*nc+1:min((block_comm_rank+1)*nc,length(bi))
-                                   for (bc, bi) ∈ zip(cols_per_proc, block_indices))
-        partial_block_indices = Tuple(bi[pcr] for (bi, pcr) ∈ zip(block_indices, partial_col_range))
+                                   for (nc, bi) ∈ zip(cols_per_proc, block_indices))
+        partial_block_indices = Tuple(bi[pcr] for (bi, pcr) ∈ zip(block_indices, partial_col_ranges))
 
-        return new{Tf,Ti,length(block_indices),typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),typeof(block_indices),F}(
+        return new{length(block_indices),Tf,Ti,typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),eltype(block_indices),F}(
                    n, local_block_solver, local_block_serial_solver, factors,
                    block_indices, block_vector_indices, block_ranges,
                    partial_block_indices, partial_col_ranges, x_buffer, u_buffer,
@@ -179,8 +179,8 @@ function get_block_diagonal_solver(level_info, data_type, use_shared_blocks, tim
     end
 end
 
-function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
-             full_A::NTuple{Nv,<:NTuple{Nv,<:Union{AbstractMatrix,SharedSparseBuffer}}}) where Nv
+function lu!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
+             full_A::NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractMatrix{T},SharedSparseBuffer{T}}}}) where {Nvar,T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         check_lu = block_diagonal_solver.check_lu
@@ -188,8 +188,8 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
             for (s, ranges, inds) ∈ zip(solver, block_diagonal_solver.block_ranges,
                                         block_diagonal_solver.block_indices)
                 factors = s.factors
-                for (vcol, colrange, colinds) ∈ zip(1:Nv, ranges, inds),
-                        (vrow, rowrange, rowinds) ∈ zip(1:Nv, ranges, inds)
+                for (vcol, colrange, colinds) ∈ zip(1:Nvar, ranges, inds),
+                        (vrow, rowrange, rowinds) ∈ zip(1:Nvar, ranges, inds)
                     A_variable_block = full_A[vrow][vcol]
                     if isa(A_variable_block, AbstractSparseMatrixCSC)
                         colptr = A_variable_block.colptr
@@ -245,8 +245,8 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
         return nothing
     end
 end
-function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
-             full_A::NTuple{Nv,<:NTuple{Nv,<:Union{AbstractMatrix,SharedSparseBuffer}}}) where Nv
+function lu!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
+             full_A::NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractMatrix{T},SharedSparseBuffer{T}}}}) where {Nvar, T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         factors = block_diagonal_solver.factors
@@ -260,9 +260,9 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
             # Nothing to do.
         else
             for (vcol, colrange, colinds, partial_colrange, partial_colinds) ∈
-                        zip(1:Nv, block_ranges, block_indices, partial_col_ranges,
+                        zip(1:Nvar, block_ranges, block_indices, partial_col_ranges,
                             partial_block_indices),
-                    (vrow, rowrange, rowinds) ∈ zip(1:Nv, block_ranges, block_indices)
+                    (vrow, rowrange, rowinds) ∈ zip(1:Nvar, block_ranges, block_indices)
                 A_variable_block = full_A[vrow][vcol]
                 if isa(A_variable_block, AbstractSparseMatrixCSC)
                     colptr = A_variable_block.colptr
@@ -331,8 +331,8 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
 end
 
 function ldiv!(buffers::AbstractVector,
-               block_diagonal_solver::BlockDiagonalSolverSerial{T},
-               u::AbstractVector{T}) where T
+               block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
+               u::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if !(eltype(solvers) <: Nothing)
@@ -351,8 +351,8 @@ function ldiv!(buffers::AbstractVector,
     end
 end
 function ldiv!(buffer::AbstractVector{T},
-               block_diagonal_solver::BlockDiagonalSolverShared{T},
-               u::AbstractVector{T}) where T
+               block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
+               u::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         block_comm_rank = block_diagonal_solver.block_comm_rank
@@ -391,13 +391,13 @@ function ldiv!(buffer::AbstractVector{T},
         return nothing
     end
 end
-function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
-               u::AbstractVector{T}) where T
+function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{Nvar,T},BlockDiagonalSolverShared{Nvar,T}},
+               u::AbstractVector{T}) where {Nvar,T}
     return ldiv!(u, block_diagonal_solver, u)
 end
 function ldiv!(x::AbstractMatrix{T},
-               block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
-               u::AbstractMatrix{T}) where T
+               block_diagonal_solver::Union{BlockDiagonalSolverSerial{Nvar,T},BlockDiagonalSolverShared{Nvar,T}},
+               u::AbstractMatrix{T}) where {Nvar, T}
     if block_diagonal_solver.local_block_solver !== nothing
         for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
             ldiv!(this_x, block_diagonal_solver, this_u)
@@ -405,8 +405,8 @@ function ldiv!(x::AbstractMatrix{T},
     end
     return nothing
 end
-function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T},
-               u::Matrix{T}) where T
+function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
+               u::Matrix{T}) where {Nvar, T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if length(solvers) == 1 && length(block_diagonal_solver.block_vector_indices[1]) == size(u, 1)
@@ -423,18 +423,18 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T}
     end
     return nothing
 end
-function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{T},
-               u::Matrix{T}) where T
+function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
+               u::Matrix{T}) where {Nvar, T}
     for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
         ldiv!(this_x, block_diagonal_solver, this_u)
     end
     return nothing
 end
-function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{T},BlockDiagonalSolverShared{T}},
-               u::AbstractMatrix{T}) where T
+function ldiv!(block_diagonal_solver::Union{BlockDiagonalSolverSerial{Nvar,T},BlockDiagonalSolverShared{Nvar,T}},
+               u::AbstractMatrix{T}) where {Nvar, T}
     return ldiv!(u, block_diagonal_solver, u)
 end
-function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{T}, u::Matrix{T}) where T
+function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T}, u::Matrix{T}) where {Nvar, T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if length(solvers) == 1 && length(block_diagonal_solver.block_vector_indices[1]) == size(u, 1)
@@ -446,13 +446,13 @@ function ldiv!(block_diagonal_solver::BlockDiagonalSolverSerial{T}, u::Matrix{T}
         end
     end
 end
-function ldiv!(block_diagonal_solver::BlockDiagonalSolverShared{T}, u::Matrix{T}) where T
+function ldiv!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T}, u::Matrix{T}) where {Nvar, T}
     return ldiv!(u, block_diagonal_solver, u)
 end
 
 # Specialized implementations to be used for A^{-1}.B
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
-                       B::NTuple{Nv,<:NTuple{Nv,<:AbstractMatrix{T}}}) where {Nv, T}
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
+                       B::NTuple{Nvar,<:NTuple{Nvar,<:AbstractMatrix{T}}}) where {Nvar, T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if !(eltype(solvers <: Nothing))
@@ -461,8 +461,8 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                         block_diagonal_solver.block_indices, solvers,
                         block_diagonal_solver.B_buffers_out,
                         block_diagonal_solver.B_column_indices)
-                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nv, Bcolranges, Bcols),
-                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nv, branges, bi)
+                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nvar, Bcolranges, Bcols),
+                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nvar, branges, bi)
                     B_variable_block = B[vrow][vcol]
                     for (j1, j2) ∈ zip(vBcolrange, vBcols), (i1, i2) ∈ zip(vrowrange,
                                                                            vrowinds)
@@ -470,8 +470,8 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                     end
                 end
                 ldiv!(s, Bbuff)
-                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nv, Bcolranges, Bcols),
-                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nv, branges, bi)
+                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nvar, Bcolranges, Bcols),
+                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nvar, branges, bi)
                     B_variable_block = B[vrow][vcol]
                     for (j1, j2) ∈ zip(vBcolrange, vBcols), (i1, i2) ∈ zip(vrowrange,
                                                                            vrowinds)
@@ -483,8 +483,8 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
         return nothing
     end
 end
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
-                       B::NTuple{Nv,<:NTuple{Nv,<:AbstractSparseMatrixCSC{T}}}) where {Nv, T}
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
+                       B::NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC{T}}}) where {Nvar, T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
         if !(eltype(solvers <: Nothing))
@@ -493,8 +493,8 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                         block_diagonal_solver.block_indices, solvers,
                         block_diagonal_solver.B_buffers_out,
                         block_diagonal_solver.B_column_indices)
-                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nv, Bcolranges, Bcols),
-                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nv, branges, bi)
+                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nvar, Bcolranges, Bcols),
+                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nvar, branges, bi)
                     B_variable_block = B[vrow][vcol]
                     B_colptr = B_variable_block.colptr
                     B_rowval = B_variable_block.rowval
@@ -519,8 +519,8 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                     end
                 end
                 ldiv!(s, Bbuff)
-                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nv, Bcolranges, Bcols),
-                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nv, branges, bi)
+                for (vcol, vBcolrange, vBcols) ∈ zip(1:Nvar, Bcolranges, Bcols),
+                        (vrow, vrowrange, vrowinds) ∈ zip(1:Nvar, branges, bi)
                     B_variable_block = B[vrow][vcol]
                     B_colptr = B_variable_block.colptr
                     B_rowval = B_variable_block.rowval
@@ -549,31 +549,31 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
         return nothing
     end
 end
-function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
-                             B::BlockAinvDotBSerial{T}) where T
+function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
+                             B::BlockAinvDotBSerial{T}) where {Nvar,T}
     for (solver, block) ∈ zip(block_diagonal_solver.local_block_solver, B.blocks)
         ldiv!(solver, block)
     end
     return nothing
 end
-function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
-                             B::BlockAinvDotBShared{T}) where T
+function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
+                             B::BlockAinvDotBShared{T}) where {Nvar,T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_serial_solver
         if solver !== nothing
             block = B.block
             partial_block = B.partial_block
-            partial_col_range = B.partial_col_range
-            partial_row_range = B.partial_row_range
+            partial_vector_col_range = B.partial_vector_col_range
+            partial_vector_row_range = B.partial_vector_row_range
             synchronize_shared = B.synchronize_shared
 
             # Probably more efficient to parallelise over columns in `block` than to use a
             # parallelised `ldiv!()` on the full block.
-            ldiv!(solver, @view(block[:,partial_col_range]))
+            ldiv!(solver, @view(block[:,partial_vector_col_range]))
 
             synchronize_shared()
 
-            partial_block .= @view block[partial_row_range,:]
+            partial_block .= @view block[partial_vector_row_range,:]
         end
         return nothing
     end
@@ -582,8 +582,8 @@ function ldiv_block_Bmatrix!(block_diagonal_solver::MPIStaticCondensationNull{T}
                              B) where T
     return nothing
 end
-function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{T},
-                       B::Matrix{T}) where T
+function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
+                       B::Matrix{T}) where {Nvar,T}
     # When not using BlockAinvDotBShared, this function will use a different
     # parallelisation than copy_B_submatrix!(), so need to synchronize.
     block_diagonal_solver.synchronize_shared()
