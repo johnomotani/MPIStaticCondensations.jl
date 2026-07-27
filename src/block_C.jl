@@ -1,8 +1,10 @@
-struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
+struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
     blocks::Vector{Tb}
-    block_rowinds::Vector{Trange}
-    bottom_block_rowinds::Vector{Trange}
-    block_colinds::Vector{Trange}
+    block_rowinds::Vector{NTuple{Nvar,Trange}}
+    block_row_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
+    bottom_block_vector_rowinds::Vector{Trange}
+    block_colinds::Vector{NTuple{Nvar,Trange}}
+    block_col_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
     block_hypercube_positions::Vector{Ti}
     n_hypercube_positions::Ti
     right_multiplication_buffer_blocks::Trmbb
@@ -14,11 +16,9 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
     block_synchronize_shared::Fsb
     synchronize_shared::Fs
 
-    function BlockCSerial{Tf}(block_rowinds::Vector{<:AbstractVector{Ti}},
-                              bottom_block_rowinds::Vector{<:AbstractVector{Ti}},
-                              block_colinds::Vector{<:AbstractVector{Ti}},
-                              local_top_vector_indices::Vector{Ti},
-                              local_bottom_vector_indices::Vector{Ti},
+    function BlockCSerial{Tf}(block_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
+                              bottom_block_vector_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
+                              block_colinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
                               matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
                               block_hypercube_positions::Vector{Ti},
                               n_hypercube_positions::Ti,
@@ -28,11 +28,26 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
                               vector_range::UnitRange{Ti},
                               block_synchronize_shared::Fsb,
                               synchronize_shared::Fs) where {Tf,Ti,Fsb<:Function,Fs<:Function}
-        non_empty_blocks = [!isempty(ri) && !isempty(ci)
-                            for (ri, ci) ∈ zip(block_rowinds, block_colinds)]
-        block_rowinds = block_rowinds[non_empty_blocks]
-        bottom_block_rowinds = bottom_block_rowinds[non_empty_blocks]
-        block_colinds = block_colinds[non_empty_blocks]
+        nblock_unfiltered = length(block_indices[1])
+        non_empty_blocks = [!all(isempty(block_rowinds[ivar][ib]) for ivar ∈ 1:Nvar) &&
+                            !all(isempty(block_colinds[ivar][ib]) for ivar ∈ 1:Nvar)
+                            for ib ∈ 1:nblock_unfiltered]
+        block_row_range_offsets = [vcat(0, cumsum(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar-1))
+                                   for ib ∈ 1:nblock_unfiltered]
+        block_row_ranges = [Tuple(block_row_range_offsets[ib][ivar] .+ 1:length(block_rowinds[ivar][ib])
+                                  for ivar ∈ 1:Nvar)
+                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        block_rowinds = [Tuple(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar)
+                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        bottom_block_vector_rowinds = [vcat((bottom_block_vector_rowinds[ivar][ib] for ivar ∈ 1:Nvar)...)
+                                       for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        block_col_range_offsets = [vcat(0, cumsum(block_colinds[ivar][ib] for ivar ∈ 1:Nvar-1))
+                                   for ib ∈ 1:nblock_unfiltered]
+        block_col_ranges = [Tuple(block_col_range_offsets[ib][ivar] .+ 1:length(block_colinds[ivar][ib])
+                                  for ivar ∈ 1:Nvar)
+                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        block_colinds = [Tuple(block_colinds[ivar][ib] for ivar ∈ 1:Nvar)
+                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         if matrix_template === nothing
             blocks = Matrix{Tf}[]
         else
@@ -82,23 +97,23 @@ struct BlockCSerial{Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
-                   blocks, block_rowinds, bottom_block_rowinds, block_colinds,
-                   block_hypercube_positions, n_hypercube_positions,
-                   right_multiplication_buffer_blocks, dense_buffer_storage,
-                   vector_buffer_blocks_in, vector_buffer_blocks_out,
-                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
-                   synchronize_shared)
+        return new{Nvar,eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
+                   blocks, block_rowinds, block_row_ranges, bottom_block_vector_rowinds,
+                   block_colinds, block_col_ranges, block_hypercube_positions,
+                   n_hypercube_positions, right_multiplication_buffer_blocks,
+                   dense_buffer_storage, vector_buffer_blocks_in,
+                   vector_buffer_blocks_out, vector_intermediate_buffer, vector_range,
+                   block_synchronize_shared, synchronize_shared)
     end
 end
 
-struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
-    block_rowinds::Trange
-    bottom_block_rowinds::Trange
-    block_colinds::Trange
-    partial_block_colinds::Vector{Ti}
-    partial_col_range::UnitRange{Ti}
+    block_rowinds::NTuple{Nvar,Trange}
+    block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
+    bottom_block_vector_rowinds::Trange
+    block_colinds::NTuple{Nvar,Trange}
+    block_col_ranges::NTuple{Nvar,UnitRange{Ti}}
     block_hypercube_position::Ti
     n_hypercube_positions::Ti
     right_multiplication_buffer_block::Trmbb
@@ -145,26 +160,27 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Fu
     # values, the binary number formed by the string of 0s and 1s (ordered in the same way
     # as the dimensions) is translated back to an integer to give the intermediate buffer
     # column.
-    function BlockCShared{Tf}(block_rowinds_full::AbstractVector{Ti},
-                              bottom_block_rowinds_full::AbstractVector{Ti},
-                              partial_row_range::UnitRange{Ti}, block_colinds::AbstractVector{Ti},
-                              local_top_vector_indices::AbstractVector{Ti},
-                              local_bottom_vector_indices::AbstractVector{Ti},
-                              matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
+    function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
+                              bottom_block_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
+                              block_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
+                              matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}},<:NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}},Nothing},
                               block_hypercube_position::Ti, n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
                               dense_buffer_storage::Vector{Tf},
                               vector_intermediate_buffer::AbstractMatrix{Tf},
-                              vector_range::UnitRange{Ti},
-                              subgroup_i::Ti, block_allocate_shared_float::Fa,
+                              vector_range::UnitRange{Ti}, subgroup_i::Ti,
+                              block_allocate_shared_float::Fa,
                               block_synchronize_shared::Fbs, block_comm_rank::Integer,
                               block_comm_size::Integer,
-                              synchronize_shared::Fs) where {Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
-        block_rowinds = block_rowinds_full[partial_row_range]
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
+        rows_per_proc = [(length(ri) + block_comm_size - 1) ÷ block_comm_size for ri ∈ block_rowinds_full]
+        partial_row_ranges = [block_comm_rank*br+1:min((block_comm_rank+1)*rows_per_proc,length(ri))
+                              for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full)]
+        block_rowinds = [cr[br] for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full)]
         bottom_block_rowinds = bottom_block_rowinds_full[partial_row_range]
         nrow_full = length(block_rowinds_full)
-        nrow = length(block_rowinds)
-        ncol = length(block_colinds)
+        nrow = sum(length(bi) for bi ∈ block_rowinds)
+        ncol = sum(length(bi for bi ∈ block_colinds))
         if matrix_template === nothing
             block = zeros(Tf, nrow, ncol)
             dense_buffer = nothing
@@ -177,9 +193,6 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Fu
             end
             dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow, ncol)
         end
-        cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
-        partial_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*cols_per_proc,ncol)
-        partial_block_colinds = block_colinds[partial_col_range]
         right_multiplication_buffer_block_size = nrow * nrow_full
         if length(right_multiplication_buffer_storage) < right_multiplication_buffer_block_size
             resize!(right_multiplication_buffer_storage,
@@ -196,9 +209,9 @@ struct BlockCShared{Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Fu
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
         return new{typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
-                   block, block_rowinds, bottom_block_rowinds, block_colinds,
-                   partial_block_colinds, partial_col_range, block_hypercube_position,
-                   n_hypercube_positions, right_multiplication_buffer_block, dense_buffer,
+                   block, block_rowinds, bottom_block_vector_rowinds, block_colinds,
+                   block_hypercube_position, n_hypercube_positions,
+                   right_multiplication_buffer_block, dense_buffer,
                    bottom_block_rowinds_full, vector_buffer_block_in,
                    vector_buffer_block_out, vector_intermediate_buffer_local,
                    vector_intermediate_buffer, vector_range, block_synchronize_shared,
@@ -209,7 +222,8 @@ end
 # copy_C_submatrix!() is identical to copy_B_submatrix!(), but keep as a separate function
 # instead of having a single implementation for both in case we want to experiment with
 # using a transposed representation of the C blocks at some point.
-function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractMatrix)
+function copy_C_submatrix!(block_C::BlockCSerial,
+                           full_A::NTuple{Nvar,<:NTuple{Nvar,<:AbstractMatrix}}) where Nvar
     @inbounds begin
         blocks = block_C.blocks
         if length(blocks) == 0
@@ -218,16 +232,25 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractMatrix)
         end
 
         block_rowinds = block_C.block_rowinds
+        block_row_ranges = block_C.block_row_ranges
         block_colinds = block_C.block_colinds
-        for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-            for (j1, j2) ∈ enumerate(colinds), (i1, i2) ∈ enumerate(rowinds)
-                block[i1,j1] = full_A[i2,j2]
+        block_col_ranges = block_C.block_col_ranges
+        for (rowinds, row_ranges, colinds, col_ranges, block) ∈
+                zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
+                    blocks)
+            for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
+                    (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                A_variable_block = full_A[vrow][vcol]
+                for (j1, j2) ∈ zip(cr, ci), (i1, i2) ∈ zip(rr, ri)
+                    block[i1,j1] = A_variable_block[i2,j2]
+                end
             end
         end
         return nothing
     end
 end
-function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractSparseMatrixCSC)
+function copy_C_submatrix!(block_C::BlockCSerial,
+                           full_A::NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}}) where Nvar
     @inbounds begin
         blocks = block_C.blocks
         if length(blocks) == 0
@@ -236,23 +259,231 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractSparseMatrixCS
         end
 
         block_rowinds = block_C.block_rowinds
+        block_row_ranges = block_C.block_row_ranges
         block_colinds = block_C.block_colinds
-        full_A_colptr = full_A.colptr
-        full_A_rowval = full_A.rowval
-        full_A_nzval = full_A.nzval
+        block_col_ranges = block_C.block_col_ranges
         if eltype(blocks) <: Matrix
-            for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-                block_nrow = length(rowinds)
-                first_row = first(rowinds)
-                for (j1, j2) ∈ enumerate(colinds)
+            for (rowinds, row_ranges, colinds, col_ranges, block) ∈
+                    zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
+                        blocks)
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
+                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval = A_variable_block.rowval
+                    full_A_nzval = A_variable_block.nzval
+                    first_irow = first(rr)
+                    last_irow = last(rr)
+                    first_row = first(ri)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        last_i = full_A_colptr[j2+1] - 1
+                        col_rv = @view full_A_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                        i1 = first_irow
+                        while i1 ≤ last_irow
+                            full_A_row = full_A_rowval[flat_i]
+                            block_global_row = rowinds[i1]
+                            if full_A_row == block_global_row
+                                block[i1,j1] = full_A_nzval[flat_i]
+                                i1 += 1
+                                flat_i += 1
+                            elseif full_A_row > block_global_row
+                                i1 += 1
+                            else
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            for (rowinds, row_ranges, colinds, col_ranges, block) ∈
+                    zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
+                        blocks)
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
+                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval = A_variable_block.rowval
+                    full_A_nzval = A_variable_block.nzval
+                    first_row = first(ri)
+                    block_colptr = block.colptr
+                    block_rowval = block.rowval
+                    block_nzval = block.nzval
+                    first_row_i = first(rr)
+                    last_row_i = last(rr)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        last_i = full_A_colptr[j2+1] - 1
+                        col_rv = @view full_A_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                        first_block_i = block_colptr[j1]
+                        last_block_i = block_colptr[j1+1] - 1
+                        block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_row_i) - 1, 1) + first_block_i - 1
+                        while block_i ≤ last_block_i
+                            full_A_row = full_A_rowval[flat_i]
+                            block_global_row = ri[block_rowval[block_i]]
+                            if block_global_row > last_row_i
+                                break
+                            end
+                            if full_A_row == block_global_row
+                                block_nzval[block_i] = full_A_nzval[flat_i]
+                                block_i += 1
+                                flat_i += 1
+                            elseif full_A_row > block_global_row
+                                block_i += 1
+                            else
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return nothing
+    end
+end
+function copy_C_submatrix!(block_C::BlockCSerial,
+                           full_A::NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}}) where Nvar
+    @inbounds begin
+        blocks = block_C.blocks
+        if length(blocks) == 0
+            # Nothing to do.
+            return nothing
+        end
+
+        block_rowinds = block_C.block_rowinds
+        block_row_ranges = block_C.block_row_ranges
+        block_colinds = block_C.block_colinds
+        block_col_ranges = block_C.block_col_ranges
+        if eltype(blocks) <: Matrix
+            for (rowinds, row_ranges, colinds, col_ranges, block) ∈
+                    zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
+                        blocks)
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
+                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval_list = A_variable_block.rowval_list
+                    full_A_nzval = A_variable_block.nzval
+                    first_irow = first(rr)
+                    last_irow = last(rr)
+                    first_row = first(ri)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        last_i = full_A_colptr[j2+1] - 1
+                        col_rv = full_A_rowval_list[j2]
+                        last_row_i = length(col_rv)
+                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                        i1 = first_irow
+                        while i1 ≤ last_irow
+                            full_A_row = col_rv[row_i]
+                            block_global_row = ri[i1]
+                            if full_A_row == block_global_row
+                                block[i1,j1] = full_A_nzval[row_i+first_i-1]
+                                i1 += 1
+                                row_i += 1
+                            elseif full_A_row > block_global_row
+                                i1 += 1
+                            else
+                                row_i += 1
+                            end
+                            if row_i > last_row_i
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            for (rowinds, row_ranges, colinds, col_ranges, block) ∈
+                    zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
+                        blocks)
+                block_colptr = block.colptr
+                block_rowval = block.rowval
+                block_nzval = block.nzval
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
+                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval_list = A_variable_block.rowval_list
+                    full_A_nzval = A_variable_block.nzval
+                    first_irow = first(rr)
+                    first_row = first(ri)
+                    last_row = last(ri)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        col_rv = full_A_rowval_list[j2]
+                        last_row_i = length(col_rv)
+                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                        first_block_i = block_colptr[j1]
+                        last_block_i = block_colptr[j1+1] - 1
+                        block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_irow) - 1, 1) + first_block_i - 1
+                        while block_i ≤ last_block_i
+                            full_A_row = col_rv[row_i]
+                            block_global_row = ri[block_rowval[block_i]]
+                            if block_global_row > last_row
+                                break
+                            end
+                            if full_A_row == block_global_row
+                                block_nzval[block_i] = full_A_nzval[row_i+first_i-1]
+                                block_i += 1
+                                row_i += 1
+                            elseif full_A_row > block_global_row
+                                block_i += 1
+                            else
+                                row_i += 1
+                            end
+                            if row_i > last_row_i
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return nothing
+    end
+end
+function copy_C_submatrix!(block_C::BlockCShared,
+                           full_A::NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}}) where Nvar
+    @inbounds begin
+        block = block_C.block
+        if length(block) == 0
+            # Nothing to do.
+            return nothing
+        end
+        block_rowinds = block_C.block_rowinds
+        block_row_ranges = block_C.block_row_ranges
+        block_colinds = block_C.block_colinds
+        block_col_ranges = block_C.block_col_ranges
+
+        if isa(block, Matrix)
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
+                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                A_variable_block = full_A[vrow][vcol]
+                full_A_colptr = A_variable_block.colptr
+                full_A_rowval = A_variable_block.rowval
+                full_A_nzval = A_variable_block.nzval
+                first_irow = first(rr)
+                last_irow = last(rr)
+                first_row = first(ri)
+                for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     last_i = full_A_colptr[j2+1] - 1
                     col_rv = @view full_A_rowval[first_i:last_i]
                     flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                    i1 = 1
-                    while i1 ≤ block_nrow
+                    i1 = first_irow
+                    while i1 ≤ last_irow
                         full_A_row = full_A_rowval[flat_i]
-                        block_global_row = rowinds[i1]
+                        block_global_row = block_rowinds[i1]
                         if full_A_row == block_global_row
                             block[i1,j1] = full_A_nzval[flat_i]
                             i1 += 1
@@ -269,22 +500,32 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractSparseMatrixCS
                 end
             end
         else
-            for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-                block_nrow = length(rowinds)
-                first_row = first(rowinds)
-                block_colptr = block.colptr
-                block_rowval = block.rowval
-                block_nzval = block.nzval
-                for (j1, j2) ∈ enumerate(colinds)
+            block_colptr = block.colptr
+            block_rowval = block.rowval
+            block_nzval = block.nzval
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
+                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                A_variable_block = full_A[vrow][vcol]
+                full_A_colptr = A_variable_block.colptr
+                full_A_rowval = A_variable_block.rowval
+                full_A_nzval = A_variable_block.nzval
+                first_irow = first(rr)
+                first_row = first(ri)
+                last_row = last(ri)
+                for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     last_i = full_A_colptr[j2+1] - 1
                     col_rv = @view full_A_rowval[first_i:last_i]
                     flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                    block_i = block_colptr[j1]
-                    block_last_i = block_colptr[j1+1] - 1
-                    while block_i ≤ block_last_i
+                    first_block_i = block_colptr[j1]
+                    last_block_i = block_colptr[j1+1] - 1
+                    block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_row_i) - 1, 1) + first_block_i - 1
+                    while block_i ≤ last_block_i
                         full_A_row = full_A_rowval[flat_i]
-                        block_global_row = rowinds[block_rowval[block_i]]
+                        block_global_row = block_rowinds[block_rowval[block_i]]
+                        if block_global_row > last_row
+                            break
+                        end
                         if full_A_row == block_global_row
                             block_nzval[block_i] = full_A_nzval[flat_i]
                             block_i += 1
@@ -304,32 +545,37 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::AbstractSparseMatrixCS
         return nothing
     end
 end
-function copy_C_submatrix!(block_C::BlockCSerial, full_A::SharedSparseBuffer)
+function copy_C_submatrix!(block_C::BlockCShared,
+                           full_A::NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}}) where Nvar
     @inbounds begin
-        blocks = block_C.blocks
-        if length(blocks) == 0
+        block = block_C.block
+        if length(block) == 0
             # Nothing to do.
             return nothing
         end
-
         block_rowinds = block_C.block_rowinds
+        block_row_ranges = block_C.block_row_ranges
         block_colinds = block_C.block_colinds
-        full_A_colptr = full_A.colptr
-        full_A_rowval_list = full_A.rowval_list
-        full_A_nzval = full_A.nzval
-        if eltype(blocks) <: Matrix
-            for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-                block_nrow = length(rowinds)
-                first_row = first(rowinds)
-                for (j1, j2) ∈ enumerate(colinds)
+        block_col_ranges = block_C.block_col_ranges
+        if isa(block, Matrix)
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
+                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                A_variable_block = full_A[vrow][vcol]
+                full_A_colptr = A_variable_block.colptr
+                full_A_rowval_list = A_variable_block.rowval_list
+                full_A_nzval = A_variable_block.nzval
+                first_irow = first(rr)
+                last_irow = last(rr)
+                first_row = first(ri)
+                for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     col_rv = full_A_rowval_list[j2]
                     last_row = length(col_rv)
-                    row_i = max(searchsortedlast(col_rv, first_row)-1,1)
-                    i1 = 1
-                    while i1 ≤ block_nrow
+                    row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                    i1 = first_irow
+                    while i1 ≤ last_irow
                         full_A_row = col_rv[row_i]
-                        block_global_row = rowinds[i1]
+                        block_global_row = ri[i1]
                         if full_A_row == block_global_row
                             block[i1,j1] = full_A_nzval[row_i+first_i-1]
                             i1 += 1
@@ -346,22 +592,32 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::SharedSparseBuffer)
                 end
             end
         else
-            for (rowinds, colinds, block) ∈ zip(block_rowinds, block_colinds, blocks)
-                block_nrow = length(rowinds)
-                first_row = first(rowinds)
-                block_colptr = block.colptr
-                block_rowval = block.rowval
-                block_nzval = block.nzval
-                for (j1, j2) ∈ enumerate(colinds)
+            block_colptr = block.colptr
+            block_rowval = block.rowval
+            block_nzval = block.nzval
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
+                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                A_variable_block = full_A[vrow][vcol]
+                full_A_colptr = A_variable_block.colptr
+                full_A_rowval_list = A_variable_block.rowval_list
+                full_A_nzval = A_variable_block.nzval
+                first_irow = first(rr)
+                first_row = first(ri)
+                last_row = last(ri)
+                for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     col_rv = full_A_rowval_list[j2]
-                    last_row = length(col_rv)
+                    last_row_i = length(col_rv)
                     row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                    block_i = block_colptr[j1]
-                    block_last_i = block_colptr[j1+1] - 1
-                    while block_i ≤ block_last_i
+                    first_block_i = block_colptr[j1]
+                    last_block_i = block_colptr[j1+1] - 1
+                    block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_irow) - 1, 1) + first_block_i - 1
+                    while block_i ≤ last_block_i
                         full_A_row = col_rv[row_i]
-                        block_global_row = rowinds[block_rowval[block_i]]
+                        block_global_row = ri[block_rowval[block_i]]
+                        if block_global_row > last_row
+                            break
+                        end
                         if full_A_row == block_global_row
                             block_nzval[block_i] = full_A_nzval[row_i+first_i-1]
                             block_i += 1
@@ -371,151 +627,9 @@ function copy_C_submatrix!(block_C::BlockCSerial, full_A::SharedSparseBuffer)
                         else
                             row_i += 1
                         end
-                        if row_i > last_row
+                        if row_i > last_row_i
                             break
                         end
-                    end
-                end
-            end
-        end
-        return nothing
-    end
-end
-function copy_C_submatrix!(block_C::BlockCShared, full_A::AbstractSparseMatrixCSC)
-    @inbounds begin
-        block_rowinds = block_C.block_rowinds
-        block_colinds = block_C.block_colinds
-        if isempty(block_rowinds) || isempty(block_colinds)
-            # Nothing to do.
-            return nothing
-        end
-        block = block_C.block
-        full_A_colptr = full_A.colptr
-        full_A_rowval = full_A.rowval
-        full_A_nzval = full_A.nzval
-
-        block_nrow = length(block_rowinds)
-        first_row = first(block_rowinds)
-        if isa(block, Matrix)
-            for (j1, j2) ∈ enumerate(block_colinds)
-                first_i = full_A_colptr[j2]
-                last_i = full_A_colptr[j2+1] - 1
-                col_rv = @view full_A_rowval[first_i:last_i]
-                flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                i1 = 1
-                while i1 ≤ block_nrow
-                    full_A_row = full_A_rowval[flat_i]
-                    block_global_row = block_rowinds[i1]
-                    if full_A_row == block_global_row
-                        block[i1,j1] = full_A_nzval[flat_i]
-                        i1 += 1
-                        flat_i += 1
-                    elseif full_A_row > block_global_row
-                        i1 += 1
-                    else
-                        flat_i += 1
-                    end
-                    if flat_i > last_i
-                        break
-                    end
-                end
-            end
-        else
-            block_colptr = block.colptr
-            block_rowval = block.rowval
-            block_nzval = block.nzval
-            for (j1, j2) ∈ enumerate(block_colinds)
-                first_i = full_A_colptr[j2]
-                last_i = full_A_colptr[j2+1] - 1
-                col_rv = @view full_A_rowval[first_i:last_i]
-                flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                block_i = block_colptr[j1]
-                block_last_i = block_colptr[j1+1] - 1
-                while block_i ≤ block_last_i
-                    full_A_row = full_A_rowval[flat_i]
-                    block_global_row = block_rowinds[block_rowval[block_i]]
-                    if full_A_row == block_global_row
-                        block_nzval[block_i] = full_A_nzval[flat_i]
-                        block_i += 1
-                        flat_i += 1
-                    elseif full_A_row > block_global_row
-                        block_i += 1
-                    else
-                        flat_i += 1
-                    end
-                    if flat_i > last_i
-                        break
-                    end
-                end
-            end
-        end
-        return nothing
-    end
-end
-function copy_C_submatrix!(block_C::BlockCShared, full_A::SharedSparseBuffer)
-    @inbounds begin
-        block_rowinds = block_C.block_rowinds
-        block_colinds = block_C.block_colinds
-        if isempty(block_rowinds) || isempty(block_colinds)
-            # Nothing to do.
-            return nothing
-        end
-        block = block_C.block
-        full_A_colptr = full_A.colptr
-        full_A_rowval_list = full_A.rowval_list
-        full_A_nzval = full_A.nzval
-
-        block_nrow = length(block_rowinds)
-        first_row = first(block_rowinds)
-        if isa(block, Matrix)
-            for (j1, j2) ∈ enumerate(block_colinds)
-                first_i = full_A_colptr[j2]
-                col_rv = full_A_rowval_list[j2]
-                last_row = length(col_rv)
-                row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                i1 = 1
-                while i1 ≤ block_nrow
-                    full_A_row = col_rv[row_i]
-                    block_global_row = block_rowinds[i1]
-                    if full_A_row == block_global_row
-                        block[i1,j1] = full_A_nzval[row_i+first_i-1]
-                        i1 += 1
-                        row_i += 1
-                    elseif full_A_row > block_global_row
-                        i1 += 1
-                    else
-                        row_i += 1
-                    end
-                    if row_i > last_row
-                        break
-                    end
-                end
-            end
-        else
-            block_colptr = block.colptr
-            block_rowval = block.rowval
-            block_nzval = block.nzval
-            for (j1, j2) ∈ enumerate(block_colinds)
-                first_i = full_A_colptr[j2]
-                col_rv = full_A_rowval_list[j2]
-                last_row = length(col_rv)
-                row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                block_i = block_colptr[j1]
-                block_last_i = block_colptr[j1+1] - 1
-                while block_i ≤ block_last_i
-                    full_A_row = col_rv[row_i]
-                    block_global_row = block_rowinds[block_rowval[block_i]]
-                    if full_A_row == block_global_row
-                        block_nzval[block_i] = full_A_nzval[row_i+first_i-1]
-                        block_i += 1
-                        row_i += 1
-                    elseif full_A_row > block_global_row
-                        block_i += 1
-                    else
-                        row_i += 1
-                    end
-                    if row_i > last_row
-                        break
                     end
                 end
             end
@@ -539,7 +653,7 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
         block_hypercube_positions = C.block_hypercube_positions
         if length(blocks) > 0
             for (vec_buffer_out, rowinds, block, bhp, Aiu_block) ∈
-                    zip(C.vector_buffer_blocks_out, C.bottom_block_rowinds, blocks,
+                    zip(C.vector_buffer_blocks_out, C.bottom_block_vector_rowinds, blocks,
                         block_hypercube_positions, Ainv_dot_u)
                 vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
                 mul!(vec_buffer_out, block, Aiu_block)
@@ -569,14 +683,14 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
         vector_intermediate_buffer = C.vector_intermediate_buffer
         vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
         vec_buffer_block_out = C.vector_buffer_block_out
-        bottom_block_rowinds = C.bottom_block_rowinds
+        bottom_block_vector_rowinds = C.bottom_block_vector_rowinds
         synchronize_shared = C.synchronize_shared
 
         # The rows are labelled by block_hypercube_position, so there are no overlaps, and
         # we can directly set entries, instead of adding to them, and so do not need to
         # zero-initialise the output buffer.
         mul!(vec_buffer_block_out, block, Ainv_dot_u)
-        for (i2, i1) ∈ enumerate(bottom_block_rowinds)
+        for (i2, i1) ∈ enumerate(bottom_block_vector_rowinds)
             vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
         end
 
