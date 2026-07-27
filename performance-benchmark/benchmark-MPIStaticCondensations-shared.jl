@@ -61,7 +61,6 @@ function run_MSC(x, matrix_data, rhs, rhs_global, dimensions, variable_dimension
     nelement_local = dimensions[end].nelement ÷ dimensions[end].nrank
     block_sizes, off_diagonals = get_block_sizes(nelement_local, dimensions[end].ngrid,
                                                  outer_dim_steps)
-    A = sparse(local_i, local_j, data)
 
     t1 = time_ns()
     Alu = mpi_static_condensation(dimensions; block_sizes_heuristic, sparse_C_blocks,
