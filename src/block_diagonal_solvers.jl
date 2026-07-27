@@ -2,19 +2,16 @@ import MPISchurComplements: ldiv_Bmatrix!
 
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange,Tsparse} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Trange} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Trange
-    sparse_buffers::Vector{Tsparse}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     B_column_indices::Trange
     B_buffers_out::Vector{Matrix{Tf}}
-    B_buffers_in::Vector{Matrix{Tf}}
     check_lu::Bool
-    function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, B_column_indices,
-                                           use_sparse, timer,
+    function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, B_column_indices, timer,
                                            check_lu) where {Tf, Ti <: Integer}
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
@@ -24,37 +21,22 @@ struct BlockDiagonalSolverSerial{Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Fa
         block_sizes = [length(bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
-            if use_sparse
-                identity = spzeros(Tf, bs, bs)
-            else
-                identity = zeros(Tf, bs, bs)
-            end
+            identity = zeros(Tf, bs, bs)
             copyto!(identity, I)
             return identity
         end
         if block_size > 0
             local_block_solver = [lu(get_identity(length(bi))) for bi ∈ block_indices]
-            if use_sparse
-                sparse_buffers = [spzeros(Tf, bs, bs) for bs ∈ block_sizes]
-            else
-                sparse_buffers = [nothing for _ ∈ block_indices]
-            end
         else
             local_block_solver = [nothing]
-            sparse_buffers = [nothing]
         end
         x_buffer = fill(NaN, block_size)
         u_buffer = fill(NaN, block_size)
         B_buffers_out = [zeros(length(bi), length(Bc))
                          for (bi, Bc) ∈ zip(block_indices, B_column_indices)]
-        if use_sparse
-            B_buffers_in = deepcopy(B_buffers_out)
-        else
-            B_buffers_in = Matrix{Tf}[]
-        end
-        return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices),eltype(sparse_buffers)}(
-                   n, local_block_solver, block_indices, sparse_buffers, x_buffer,
-                   u_buffer, B_column_indices, B_buffers_out, B_buffers_in, check_lu)
+        return new{Tf,Ti,eltype(local_block_solver),typeof(block_indices)}(
+                   n, local_block_solver, block_indices, x_buffer, u_buffer,
+                   B_column_indices, B_buffers_out, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolverSerial) = (Alu.n, Alu.n)
@@ -141,12 +123,10 @@ end
 Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
 Base.size(Alu::BlockDiagonalSolverShared, d::Integer) = size(Alu)[d]
 
-function get_block_diagonal_solver(level_info, data_type, is_top_level, use_shared_blocks,
-                                   timer, check_lu, block_allocate_shared_float=nothing,
+function get_block_diagonal_solver(level_info, data_type, use_shared_blocks, timer,
+                                   check_lu, block_allocate_shared_float=nothing,
                                    block_allocate_shared_int=nothing,
                                    block_synchronize_shared=nothing)
-    # The A blocks may be sparse at the top level, but will generally be dense on lower
-    # levels, so only use a sparse LU solver when is_top_level=true.
     if isempty(level_info.local_top_vector_a_block_indices)
         return MPIStaticCondensationNull{data_type}()
     elseif use_shared_blocks
@@ -162,7 +142,7 @@ function get_block_diagonal_solver(level_info, data_type, is_top_level, use_shar
         return BlockDiagonalSolverSerial{data_type}(level_info.global_size - level_info.global_bottom_vector_size,
                                                     level_info.local_top_vector_a_block_indices,
                                                     level_info.a_block_off_diagonal_indices,
-                                                    is_top_level, timer, check_lu)
+                                                    timer, check_lu)
     end
 end
 
@@ -172,62 +152,56 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
         solver = block_diagonal_solver.local_block_solver
         check_lu = block_diagonal_solver.check_lu
         if solver != [nothing]
-            for (s, inds, buffer) ∈ zip(solver, block_diagonal_solver.block_indices,
-                                        block_diagonal_solver.sparse_buffers)
-                if isa(s, UmfpackLU)
-                    update_sparse_matrix!(buffer, full_A, inds, inds)
-                    lu!(s, buffer; reuse_symbolic=false, check=check_lu)
-                else
-                    factors = s.factors
-                    if isa(full_A, AbstractSparseMatrixCSC)
-                        colptr = full_A.colptr
-                        rowval = full_A.rowval
-                        nzval = full_A.nzval
-                        first_row = inds[1]
-                        for (j1, j2) ∈ enumerate(inds)
-                            first_i = colptr[j2]
-                            last_i = colptr[j2+1]-1
-                            flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
-                            for (i1, i2) ∈ enumerate(inds)
-                                while flat_i ≤ last_i && rowval[flat_i] < i2
-                                    flat_i += 1
-                                end
-                                if rowval[flat_i] == i2
-                                    factors[i1,j1] = nzval[flat_i]
-                                else
-                                    factors[i1,j1] = 0.0
-                                end
+            for (s, inds) ∈ zip(solver, block_diagonal_solver.block_indices)
+                factors = s.factors
+                if isa(full_A, AbstractSparseMatrixCSC)
+                    colptr = full_A.colptr
+                    rowval = full_A.rowval
+                    nzval = full_A.nzval
+                    first_row = inds[1]
+                    for (j1, j2) ∈ enumerate(inds)
+                        first_i = colptr[j2]
+                        last_i = colptr[j2+1]-1
+                        flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
+                        for (i1, i2) ∈ enumerate(inds)
+                            while flat_i ≤ last_i && rowval[flat_i] < i2
+                                flat_i += 1
                             end
-                        end
-                    elseif isa(full_A, SharedSparseBuffer)
-                        colptr = full_A.colptr
-                        rowval_list = full_A.rowval_list
-                        nzval = full_A.nzval
-                        first_row = inds[1]
-                        for (j1, j2) ∈ enumerate(inds)
-                            first_i = colptr[j2]
-                            col_rowval = rowval_list[j2]
-                            row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
-                            last_row = length(col_rowval)
-                            flat_i = row_i + first_i - 1
-                            for (i1, i2) ∈ enumerate(inds)
-                                while row_i < last_row && col_rowval[row_i] < i2
-                                    row_i += 1
-                                end
-                                if col_rowval[row_i] == i2
-                                    factors[i1,j1] = nzval[row_i+first_i-1]
-                                else
-                                    factors[i1,j1] = 0.0
-                                end
+                            if rowval[flat_i] == i2
+                                factors[i1,j1] = nzval[flat_i]
+                            else
+                                factors[i1,j1] = 0.0
                             end
-                        end
-                    else
-                        for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
-                            factors[i1,j1] = full_A[i2,j2]
                         end
                     end
-                    getrf!(factors, s.ipiv; check=check_lu)
+                elseif isa(full_A, SharedSparseBuffer)
+                    colptr = full_A.colptr
+                    rowval_list = full_A.rowval_list
+                    nzval = full_A.nzval
+                    first_row = inds[1]
+                    for (j1, j2) ∈ enumerate(inds)
+                        first_i = colptr[j2]
+                        col_rowval = rowval_list[j2]
+                        row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
+                        last_row = length(col_rowval)
+                        flat_i = row_i + first_i - 1
+                        for (i1, i2) ∈ enumerate(inds)
+                            while row_i < last_row && col_rowval[row_i] < i2
+                                row_i += 1
+                            end
+                            if col_rowval[row_i] == i2
+                                factors[i1,j1] = nzval[row_i+first_i-1]
+                            else
+                                factors[i1,j1] = 0.0
+                            end
+                        end
+                    end
+                else
+                    for (j1, j2) ∈ enumerate(inds), (i1, i2) ∈ enumerate(inds)
+                        factors[i1,j1] = full_A[i2,j2]
+                    end
                 end
+                getrf!(factors, s.ipiv; check=check_lu)
             end
         end
         return nothing
@@ -313,7 +287,7 @@ function ldiv!(buffers::AbstractVector,
                u::AbstractVector{T}) where T
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
-        if solvers != [nothing]
+        if !(eltype(solvers) <: Nothing)
             x_buffer = block_diagonal_solver.x_buffer
             u_buffer = block_diagonal_solver.u_buffer
             for (bi, s, buff) ∈ zip(block_diagonal_solver.block_indices, solvers, buffers)
@@ -392,7 +366,7 @@ function ldiv!(x::Matrix{T}, block_diagonal_solver::BlockDiagonalSolverSerial{T}
             # not need to select range out of x/u.
             ldiv!(x, solvers[1], u)
         else
-            if block_diagonal_solver.local_block_solver !== nothing
+            if !(eltype(solvers) <: Nothing)
                 for (this_x, this_u) ∈ zip(eachcol(x), eachcol(u))
                     ldiv!(this_x, block_diagonal_solver, this_u)
                 end
@@ -448,7 +422,7 @@ function ldiv!(x::AbstractSparseMatrixCSC{T},
                u::AbstractSparseMatrixCSC{T}) where T
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
-        if solvers != [nothing]
+        if !(eltype(solvers) <: Nothing)
             m = size(u, 2)
             u_colptr = u.colptr
             u_rowval = u.rowval
@@ -521,32 +495,16 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::AbstractMatrix{T}) where T
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
-        if solvers != [nothing]
-            if eltype(solvers) <: LU
-                for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
-                                                block_diagonal_solver.B_buffers_out,
-                                                block_diagonal_solver.B_column_indices)
-                    for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
-                        Bbuff[i1,j1] = B[i2,j2]
-                    end
-                    ldiv!(s, Bbuff)
-                    for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
-                        B[i1,j1] = Bbuff[i2,j2]
-                    end
+        if !(eltype(solvers <: Nothing))
+            for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
+                                            block_diagonal_solver.B_buffers_out,
+                                            block_diagonal_solver.B_column_indices)
+                for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
+                    Bbuff[i1,j1] = B[i2,j2]
                 end
-            else
-                for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
-                        zip(block_diagonal_solver.block_indices, solvers,
-                            block_diagonal_solver.B_buffers_out,
-                            block_diagonal_solver.B_buffers_in,
-                            block_diagonal_solver.B_column_indices)
-                    for (j1, j2) ∈ enumerate(Bcols), (i1, i2) ∈ enumerate(bi)
-                        Bbuff_in[i1,j1] = B[i2,j2]
-                    end
-                    ldiv!(Bbuff_out, s, Bbuff_in)
-                    for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
-                        B[i1,j1] = Bbuff_out[i2,j2]
-                    end
+                ldiv!(s, Bbuff)
+                for (j2, j1) ∈ enumerate(Bcols), (i2, i1) ∈ enumerate(bi)
+                    B[i1,j1] = Bbuff[i2,j2]
                 end
             end
         end
@@ -557,94 +515,46 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
                        B::AbstractSparseMatrixCSC{T}) where T
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
-        if solvers != [nothing]
-            if eltype(solvers) <: LU
-                for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
-                                                block_diagonal_solver.B_buffers_out,
-                                                block_diagonal_solver.B_column_indices)
-                    B_colptr = B.colptr
-                    B_rowval = B.rowval
-                    B_nzval = B.nzval
-                    firstrow = first(bi)
-                    for (j1, j2) ∈ enumerate(Bcols)
-                        first_i = B_colptr[j2]
-                        last_i = B_colptr[j2+1] - 1
-                        col_rv = @view B_rowval[first_i:last_i]
-                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                        for (i1, i2) ∈ enumerate(bi)
-                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                                flat_i += 1
-                            end
-                            if flat_i > last_i
-                                break
-                            end
-                            if B_rowval[flat_i] == i2
-                                Bbuff[i1,j1] = B_nzval[flat_i]
-                            end
+        if !(eltype(solvers <: Nothing))
+            for (bi, s, Bbuff, Bcols) ∈ zip(block_diagonal_solver.block_indices, solvers,
+                                            block_diagonal_solver.B_buffers_out,
+                                            block_diagonal_solver.B_column_indices)
+                B_colptr = B.colptr
+                B_rowval = B.rowval
+                B_nzval = B.nzval
+                firstrow = first(bi)
+                for (j1, j2) ∈ enumerate(Bcols)
+                    first_i = B_colptr[j2]
+                    last_i = B_colptr[j2+1] - 1
+                    col_rv = @view B_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                    for (i1, i2) ∈ enumerate(bi)
+                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                            flat_i += 1
                         end
-                    end
-                    ldiv!(s, Bbuff)
-                    for (j1, j2) ∈ enumerate(Bcols)
-                        first_i = B_colptr[j2]
-                        last_i = B_colptr[j2+1] - 1
-                        col_rv = @view B_rowval[first_i:last_i]
-                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                        for (i1, i2) ∈ enumerate(bi)
-                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                                flat_i += 1
-                            end
-                            if flat_i > last_i
-                                break
-                            end
-                            if B_rowval[flat_i] == i2
-                                B_nzval[flat_i] = Bbuff[i1,j1]
-                            end
+                        if flat_i > last_i
+                            break
+                        end
+                        if B_rowval[flat_i] == i2
+                            Bbuff[i1,j1] = B_nzval[flat_i]
                         end
                     end
                 end
-            else
-                for (bi, s, Bbuff_out, Bbuff_in, Bcols) ∈
-                        zip(block_diagonal_solver.block_indices, solvers,
-                            block_diagonal_solver.B_buffers_out,
-                            block_diagonal_solver.B_buffers_in,
-                            block_diagonal_solver.B_column_indices)
-                    B_colptr = B.colptr
-                    B_rowval = B.rowval
-                    B_nzval = B.nzval
-                    firstrow = first(bi)
-                    for (j1, j2) ∈ enumerate(Bcols)
-                        first_i = B_colptr[j2]
-                        last_i = B_colptr[j2+1] - 1
-                        col_rv = @view B_rowval[first_i:last_i]
-                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                        for (i1, i2) ∈ enumerate(bi)
-                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                                flat_i += 1
-                            end
-                            if flat_i > last_i
-                                break
-                            end
-                            if B_rowval[flat_i] == i2
-                                Bbuff_in[i1,j1] = B_nzval[flat_i]
-                            end
+                ldiv!(s, Bbuff)
+                for (j1, j2) ∈ enumerate(Bcols)
+                    first_i = B_colptr[j2]
+                    last_i = B_colptr[j2+1] - 1
+                    col_rv = @view B_rowval[first_i:last_i]
+                    flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
+                    for (i1, i2) ∈ enumerate(bi)
+                        while flat_i ≤ last_i && B_rowval[flat_i] < i2
+                            flat_i += 1
                         end
-                    end
-                    ldiv!(Bbuff_out, s, Bbuff_in)
-                    for (j1, j2) ∈ enumerate(Bcols)
-                        first_i = B_colptr[j2]
-                        last_i = B_colptr[j2+1] - 1
-                        col_rv = @view B_rowval[first_i:last_i]
-                        flat_i = max(searchsortedlast(col_rv, firstrow) - 1, 1) + first_i - 1
-                        for (i1, i2) ∈ enumerate(bi)
-                            while flat_i ≤ last_i && B_rowval[flat_i] < i2
-                                flat_i += 1
-                            end
-                            if flat_i > last_i
-                                break
-                            end
-                            if B_rowval[flat_i] == i2
-                                B_nzval[flat_i] = Bbuff_out[i1,j1]
-                            end
+                        if flat_i > last_i
+                            break
+                        end
+                        if B_rowval[flat_i] == i2
+                            B_nzval[flat_i] = Bbuff[i1,j1]
                         end
                     end
                 end

@@ -1174,11 +1174,6 @@ at some level exceeds `mumps_fill_in_threshold`, MUMPS is used to factorize/solv
 schur_complement matrix at that level instead of using another
 `MPIStaticCondensationParallel`.
 
-`sparse_A_first_level=true` can be passed to use a sparse-LU solver for the 'A blocks' on
-the first level. The blocks are so small that usually this is not useful even when the
-block are sparse - it is probably faster to use a dense-matrix solver (BLAS) for small
-blocks. However if using very large 'ngrid' (≫5) this might be useful?
-
 `comm` is divided into equally sized shared-memory blocks. `shared_comm` represents the
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
 members must be able to create shared-memory arrays.
@@ -1215,7 +1210,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=true,
                                  mumps_fill_in_threshold::Number=1.0,
-                                 sparse_A_first_level::Bool=false,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
                                  distributed_comm::Union{MPI.Comm,Nothing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
@@ -1464,7 +1458,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                a_block_off_diagonal_indices=(1:0,),
                                block_comm=last_level_info.block_comm)
             last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
-                                                            length(level_info_list) == 1,
                                                             true, timer, check_lu,
                                                             last_block_allocate_shared_float,
                                                             last_block_allocate_shared_int,
@@ -1561,7 +1554,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              schur_complement_buffer_list,
                                              second_last_schur_complement_buffer,
                                              this_level_schur_solver, use_shared_blocks,
-                                             level_sparse_C_blocks, sparse_A_first_level,
+                                             level_sparse_C_blocks,
                                              this_level_shared_comm,
                                              level_synchronize_shared,
                                              level_allocate_shared_float,

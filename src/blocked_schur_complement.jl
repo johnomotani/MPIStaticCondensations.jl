@@ -12,11 +12,11 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                  dimensions::Vector{<:Dimension}, level::Integer, level_info,
                  schur_complement_buffer_list, second_last_schur_complement_buffer,
                  schur_complement_solver, use_shared_blocks::Bool,
-                 sparse_C_blocks::Bool, sparse_A_first_level::Bool, shared_comm,
-                 synchronize_shared::Fsync, allocate_shared_float::Faf,
-                 allocate_shared_int::Fai, block_synchronize_shared::Fbsync,
-                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
-                 right_multiplication_buffer_storage, C_dense_buffer_storage,
+                 sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
+                 allocate_shared_float::Faf, allocate_shared_int::Fai,
+                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
+                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
+                 C_dense_buffer_storage,
                  check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
@@ -77,7 +77,6 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                 C = nothing
             else
                 A_factorization = get_block_diagonal_solver(level_info, data_type,
-                                                            (sparse_A_first_level && level==1),
                                                             use_shared_blocks, timer,
                                                             check_lu,
                                                             block_allocate_shared_float,
@@ -129,9 +128,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             block_comm_size, synchronize_shared)
             end
         else
-            A_factorization = get_block_diagonal_solver(level_info, data_type,
-                                                        (sparse_A_first_level && level==1),
-                                                        false, timer, check_lu)
+            A_factorization = get_block_diagonal_solver(level_info, data_type, false,
+                                                        timer, check_lu)
             B = BlockAinvDotBSerial{data_type}(level_info.local_top_vector_a_block_indices,
                                                level_info.a_block_off_diagonal_indices,
                                                level_info.a_block_off_diagonal_bottom_vector_indices)
