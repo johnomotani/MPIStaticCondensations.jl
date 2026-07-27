@@ -27,7 +27,7 @@ function run_UMFPACK(x, matrix_data, rhs, rhs_global, dimensions, variable_dimen
     t_solve = Inf
     for _ ∈ 1:matrix_repeats
         t1 = time_ns()
-        lu!(Alu, A; reuse_symbolic=false)
+        lu!(Alu, A; check=false)
         t2 = time_ns()
         t_lu = min(t_lu, (t2 - t1) * 1e-6)
 
@@ -36,6 +36,12 @@ function run_UMFPACK(x, matrix_data, rhs, rhs_global, dimensions, variable_dimen
             ldiv!(x, Alu, rhs)
             t2 = time_ns()
             t_solve = min(t_solve, (t2 - t1) * 1e-6)
+
+            max_error = maximum(abs.(A * x - rhs_global))
+            if max_error > 1.0e-3
+                println("Solution incorrect? Max error $max_error.")
+                MPI.Abort(MPI.COMM_WORLD, -1)
+            end
         end
     end
 
