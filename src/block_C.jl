@@ -27,7 +27,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
                               block_synchronize_shared::Fsb,
-                              synchronize_shared::Fs) where {Tf,Ti,Fsb<:Function,Fs<:Function}
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Fsb<:Function,Fs<:Function}
         nblock_unfiltered = length(block_indices[1])
         non_empty_blocks = [!all(isempty(block_rowinds[ivar][ib]) for ivar ∈ 1:Nvar) &&
                             !all(isempty(block_colinds[ivar][ib]) for ivar ∈ 1:Nvar)
@@ -208,7 +208,7 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+        return new{Nvar,typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, bottom_block_vector_rowinds, block_colinds,
                    block_hypercube_position, n_hypercube_positions,
                    right_multiplication_buffer_block, dense_buffer,
