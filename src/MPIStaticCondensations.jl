@@ -1126,6 +1126,7 @@ end
 
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
+                            variable_dimensions::Tuple=(nothing,),
                             block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=$DefaultBlockSizesHeuristic,
                             reduce_proc_count_with_blocks::Bool=false,
                             sparse_C_blocks::Bool=true,
@@ -1148,6 +1149,13 @@ continuous-finite-element grid.  The right-hand-side and solution vectors are fl
 the finite element grid. The order of `dimensions` corresponds to the order of the indices
 in the multi-dimensional array. For a description of the discretization, see the
 `create_dimensions()` docstring.
+
+When multiple variables are to be solved for, variables can be defined on grids given by
+different subsets of `dimensions`. Which dimensions each variable is a function of is
+specified by `variable_dimensions`, which is a Tuple with one entry per variable. Each
+entry may be `nothing` (the whole of `dimensions` is used for that variable), or a
+`Vector{<:Integer}` or `AbstractRange` that selects the dimensions for that variable from
+`dimensions`.
 
 `block_sizes_heuristic` determines how to set the block sizes at each level. A heuristic
 (an instance of BlockSizesHeuristic) can be passed; currently `FastSlow` and
@@ -1206,6 +1214,7 @@ factors of 2).
 matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
+                                 variable_dimensions::Tuple=(nothing,),
                                  block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=true,
