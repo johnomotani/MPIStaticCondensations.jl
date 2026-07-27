@@ -71,14 +71,14 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Trange,Tsync}
     synchronize_shared::Tsync
 
     function BlockAinvDotBShared{Tf}(block_rowinds::NTuple{Nvar,<:AbstractVector{Ti}},
-                                     block_vector_rowinds::Ntuple{Nvar,<:AbstractVector{Ti}},
+                                     block_vector_rowinds::NTuple{Nvar,<:AbstractVector{Ti}},
                                      block_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
                                      bottom_block_vector_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
                                      block_comm_rank::Integer, block_comm_size::Integer,
                                      allocate_shared_float::Fa,
                                      synchronize_shared::Fs) where {Nvar,Tf,Ti,Fa,Fs}
         if isempty(block_rowinds) || isempty(block_colinds)
-            return new{Tf,Ti,Matrix{Tf},typeof(block_colinds),Fs}(
+            return new{Nvar,Tf,Ti,Matrix{Tf},typeof(block_colinds),Fs}(
                        zeros(Tf, 0, 0), zeros(Tf, 0, 0), ntuple(i->zeros(Ti, 0), Nvar),
                        zeros(Ti, 0), ntuple(i->zeros(Ti, 0), Nvar),
                        ntuple(i->zeros(Ti, 0), Nvar), zeros(Ti, 0), zeros(Ti, 0),
