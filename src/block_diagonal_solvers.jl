@@ -433,22 +433,6 @@ end
 function ldiv!(block_diagonal_solver::BlockDiagonalSolverShared{T}, u::Matrix{T}) where T
     return ldiv!(u, block_diagonal_solver, u)
 end
-function sparse_column_has_overlap(rowval, bi)
-    @inbounds begin
-        r_count = 1
-        b_count = 1
-        while r_count ≤ length(rowval) && b_count ≤ length(bi)
-            if rowval[r_count] == bi[b_count]
-                return true
-            elseif rowval[r_count] < bi[b_count]
-                r_count += 1
-            else
-                b_count += 1
-            end
-        end
-        return false
-    end
-end
 
 # Specialized implementations to be used for A^{-1}.B
 function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{T},
