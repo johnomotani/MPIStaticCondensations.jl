@@ -1477,6 +1477,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             # temporary hack! need to handle Nvar Tuple of level_info
             fake_level_info = ((global_size=ntop, global_bottom_vector_size=0,
                                local_top_vector_a_block_indices=(1:ntop,),
+                               local_top_vector_a_block_vector_indices=(1:ntop,),
                                a_block_off_diagonal_indices=(1:0,),
                                block_comm=last_level_info.block_comm),)
             last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
