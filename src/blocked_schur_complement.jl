@@ -1,3 +1,19 @@
+function extract_block_field_from_Tuple(t::Tuple, fieldname::Symbol)
+    # `t` is a Tuple of structs, length nt. One of the fields of the struct, `fieldname`,
+    # is a Vector, length nv. We want to return a Vector of nv Tuples of nt values from
+    # `fieldname`.
+    nt = length(t)
+    if nt < 1
+        error("Tuple `t=$t` has no entries.")
+    end
+    first_field = getfield(t[1], fieldname)
+    nv = length(first_field)
+    fieldtype = eltype(first_field)
+
+    return NTuple{nt,fieldtype}[Tuple(getfield(t[it], fieldname)[iv]
+                                      for it ∈ 1:nt) for iv ∈ 1:nv]
+end
+
 struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync,Ttimer}
     A_factorization::TA
     B::TB
@@ -13,11 +29,10 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                  schur_complement_buffer_list, second_last_schur_complement_buffer,
                  schur_complement_solver, use_shared_blocks::Bool,
                  sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
-                 allocate_shared_float::Faf, allocate_shared_int::Fai,
-                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
-                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
-                 C_dense_buffer_storage,
-                 check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
+                 allocate_shared_float::Faf, block_synchronize_shared::Fbsync,
+                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
+                 right_multiplication_buffer_storage, C_dense_buffer_storage,
+                 check_lu::Bool) where {Fsync,Faf,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
             # This process should do no work
@@ -42,7 +57,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
         shared_comm_rank = MPI.Comm_rank(shared_comm)
         shared_comm_size = MPI.Comm_size(shared_comm)
-        block_comm = level_info.block_comm
+        block_comm = level_info[1].block_comm
         if block_comm == MPI.COMM_NULL
             block_comm_rank = 0
             block_comm_size = 1
@@ -51,15 +66,18 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             block_comm_size = MPI.Comm_size(block_comm)
         end
 
-        n_hypercube_positions = 2^sum(level_info.nblock .> 1)
-
         if level ≤ length(schur_complement_buffer_list)
             this_sc_buffer = schur_complement_buffer_list[level]
+            schur_complement = BlockS(this_sc_buffer,
+                                      Tuple(li.local_bottom_vector_indices for li ∈ level_info),
+                                      shared_comm, allocate_shared_float)
+            data_type = eltype(schur_complement.matrix[1][1])
         else
-            this_sc_buffer = second_last_schur_complement_buffer
+            schur_complement = BlockDenseS(second_last_schur_complement_buffer,
+                                           Tuple(li.local_bottom_vector_indices for li ∈ level_info),
+                                           shared_comm, allocate_shared_float)
+            data_type = eltype(schur_complement.matrix)
         end
-        schur_complement = BlockS(this_sc_buffer, level_info.local_bottom_vector_indices,
-                                  shared_comm, allocate_shared_float)
 
         if level == 1 || !sparse_C_blocks
             matrix_template = nothing
@@ -67,14 +85,16 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             matrix_template = schur_complement_buffer_list[level-1]
         end
 
-        data_type = eltype(schur_complement.matrix)
-        nbottom = length(level_info.local_bottom_vector_indices)
+        nbottom = sum(length(li.local_bottom_vector_indices) for li ∈ level_info)
 
         if use_shared_blocks
-            if level_info.block_comm == MPI.COMM_NULL
+            if block_comm == MPI.COMM_NULL
                 A_factorization = MPIStaticCondensationNull{data_type}()
                 B = nothing
-                C = nothing
+                C = NullBlockCShared(level_info[1].n_subgroups,
+                                     sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
+                                     shared_comm, shared_comm_rank, shared_comm_size,
+                                     synchronize_shared, allocate_shared_float)
             else
                 A_factorization = get_block_diagonal_solver(level_info, data_type,
                                                             use_shared_blocks, timer,
@@ -82,89 +102,64 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                                             block_allocate_shared_float,
                                                             block_allocate_shared_int,
                                                             block_synchronize_shared)
-                B = BlockAinvDotBShared{data_type}(level_info.local_top_vector_a_block_indices[1],
-                                                   level_info.a_block_off_diagonal_indices[1],
-                                                   level_info.a_block_off_diagonal_bottom_vector_indices[1],
-                                                   block_comm_rank, block_comm_size,
-                                                   block_allocate_shared_float,
-                                                   block_synchronize_shared)
-                C_vector_intermediate_buffer =
-                    allocate_shared_float(n_hypercube_positions, nbottom)
-                if shared_comm_rank == 0
-                    C_vector_intermediate_buffer .= 0.0
-                end
-                C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
-                C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
-                C_block_row_inds_full = level_info.a_block_off_diagonal_indices[1]
-
-               C_nrow = length(level_info.a_block_off_diagonal_indices[1])
-               C_rows_per_proc = (C_nrow + block_comm_size - 1) ÷ block_comm_size
-               if isempty(level_info.local_top_vector_a_block_indices[1])
-                   # There are no entries in the block handled by this process, so
-                   # to avoid accessing zero-length vectors, set the row range to
-                   # be empty also.
-                   C_partial_row_range = 1:0
-               else
-                   C_partial_row_range = block_comm_rank*C_rows_per_proc+1:min((block_comm_rank+1)*C_rows_per_proc,C_nrow)
-               end
-
-                block_hypercube_position =
-                    get_hypercube_position(level_info.iblock_list[:,1], level_info.nblock)
-
-                C = BlockCShared{data_type}(level_info.a_block_off_diagonal_indices[1],
-                                            level_info.a_block_off_diagonal_bottom_vector_indices[1],
-                                            C_partial_row_range,
-                                            level_info.local_top_vector_a_block_indices[1],
-                                            level_info.local_top_vector_indices,
-                                            level_info.local_bottom_vector_indices,
-                                            matrix_template, block_hypercube_position,
-                                            n_hypercube_positions,
+                B = BlockAinvDotBShared{data_type}(
+                        Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
+                        Tuple(li.local_top_vector_a_block_offset_indices[1] for li ∈ level_info),
+                        Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
+                        Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
+                        block_comm_rank, block_comm_size, block_allocate_shared_float,
+                        block_synchronize_shared)
+                C = BlockCShared{data_type}(Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
+                                            Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
+                                            Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
+                                            Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
+                                            sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
+                                            matrix_template,
                                             right_multiplication_buffer_storage,
                                             C_dense_buffer_storage,
-                                            C_vector_intermediate_buffer, C_vector_range,
-                                            level_info.subgroup_i,
+                                            level_info[1].subgroup_i,
+                                            level_info[1].n_subgroups,
                                             block_allocate_shared_float,
-                                            block_synchronize_shared, block_comm_rank,
-                                            block_comm_size, synchronize_shared)
+                                            isa(schur_complement, BlockDenseS),
+                                            block_comm_rank, block_comm_size,
+                                            shared_comm, shared_comm_rank,
+                                            shared_comm_size, synchronize_shared,
+                                            allocate_shared_float)
             end
         else
             A_factorization = get_block_diagonal_solver(level_info, data_type, false,
                                                         timer, check_lu)
-            B = BlockAinvDotBSerial{data_type}(level_info.local_top_vector_a_block_indices,
-                                               level_info.a_block_off_diagonal_indices,
-                                               level_info.a_block_off_diagonal_bottom_vector_indices)
-            C_vector_intermediate_buffer =
-                allocate_shared_float(n_hypercube_positions, nbottom)
-            if shared_comm_rank == 0
-                C_vector_intermediate_buffer .= 0.0
-            end
-            C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
-            C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
-
-            block_hypercube_positions =
-                [get_hypercube_position(iblock, level_info.nblock)
-                 for (iblock, bi) ∈ zip(eachcol(level_info.iblock_list), level_info.local_top_vector_a_block_indices)
-                 if !isempty(bi)]
-
-            C = BlockCSerial{data_type}(level_info.a_block_off_diagonal_indices,
-                                        level_info.a_block_off_diagonal_bottom_vector_indices,
-                                        level_info.local_top_vector_a_block_indices,
-                                        level_info.local_top_vector_indices,
-                                        level_info.local_bottom_vector_indices,
-                                        matrix_template, block_hypercube_positions,
-                                        n_hypercube_positions,
-                                        right_multiplication_buffer_storage,
-                                        C_dense_buffer_storage,
-                                        C_vector_intermediate_buffer, C_vector_range,
-                                        block_synchronize_shared, synchronize_shared)
+            B = BlockAinvDotBSerial{data_type}(
+                    extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
+                    extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_offset_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_offset_indices))
+            C = BlockCSerial{data_type}(
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_offset_indices),
+                    extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
+                    sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
+                    matrix_template, right_multiplication_buffer_storage,
+                    C_dense_buffer_storage, shared_comm, shared_comm_rank,
+                    shared_comm_size, synchronize_shared, allocate_shared_float)
         end
 
         if use_shared_blocks
             # Only one block per process.
-            Ainv_dot_u = block_allocate_shared_float(length(level_info.local_top_vector_a_block_indices[1]))
+            if length(level_info[1].local_top_vector_a_block_indices) == 0
+                Ainv_dot_u = zeros(data_type, 0)
+            else
+                Ainv_dot_u = block_allocate_shared_float(sum(length(li.local_top_vector_a_block_indices[1])
+                                                             for li ∈ level_info))
+            end
         else
-            Ainv_dot_u = [block_allocate_shared_float(length(bi))
-                          for bi ∈ level_info.local_top_vector_a_block_indices if !isempty(bi)]
+            unfiltered_nblock = length(level_info[1].local_top_vector_a_block_indices)
+            Nvar = length(level_info)
+            top_block_sizes = [sum(length(level_info[ili].local_top_vector_a_block_indices[ib]) for ili ∈ 1:Nvar)
+                               for ib ∈ 1:unfiltered_nblock]
+            Ainv_dot_u = [block_allocate_shared_float(nb)
+                          for nb ∈ top_block_sizes if nb > 0]
         end
 
         return new{data_type,typeof(A_factorization),typeof(B),typeof(C),typeof(schur_complement),typeof(schur_complement_solver),typeof(Ainv_dot_u),Fsync,typeof(timer)}(
@@ -199,10 +194,9 @@ function lu!(sc::BlockedSchurComplementSolver, full_A)
         @sc_timeit timer "schur_complement" begin
             synchronize_shared()
 
-            mul_C_Ainv_dot_B!(schur_complement, C, B)
-            synchronize_shared()
             add_D_to_schur_complement!(schur_complement, full_A)
             synchronize_shared()
+            mul_C_Ainv_dot_B!(schur_complement, C, B)
 
             lu!(schur_complement_solver, schur_complement.matrix)
         end
@@ -223,7 +217,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             B = sc.B
             C = sc.C
             Ainv_dot_u = sc.Ainv_dot_u
-            bottom_sub_range = C.vector_range
+            bottom_sub_range = C.this_proc_bottom_vector_entries
 
             @sc_timeit timer "Ainv.u" begin
                 ldiv!(Ainv_dot_u, A_factorization, U)
@@ -231,11 +225,11 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             end
 
             @sc_timeit timer "v-C.Ainv.u" begin
-                mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
-
                 for i ∈ bottom_sub_range
-                    y[i] += v[i]
+                    y[i] = v[i]
                 end
+
+                mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
                 synchronize_shared()
             end
 

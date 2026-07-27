@@ -70,7 +70,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
             solution = x_local
         end
         MPI.Barrier(shared_comm)
-        x_global = gather_vector(solution, dimensions, comm, distributed_comm,
+        x_global = gather_vector(solution, dimensions, (nothing,), comm, distributed_comm,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
             check_solution = global_matrix \ rhs_global

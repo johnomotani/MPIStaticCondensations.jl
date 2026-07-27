@@ -1,7 +1,8 @@
 using BlockArrays
 using MPIStaticCondensations
-using MPIStaticCondensations: Dimension
+using MPIStaticCondensations: Dimension, get_shared_sparse_matrix_csc_buffer
 using MPI
+using Random
 using SparseArrays
 using SparseArrays: FixedSparseCSC
 
@@ -17,11 +18,12 @@ function get_flattened_index(n_tuple, ngrid_tuple, ielement, igrid::CartesianInd
     return get_flattened_index(n_tuple, ngrid_tuple, ielement, Tuple(igrid))
 end
 
-function construct_sparse_finite_element_matrix(common_dimensions::Tuple, rng,
+function construct_sparse_finite_element_matrix(dimensions::Vector{<:Dimension},
+                                                row_dimensions::AbstractVector{<:Integer},
+                                                column_dimensions::AbstractVector{<:Integer}, rng,
                                                 sparse_stencils::Bool,
-                                                handle_periodicity::Bool=true;
-                                                extra_row_dimensions=[],
-                                                extra_column_dimensions=[],
+                                                handle_periodicity::Bool=true,
+                                                diagonal_block::Bool=true;
                                                 stencil="element")
 
     if stencil == "empty"
@@ -31,169 +33,29 @@ function construct_sparse_finite_element_matrix(common_dimensions::Tuple, rng,
         return data, global_i, global_j
     end
 
-    nd = length(common_dimensions)
-    data = Float64[]
-    global_inds = Tuple{Int64,Int64}[]
-    n_tuple = map(d->d.n, common_dimensions)
-    ngrid_tuple = map(d->d.ngrid, common_dimensions)
-    nelement_tuple = map(d->d.nelement, common_dimensions)
-    element_indices = CartesianIndices(ngrid_tuple)
-    extra_m = prod(d.n for d ∈ extra_row_dimensions; init=1)
-    extra_n = prod(d.n for d ∈ extra_column_dimensions; init=1)
+    global_dimensions = [Dimension(; name=d.name, nelement=d.nelement, ngrid=d.ngrid,
+                                   nrank=1, irank=0, periodic=d.periodic,
+                                   dense_boundaries=d.dense_boundaries,
+                                   remove_boundaries=d.remove_boundaries)
+                                   for d ∈ dimensions]
+    matrix = get_shared_sparse_matrix_csc_buffer(global_dimensions, MPI.COMM_SELF, zeros,
+                                                 (args...)->zeros(Int64, args...);
+                                                 row_dimensions, column_dimensions,
+                                                 stencil)
+    rand!(matrix.nzval)
 
-    last_dim_dense_boundaries = common_dimensions[end].dense_boundaries
-    dense_boundary_nelement_tuple_first = ntuple((d) -> d == nd ? (1:1) : nelement_tuple[d], nd)
-    dense_boundary_ngrid_tuple_first = ntuple((d) -> d == nd ? (1:1) : ngrid_tuple[d], nd)
-    dense_boundary_nelement_tuple_last = ntuple((d) -> d == nd ? (common_dimensions[end].nelement:common_dimensions[end].nelement) : nelement_tuple[d], nd)
-    dense_boundary_ngrid_tuple_last = ntuple((d) -> d == nd ? (common_dimensions[end].ngrid:common_dimensions[end].ngrid) : ngrid_tuple[d], nd)
-
-    counter = 0
-    function add_point!(ielement, igrid, jelement, jgrid)
-        common_global_i = get_flattened_index(n_tuple, ngrid_tuple, Tuple(ielement), Tuple(igrid))
-        common_global_j = get_flattened_index(n_tuple, ngrid_tuple, Tuple(jelement), jgrid)
-        for extra_j ∈ 1:extra_n, extra_i ∈ 1:extra_m
-            global_i = (common_global_i - 1) * extra_m + extra_i
-            global_j = (common_global_j - 1) * extra_n + extra_j
-            i = (global_i, global_j)
-            push!(global_inds, i)
-            if igrid == Tuple(jgrid)
-                # Add 1 to diagonal to ensure matrix is invertible.
-                push!(data, 1.0 + rand(rng))
-                counter += 1
-            else
-                push!(data, rand(rng))
-                counter += 1
-            end
-        end
-        return nothing
-    end
-    if stencil == "point"
-        for ielement ∈ CartesianIndices(nelement_tuple)
-            for igrid ∈ element_indices
-                if last_dim_dense_boundaries && ielement[nd] == 1 && igrid[nd] == 1
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_first), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_first)
-                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
-                    end
-                    skip_last_dim_first = true
-                else
-                    skip_last_dim_first = false
-                end
-                if last_dim_dense_boundaries && ielement[nd] == nelement_tuple[nd] && igrid[nd] == ngrid_tuple[nd]
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    skip_last_dim_last = true
-                else
-                    skip_last_dim_last = false
-                end
-                add_point!(ielement, igrid, ielement, igrid)
-                if skip_last_dim_last
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_last), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_last)
-                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
-                    end
-                end
-            end
-        end
-    elseif stencil != "element"
-        error("Unrecognised stencil=\"$stencil\".")
-    elseif sparse_stencils
-        for ielement ∈ CartesianIndices(nelement_tuple)
-            for igrid ∈ element_indices
-                if last_dim_dense_boundaries && ielement[nd] == 1 && igrid[nd] == 1
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_first), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_first)
-                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
-                    end
-                    skip_last_dim_first = true
-                else
-                    skip_last_dim_first = false
-                end
-                if last_dim_dense_boundaries && ielement[nd] == nelement_tuple[nd] && igrid[nd] == ngrid_tuple[nd]
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    skip_last_dim_last = true
-                else
-                    skip_last_dim_last = false
-                end
-                for d ∈ 1:nd, this_jgrid ∈ 1:ngrid_tuple[d]
-                    if d > 1 && this_jgrid == igrid[d]
-                        # This repeats the diagonal entry that was already included.
-                        continue
-                    end
-                    if skip_last_dim_first && d == nd && this_jgrid == 1
-                        # Already included these points in the 'dense boundaries' branch.
-                        continue
-                    end
-                    if skip_last_dim_last && d == nd && this_jgrid == ngrid_tuple[end]
-                        # Will include these points in the following 'dense boundaries' branch.
-                        continue
-                    end
-                    jgrid = [this_d == d ? this_jgrid : igrid[this_d] for this_d ∈ 1:nd]
-                    if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
-                            && any(jg == 1 && je > 1 for (jg, je) ∈ zip(jgrid, Tuple(ielement))))
-                        # Avoid repeated global index pairs.
-                        continue
-                    end
-                    add_point!(ielement, igrid, ielement, jgrid)
-                end
-                if skip_last_dim_last
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_last), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_last)
-                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
-                    end
-                end
-            end
-        end
-    else
-        for ielement ∈ CartesianIndices(nelement_tuple)
-            for igrid ∈ element_indices
-                if last_dim_dense_boundaries && ielement[nd] == 1 && igrid[nd] == 1
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_first), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_first)
-                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
-                    end
-                    skip_last_dim_first = true
-                else
-                    skip_last_dim_first = false
-                end
-                if last_dim_dense_boundaries && ielement[nd] == nelement_tuple[nd] && igrid[nd] == ngrid_tuple[nd]
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    skip_last_dim_last = true
-                else
-                    skip_last_dim_last = false
-                end
-                for jgrid ∈ element_indices
-                    if (any(ig == 1 && ie > 1 for (ig, ie) ∈ zip(Tuple(igrid), Tuple(ielement)))
-                            && any(jg == 1 && je > 1 for (jg, je) ∈ zip(Tuple(jgrid), Tuple(ielement))))
-                        # Avoid repeated global index pairs.
-                        continue
-                    end
-                    add_point!(ielement, igrid, ielement, jgrid)
-                end
-                if skip_last_dim_last
-                    # Fill all the boundary entries that are allowed to be non-zero when
-                    # the last dimension has dense_boundaries=true.
-                    for jelement ∈ CartesianIndices(dense_boundary_nelement_tuple_last), jgrid ∈ CartesianIndices(dense_boundary_ngrid_tuple_last)
-                        add_point!(ielement, igrid, jelement, Tuple(jgrid))
-                    end
-                end
-            end
+    if diagonal_block
+        # Add 1 to diagonal to ensure matrix is invertible.
+        for i ∈ 1:size(matrix, 1)
+            matrix[i,i] += 1.0
         end
     end
 
-    global_i = [i[1] for i ∈ global_inds]
-    global_j = [i[2] for i ∈ global_inds]
+    global_i, global_j, data = findnz(matrix)
 
     if handle_periodicity
-        apply_periodicity_to_indices!(global_i, vcat(common_dimensions, extra_row_dimensions))
-        apply_periodicity_to_indices!(global_j, vcat(common_dimensions, extra_column_dimensions))
+        apply_periodicity_to_indices!(global_i, dimensions[row_dimensions])
+        apply_periodicity_to_indices!(global_j, dimensions[column_dimensions])
     end
 
     return data, global_i, global_j
@@ -240,42 +102,25 @@ function global_to_local(inds, dimensions)
     return i
 end
 
-function get_sparse_indices_for_local_block(global_i, global_j, dimensions, irank_list;
-                                            extra_row_dimensions=[],
-                                            extra_column_dimensions=[])
+function get_sparse_indices_for_local_block(global_i, global_j, dimensions,
+                                            row_dimensions, column_dimensions, irank_list)
     local_dimensions = [
         create_dimension(; name=d.name, nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
                          irank=irank, periodic=d.periodic,
                          remove_boundaries=d.remove_boundaries)
         for (d, irank) ∈ zip(dimensions, irank_list[1:length(dimensions)])
     ]
-    local_extra_row_dimensions = [
-        create_dimension(; name=d.name, nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
-                         irank=irank, periodic=d.periodic,
-                         remove_boundaries=d.remove_boundaries)
-        for (d, irank) ∈ zip(extra_row_dimensions, irank_list[length(dimensions)+1:end])
-    ]
-    local_extra_column_dimensions = [
-        create_dimension(; name=d.name, nelement=d.nelement, ngrid=d.ngrid, nrank=d.nrank,
-                         irank=irank, periodic=d.periodic,
-                         remove_boundaries=d.remove_boundaries)
-        for (d, irank) ∈ zip(extra_column_dimensions, irank_list[length(dimensions)+1:end])
-    ]
-    local_row_dimensions = vcat(local_dimensions, local_extra_row_dimensions)
-    local_column_dimensions = vcat(local_dimensions, local_extra_column_dimensions)
+    local_row_dimensions = local_dimensions[row_dimensions]
+    local_column_dimensions = local_dimensions[column_dimensions]
     row_n_tuple = Tuple(d.n for d ∈ local_row_dimensions)
     column_n_tuple = Tuple(d.n for d ∈ local_column_dimensions)
     return get_sparse_indices_for_local_block(global_i, global_j, local_row_dimensions,
                                               local_column_dimensions, irank_list,
-                                              row_n_tuple, column_n_tuple;
-                                              local_extra_row_dimensions,
-                                              local_extra_column_dimensions)
+                                              row_n_tuple, column_n_tuple)
 end
 function get_sparse_indices_for_local_block(global_i, global_j, local_row_dimensions,
                                             local_column_dimensions, irank_list,
-                                            row_n_tuple::Tuple, column_n_tuple::Tuple;
-                                            local_extra_row_dimensions=[],
-                                            local_extra_column_dimensions=[])
+                                            row_n_tuple::Tuple, column_n_tuple::Tuple)
     row_global_cartinds = CartesianIndices(row_n_tuple)
     column_global_cartinds = CartesianIndices(column_n_tuple)
     local_sparse_inds = Int64[]
@@ -295,17 +140,15 @@ function get_sparse_indices_for_local_block(global_i, global_j, local_row_dimens
 end
 
 function get_sparse_indices_for_all_local_blocks(global_i, global_j, dimensions,
-                                                 local_block_irank_lists;
-                                                 extra_row_dimensions=[],
-                                                 extra_column_dimensions=[])
+                                                 row_dimensions, column_dimensions,
+                                                 local_block_irank_lists)
     local_block_sparse_indices = Vector{Int64}[]
     local_i_list = Vector{Int64}[]
     local_j_list = Vector{Int64}[]
     for irl ∈ local_block_irank_lists
         local_sparse_inds, local_i, local_j =
-            get_sparse_indices_for_local_block(global_i, global_j, dimensions, irl;
-                                               extra_row_dimensions,
-                                               extra_column_dimensions)
+            get_sparse_indices_for_local_block(global_i, global_j, dimensions,
+                                               row_dimensions, column_dimensions, irl)
         push!(local_block_sparse_indices, local_sparse_inds)
         push!(local_i_list, local_i)
         push!(local_j_list, local_j)
@@ -392,8 +235,9 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
                                             shared_comm::MPI.Comm, allocate_shared_float,
                                             allocate_shared_int, rng,
                                             sparse_stencils::Bool; return_separate=false,
-                                            row_dimensions=nothing,
-                                            column_dimensions=nothing, stencil="element")
+                                            row_dimensions::Union{AbstractVector{<:Integer},Nothing}=nothing,
+                                            column_dimensions::Union{AbstractVector{<:Integer},Nothing}=nothing,
+                                            diagonal_block::Bool=true, stencil="element")
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
@@ -402,26 +246,14 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     shared_comm_rank = MPI.Comm_rank(shared_comm)
 
     if row_dimensions === nothing
-        row_dimensions = dimensions
+        row_dimensions = 1:length(dimensions)
     end
     if column_dimensions === nothing
-        column_dimensions = dimensions
+        column_dimensions = 1:length(dimensions)
     end
-    common_dimension_inds = [r.name == c.name
-                             for (r, c) ∈ zip(row_dimensions, column_dimensions)]
-    last_common_dimension = 0
-    for (r, c) ∈ zip(row_dimensions, column_dimensions)
-        last_common_dimension += 1
-        if r.name != c.name
-            break
-        end
-    end
-    common_dimensions = row_dimensions[1:last_common_dimension]
-    extra_row_dimensions = row_dimensions[last_common_dimension+1:end]
-    extra_column_dimensions = column_dimensions[last_common_dimension+1:end]
 
-    local_m = prod(d.n_local for d ∈ row_dimensions)
-    local_n = prod(d.n_local for d ∈ column_dimensions)
+    local_m = prod(d.n_local for d ∈ dimensions[row_dimensions])
+    local_n = prod(d.n_local for d ∈ dimensions[column_dimensions])
     if return_separate
         local_data = nothing
         global_data = nothing
@@ -436,29 +268,18 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
         global_matrix = nothing
     end
     if rank == 0
-        if extra_row_dimensions == [] && extra_column_dimensions == []
-            all_dimensions = common_dimensions
-        elseif extra_row_dimensions == []
-            all_dimensions = column_dimensions
-        elseif extra_column_dimensions == []
-            all_dimensions = row_dimensions
-        else
-            error("At least one of extra_row_dimensions and extra_column_dimensions "
-                  * "should be empty.")
-        end
         data, global_i, global_j =
-            construct_sparse_finite_element_matrix(Tuple(common_dimensions), rng,
-                                                   sparse_stencils, false;
-                                                   extra_row_dimensions,
-                                                   extra_column_dimensions, stencil)
+            construct_sparse_finite_element_matrix(dimensions, row_dimensions,
+                                                   column_dimensions, rng,
+                                                   sparse_stencils, false, diagonal_block;
+                                                   stencil)
 
-        local_block_irank_lists = [get_irank_list(irank, all_dimensions)
+        local_block_irank_lists = [get_irank_list(irank, dimensions)
                                    for irank ∈ 0:distributed_comm_size-1]
         local_block_sparse_indices, local_i_list, local_j_list =
-            get_sparse_indices_for_all_local_blocks(global_i, global_j, common_dimensions,
-                                                    local_block_irank_lists;
-                                                    extra_row_dimensions,
-                                                    extra_column_dimensions)
+            get_sparse_indices_for_all_local_blocks(global_i, global_j, dimensions,
+                                                    row_dimensions, column_dimensions,
+                                                    local_block_irank_lists)
 
         # Count overlaps so that the corresponding points can be decreased so that when
         # overlaps are added together from all overlapping blocks, they give the original
@@ -501,8 +322,8 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
             end
         end
 
-        apply_periodicity_to_indices!(global_i, row_dimensions)
-        apply_periodicity_to_indices!(global_j, column_dimensions)
+        apply_periodicity_to_indices!(global_i, dimensions[row_dimensions])
+        apply_periodicity_to_indices!(global_j, dimensions[column_dimensions])
 
         local_sparse_inds = local_block_sparse_indices[1]
 
@@ -539,8 +360,8 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
             MPI.Barrier(shared_comm)
 
             # Assemble global matrix
-            m = prod(d.periodic ? d.n - 1 : d.n for d ∈ row_dimensions)
-            n = prod(d.periodic ? d.n - 1 : d.n for d ∈ column_dimensions)
+            m = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions[row_dimensions])
+            n = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions[column_dimensions])
             local_matrix = FixedSparseCSC(local_m, local_n, local_matrix_colptr,
                                           local_matrix_rowval, local_matrix_nzval)
             global_matrix = sparse(global_i, global_j, data, m, n)
@@ -643,8 +464,9 @@ function assemble_and_scatter_global_multi_variable_matrix(
                                              shared_comm, allocate_shared_float,
                                              allocate_shared_int, rng, sparse_stencils;
                                              return_separate,
-                                             row_dimensions=dimensions[variable_dimensions[ivar]],
-                                             column_dimensions=dimensions[variable_dimensions[jvar]],
+                                             row_dimensions=variable_dimensions[ivar],
+                                             column_dimensions=variable_dimensions[jvar],
+                                             diagonal_block=(ivar == jvar),
                                              stencil=stencil_matrix[ivar,jvar])
                                          for jvar ∈ 1:n_variables)
                                    for ivar ∈ 1:n_variables)
@@ -729,14 +551,14 @@ function assemble_and_scatter_global_multi_variable_matrix(
         return global_data, Tuple(var_tuple_from_result(i) for i ∈ 2:5)...
     else
         if rank == 0
-            global_matrix_tuple = var_tuple_from_result[1]
-            global_matrix = BlockArray(reshape([global_matrix_tuple[flat_i%n_variables+1][flat_i÷n_variables+1]
-                                                for flat_i ∈ 0:n_variables^2-1],
-                                               n_variables, n_variables))
+            global_matrix_tuple = var_tuple_from_result(1)
+            global_matrix = mortar(reshape([global_matrix_tuple[flat_i%n_variables+1][flat_i÷n_variables+1]
+                                            for flat_i ∈ 0:n_variables^2-1],
+                                           n_variables, n_variables))
         else
             global_matrix = nothing
         end
-        local_matrix = var_tuple_from_result[2]
+        local_matrix = var_tuple_from_result(2)
         return global_matrix, local_matrix
     end
 end
@@ -782,21 +604,32 @@ end
 function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::MPI.Comm,
                                          distributed_comm::Union{MPI.Comm,Nothing},
                                          shared_comm::MPI.Comm, allocate_shared_float,
-                                         rng)
+                                         rng; rhs_global=nothing, rhs_local=nothing)
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
     distributed_comm_size = comm_size ÷ shared_comm_size
     shared_comm_rank = MPI.Comm_rank(shared_comm)
-    n_total = prod(d.n for d ∈ dimensions)
+    n_total_with_dups = prod(d.n for d ∈ dimensions)
+    n_total = prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions)
     n_local = prod(d.n_local for d ∈ dimensions)
 
-    rhs_global = nothing
-    rhs_local = allocate_shared_float(n_local)
+    if rhs_local === nothing
+        rhs_local = allocate_shared_float(n_local)
+    elseif size(rhs_local) != (n_local,)
+        error("rhs_local has wrong size. Should be ($n_local,), got $(size(rhs_local))")
+    end
+    if rhs_global !== nothing && size(rhs_global) != (n_total,)
+        error("rhs_global has wrong size. Should be ($n_total,), got $(size(rhs_global))")
+    end
 
     if rank == 0
-        rhs_global_with_dups = rand(rng, n_total)
-        rhs_global = remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
+        rhs_global_with_dups = rand(rng, n_total_with_dups)
+        if rhs_global === nothing
+            rhs_global = remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
+        else
+            rhs_global .= remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
+        end
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
                                    for irank ∈ 0:distributed_comm_size-1]
@@ -822,26 +655,81 @@ function assemble_and_scatter_global_multi_variable_rhs(
              dimensions::Vector{<:Dimension}, variable_dimensions, comm::MPI.Comm,
              distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm,
              allocate_shared_float, rng)
-    rhs_global, rhs_local =
-        assemble_and_scatter_global_rhs(dimensions[variable_dimensions[1]], comm,
-                                        distributed_comm, shared_comm,
-                                        allocate_shared_float, rng)
-    for vdims ∈ variable_dimensions[2:end]
-        new_rhs_global, new_rhs_local =
-            assemble_and_scatter_global_rhs(dimensions[vdims], comm, distributed_comm,
-                                            shared_comm, allocate_shared_float, rng)
-        if rhs_global !== nothing
-            rhs_global = vcat(rhs_global, new_rhs_global)
+
+    nd = length(dimensions)
+    variable_dimensions = Tuple(vdims === nothing ? (1:nd) : vdims
+                                for vdims ∈ variable_dimensions)
+
+    global_rhs_variable_sizes = [prod(d.periodic ? d.n - 1 : d.n for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
+    global_rhs_size = sum(global_rhs_variable_sizes)
+    global_rhs_variable_offsets = vcat(0, cumsum(global_rhs_variable_sizes[1:end-1])...)
+    local_rhs_variable_sizes = [prod(d.n_local for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
+    local_rhs_size = sum(local_rhs_variable_sizes)
+    local_rhs_variable_offsets = vcat(0, cumsum(local_rhs_variable_sizes[1:end-1])...)
+
+    if MPI.Comm_rank(comm) == 0
+        rhs_global = zeros(global_rhs_size)
+    else
+        rhs_global = nothing
+    end
+    rhs_local = allocate_shared_float(local_rhs_size)
+
+    for (vdims, n_global, global_offset, n_local, local_offset) ∈
+            zip(variable_dimensions, global_rhs_variable_sizes,
+                global_rhs_variable_offsets, local_rhs_variable_sizes,
+                local_rhs_variable_offsets)
+        if MPI.Comm_rank(comm) == 0
+            var_rhs_global = @view rhs_global[global_offset+1:global_offset+n_global]
+        else
+            var_rhs_global = nothing
         end
-        rhs_local = vcat(rhs_local, new_rhs_local)
+        var_rhs_local = @view rhs_local[local_offset+1:local_offset+n_local]
+        assemble_and_scatter_global_rhs(dimensions[vdims], comm, distributed_comm,
+                                        shared_comm, allocate_shared_float, rng;
+                                        rhs_global=var_rhs_global,
+                                        rhs_local=var_rhs_local)
     end
 
     return rhs_global, rhs_local
 end
 
 function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
-                       comm::Union{MPI.Comm}, distributed_comm::Union{MPI.Comm,Nothing},
-                       shared_comm::MPI.Comm)
+                       variable_dimensions, comm::Union{MPI.Comm},
+                       distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
+    if MPI.Comm_rank(shared_comm) > 0
+        return nothing
+    end
+    nd = length(dimensions)
+    variable_dimensions = Tuple(vdim === nothing ? (1:nd) : vdim
+                                for vdim ∈ variable_dimensions)
+    x_global_list = Vector{eltype(x_local)}[]
+    offset = 0
+    for vdims ∈ variable_dimensions
+        this_dimensions = dimensions[vdims]
+        var_length_local = prod(d.n_local for d ∈ this_dimensions)
+        this_x_local = @view x_local[offset+1:offset+var_length_local]
+        this_x_global = gather_single_variable_vector(this_x_local, this_dimensions, comm,
+                                                      distributed_comm, shared_comm)
+        if MPI.Comm_rank(distributed_comm) == 0
+            push!(x_global_list, this_x_global)
+        end
+        offset += var_length_local
+    end
+
+    if MPI.Comm_rank(distributed_comm) > 0
+        return nothing
+    end
+
+    x_global = vcat(x_global_list...)
+
+    return x_global
+end
+
+function gather_single_variable_vector(x_local::AbstractVector,
+                                       dimensions::Vector{<:Dimension},
+                                       comm::Union{MPI.Comm},
+                                       distributed_comm::Union{MPI.Comm,Nothing},
+                                       shared_comm::MPI.Comm)
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
