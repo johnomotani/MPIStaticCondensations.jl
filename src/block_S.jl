@@ -34,6 +34,37 @@ struct BlockS{Nvar,Ti,Tm,Trange}
     end
 end
 
+struct BlockDenseS{Nvar,Ti,Tm,Trange}
+    matrix::Tm
+    indices::NTuple{Nvar,Trange}
+    column_range_partial::UnitRange{Ti}
+    partial_ranges::NTuple{Nvar,UnitRange{Ti}}
+
+    function BlockDenseS(matrix::Tm, local_bottom_vector_indices::NTuple{Nvar,Tind},
+                         shared_comm,
+                         allocate_shared_float::F) where {Nvar,Tm<:AbstractMatrix,Tind,F}
+        Ti = eltype(local_bottom_vector_indices[1])
+        shared_comm_size = MPI.Comm_size(shared_comm)
+        shared_comm_rank = MPI.Comm_rank(shared_comm)
+
+        ncol = size(matrix, 2)
+        cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
+        column_range_partial = shared_comm_rank*cols_per_proc+1:min((shared_comm_rank+1)*cols_per_proc,ncol)
+
+        block_n = Tuple(length(bvi) for bvi ∈ local_bottom_vector_indices)
+        block_n_per_proc = Tuple((nc + shared_comm_size - 1) ÷ shared_comm_size for nc ∈ block_n)
+        block_range_offsets = vcat(0, cumsum(block_n[1:Nvar-1]))
+        partial_ranges = Tuple(offset .+ shared_comm_rank*cpp+1:min((shared_comm_rank+1)*cpp,nc)
+                                      for (offset, cpp, nc) ∈ zip(block_range_offsets,
+                                                                  block_n_per_proc,
+                                                                  block_n))
+
+        return new{Nvar,Ti,Tm,eltype(local_bottom_vector_indices)}(
+                   matrix, local_bottom_vector_indices, column_range_partial,
+                   partial_ranges)
+    end
+end
+
 function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                                     full_A::NTuple{Nvar,NTuple{Nvar,T}}) where {Nvar,T}
     @inbounds begin
@@ -41,7 +72,8 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
         # `schur_complement`.
         sc_matrix = schur_complement.matrix
         indices = schur_complement.indices
-        for (vcol, ci) ∈ zip(1:Nvar, indices), (vrow, ri) ∈ zip(1:Nvar, indices)
+        column_ranges_partial = schur_complement.column_ranges_partial
+        for (vcol, ci, cr) ∈ zip(1:Nvar, indices, column_ranges_partial), (vrow, ri) ∈ zip(1:Nvar, indices)
             sc_matrix_variable_block = sc_matrix[vrow][vcol]
             A_variable_block = full_A[vrow][vcol]
             if isa(sc_matrix_variable_block, SharedSparseBuffer)
@@ -52,11 +84,8 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                     sc_colptr = sc_matrix_variable_block.colptr
                     sc_rowval_list = sc_matrix_variable_block.rowval_list
                     sc_nzval = sc_matrix_variable_block.nzval
-                    sc_column_range_partial = schur_complement.column_range_partial
-                    sc_indices = schur_complement.indices
 
-                    nrow = length(sc_indices)
-                    for j ∈ sc_column_range_partial
+                    for j ∈ cr
                         first_i = sc_colptr[j]
                         last_i = sc_colptr[j+1] - 1
                         if last_i < first_i
@@ -67,7 +96,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         # will be within the non-zeros of D.
                         row_i = 1
 
-                        full_j = sc_indices[j]
+                        full_j = ci[j]
                         full_first_i = full_A_colptr[full_j]
                         full_last_i = full_A_colptr[full_j+1]-1
                         if full_last_i < full_first_i
@@ -79,7 +108,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         last_row_i = length(sc_col_rv)
                         full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
                         while row_i ≤ last_row_i && full_flat_i ≤ full_last_i
-                            row = sc_indices[sc_col_rv[row_i]]
+                            row = ri[sc_col_rv[row_i]]
                             full_row = full_A_rowval[full_flat_i]
                             if row == full_row
                                 sc_nzval[row_i+first_i-1] += full_A_nzval[full_flat_i]
@@ -99,11 +128,8 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                     sc_colptr = sc_matrix_variable_block.colptr
                     sc_rowval_list = sc_matrix_variable_block.rowval_list
                     sc_nzval = sc_matrix_variable_block.nzval
-                    sc_column_range_partial = schur_complement.column_range_partial
-                    sc_indices = schur_complement.indices
 
-                    nrow = length(sc_indices)
-                    for j ∈ sc_column_range_partial
+                    for j ∈ cr
                         first_i = sc_colptr[j]
                         last_i = sc_colptr[j+1] - 1
                         if last_i < first_i
@@ -114,7 +140,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         # will be within the non-zeros of D.
                         row_i = 1
 
-                        full_j = sc_indices[j]
+                        full_j = ci[j]
                         full_first_i = full_A_colptr[full_j]
                         full_last_i = full_A_colptr[full_j+1]-1
                         if full_last_i < full_first_i
@@ -129,7 +155,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         full_last_row_i = length(full_col_rv)
                         full_row_i = max(searchsortedlast(full_col_rv, first_row) - 1, 1)
                         while row_i ≤ last_row_i && full_row_i ≤ full_last_row_i
-                            row = sc_indices[sc_col_rv[row_i]]
+                            row = ri[sc_col_rv[row_i]]
                             full_row = full_col_rv[full_row_i]
                             if row == full_row
                                 sc_nzval[row_i+first_i-1] += full_A_nzval[full_row_i+full_first_i-1]
@@ -150,12 +176,10 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                     full_A_colptr = A_variable_block.colptr
                     full_A_rowval = A_variable_block.rowval
                     full_A_nzval = A_variable_block.nzval
-                    sc_column_range_partial = schur_complement.column_range_partial
-                    sc_indices = schur_complement.indices
 
-                    nrow = length(sc_indices)
+                    nrow = length(ri)
                     first_full_row = sc_indices[1]
-                    for j ∈ sc_column_range_partial
+                    for j ∈ cr
                         full_j = sc_indices[j]
                         full_first_i = full_A_colptr[full_j]
                         full_last_i = full_A_colptr[full_j+1]-1
@@ -183,12 +207,11 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                     full_A_colptr = A_variable_block.colptr
                     full_A_rowval_list = A_variable_block.rowval_list
                     full_A_nzval = A_variable_block.nzval
-                    sc_column_range_partial = schur_complement.column_range_partial
                     sc_indices = schur_complement.indices
 
                     nrow = length(sc_indices)
                     first_full_row = sc_indices[1]
-                    for j ∈ sc_column_range_partial
+                    for j ∈ cr
                         full_j = sc_indices[j]
                         full_first_i = full_A_colptr[full_j]
                         full_last_i = full_A_colptr[full_j+1]-1
@@ -217,6 +240,82 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                 else
                     error("Unsupported type '$(typeof(A_variable_block))' for `A_variable_block`.")
                 end
+            end
+        end
+        return nothing
+    end
+end
+
+function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
+                                    full_A::NTuple{Nvar,NTuple{Nvar,T}}) where {Nvar,T}
+    @inbounds begin
+        # Only get the local rows for D, so just add these to the local rows of
+        # `schur_complement`.
+        sc_matrix = schur_complement.matrix
+        indices = schur_complement.indices
+        partial_ranges = schur_complement.partial_ranges
+        for (vcol, ci, cr) ∈ zip(1:Nvar, indices, partial_ranges),
+                (vrow, ri, rr) ∈ zip(1:Nvar, indices, partial_ranges)
+            A_variable_block = full_A[vrow][vcol]
+            first_row = first(ri)
+            if isa(A_variable_block, AbstractSparseMatrixCSC)
+                full_A_colptr = A_variable_block.colptr
+                full_A_rowval = A_variable_block.rowval
+                full_A_nzval = A_variable_block.nzval
+
+                for (j, full_j) ∈ zip(cr, ci)
+                    full_first_i = full_A_colptr[full_j]
+                    full_last_i = full_A_colptr[full_j+1]-1
+                    if full_last_i < full_first_i
+                        continue
+                    end
+
+                    last_full_row = full_A_rowval[full_last_i]
+                    full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
+                    for (i, full_i) ∈ zip(rr, ri)
+                        while full_A_rowval[full_flat_i] < full_i && full_flat_i < full_last_i
+                            full_flat_i += 1
+                        end
+                        if full_i == full_A_rowval[full_flat_i]
+                            sc_matrix[i,j] += full_A_nzval[full_flat_i]
+                            full_flat_i += 1
+                        end
+                        if full_i > last_full_row
+                            break
+                        end
+                    end
+                end
+            elseif isa(A_variable_block, SharedSparseBuffer)
+                full_A_colptr = A_variable_block.colptr
+                full_A_rowval_list = A_variable_block.rowval_list
+                full_A_nzval = A_variable_block.nzval
+
+                for (j, full_j) ∈ zip(cr, ci)
+                    full_first_i = full_A_colptr[full_j]
+                    full_last_i = full_A_colptr[full_j+1]-1
+                    if full_last_i < full_first_i
+                        continue
+                    end
+
+                    full_col_rv = full_A_rowval_list[full_j]
+                    last_full_row = full_col_rv[end]
+                    last_full_row_i = length(full_col_rv)
+                    full_row_i = max(searchsortedlast(full_col_rv, first_row) - 1, 1)
+                    for (i, full_i) ∈ zip(rr, ri)
+                        while full_col_rv[full_row_i] < full_i && full_row_i < last_full_row_i
+                            full_row_i += 1
+                        end
+                        if full_i == full_col_rv[full_row_i]
+                            sc_matrix[i,j] += full_A_nzval[full_row_i+full_first_i-1]
+                            full_row_i += 1
+                        end
+                        if full_i > last_full_row
+                            break
+                        end
+                    end
+                end
+            else
+                error("Unsupported type '$(typeof(A_variable_block))' for `A_variable_block`.")
             end
         end
         return nothing
