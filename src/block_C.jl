@@ -2,6 +2,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     blocks::Vector{Tb}
     block_rowinds::Vector{NTuple{Nvar,Trange}}
     block_row_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
+    bottom_block_rowinds::Vector{NTuple{Nvar,Trange}}
     bottom_block_vector_rowinds::Vector{Trange}
     block_colinds::Vector{NTuple{Nvar,Trange}}
     block_col_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
@@ -17,6 +18,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     synchronize_shared::Fs
 
     function BlockCSerial{Tf}(block_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
+                              bottom_block_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
                               bottom_block_vector_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
                               block_colinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
                               matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
@@ -39,6 +41,8 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
                             for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         block_rowinds = [Tuple(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar)
                          for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        bottom_block_rowinds = [Tuple(bottom_block_rowinds[ivar][ib] for ivar ∈ 1:Nvar)
+                                for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         bottom_block_vector_rowinds = [vcat((bottom_block_vector_rowinds[ivar][ib] for ivar ∈ 1:Nvar)...)
                                        for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
         block_col_range_offsets = [vcat(0, cumsum(block_colinds[ivar][ib] for ivar ∈ 1:Nvar-1))
@@ -98,12 +102,13 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
         return new{Nvar,eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
-                   blocks, block_rowinds, block_row_ranges, bottom_block_vector_rowinds,
-                   block_colinds, block_col_ranges, block_hypercube_positions,
-                   n_hypercube_positions, right_multiplication_buffer_blocks,
-                   dense_buffer_storage, vector_buffer_blocks_in,
-                   vector_buffer_blocks_out, vector_intermediate_buffer, vector_range,
-                   block_synchronize_shared, synchronize_shared)
+                   blocks, block_rowinds, block_row_ranges, bottom_block_rowinds,
+                   bottom_block_vector_rowinds, block_colinds, block_col_ranges,
+                   block_hypercube_positions, n_hypercube_positions,
+                   right_multiplication_buffer_blocks, dense_buffer_storage,
+                   vector_buffer_blocks_in, vector_buffer_blocks_out,
+                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
+                   synchronize_shared)
     end
 end
 
@@ -111,6 +116,7 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
     block::Tb
     block_rowinds::NTuple{Nvar,Trange}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
+    bottom_block_rowinds::NTuple{Nvar,Trange}
     bottom_block_vector_rowinds::Trange
     block_colinds::NTuple{Nvar,Trange}
     block_col_ranges::NTuple{Nvar,UnitRange{Ti}}
@@ -162,6 +168,7 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
     # column.
     function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
                               bottom_block_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
+                              bottom_block_vector_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
                               block_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}},<:NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}},Nothing},
                               block_hypercube_position::Ti, n_hypercube_positions::Ti,
@@ -173,11 +180,21 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
                               block_synchronize_shared::Fbs, block_comm_rank::Integer,
                               block_comm_size::Integer,
                               synchronize_shared::Fs) where {Nvar,Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
-        rows_per_proc = [(length(ri) + block_comm_size - 1) ÷ block_comm_size for ri ∈ block_rowinds_full]
-        partial_row_ranges = [block_comm_rank*br+1:min((block_comm_rank+1)*rows_per_proc,length(ri))
-                              for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full)]
-        block_rowinds = [cr[br] for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full)]
-        bottom_block_rowinds = bottom_block_rowinds_full[partial_row_range]
+        rows_per_proc = Tuple((length(ri) + block_comm_size - 1) ÷ block_comm_size
+                              for ri ∈ block_rowinds_full)
+        partial_row_ranges = Tuple(block_comm_rank*br+1:min((block_comm_rank+1)*rows_per_proc,length(ri))
+                                   for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full))
+        block_rowinds = Tuple(cr[br] for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full))
+        bottom_block_rowinds = Tuple(cr[br] for (br, ri) ∈ zip(rows_per_proc, bottom_block_rowinds_full))
+        block_row_range_offsets = vcat(0, cumsum(block_rowinds[ivar] for ivar ∈ 1:Nvar-1))
+        block_row_ranges = Tuple(block_row_range_offsets[ivar] .+ partial_row_ranges[ivar]
+                                 for ivar ∈ 1:Nvar)
+
+        all_bottom_block_vector_rowinds_full = vcat((ri for ri ∈ bottom_block_vector_rowinds_full)...)
+        vector_rows_per_proc = (length(all_bottom_block_vector_rowinds_full) + block_comm_size - 1) ÷ block_comm_size
+        vector_partial_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,length(all_bottom_block_vector_rowinds_full))
+        bottom_block_vector_rowinds = all_bottom_block_vector_rowinds_full[vector_partial_row_range]
+
         nrow_full = length(block_rowinds_full)
         nrow = sum(length(bi) for bi ∈ block_rowinds)
         ncol = sum(length(bi for bi ∈ block_colinds))
@@ -209,9 +226,9 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
         return new{Nvar,typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
-                   block, block_rowinds, bottom_block_vector_rowinds, block_colinds,
-                   block_hypercube_position, n_hypercube_positions,
-                   right_multiplication_buffer_block, dense_buffer,
+                   block, block_rowinds, block_row_ranges, bottom_block_rowinds,
+                   bottom_block_vector_rowinds, block_colinds, block_hypercube_position,
+                   n_hypercube_positions, right_multiplication_buffer_block, dense_buffer,
                    bottom_block_rowinds_full, vector_buffer_block_in,
                    vector_buffer_block_out, vector_intermediate_buffer_local,
                    vector_intermediate_buffer, vector_range, block_synchronize_shared,
