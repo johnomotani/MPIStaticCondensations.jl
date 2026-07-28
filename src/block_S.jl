@@ -1,30 +1,36 @@
 struct BlockS{Nvar,Ti,Tm,Trange}
     matrix::NTuple{Nvar,NTuple{Nvar,Tm}}
     indices::NTuple{Nvar,Trange}
-    column_range_partial::UnitRange{Ti}
-    flat_range_partial::UnitRange{Ti}
+    column_ranges_partial::NTuple{Nvar,UnitRange{Ti}}
+    flat_ranges_partial::NTuple{Nvar,NTuple{Nvar,UnitRange{Ti}}}
 
-    function BlockS(matrix::NTuple{Nvar,NTuple{Nvar,Tm}}, local_bottom_vector_indices,
-                    shared_comm, allocate_shared_float::F) where {Nvar,Tm,F}
+    function BlockS(matrix::NTuple{Nvar,NTuple{Nvar,Tm}},
+                    local_bottom_vector_indices::NTuple{Nvar,Tind}, shared_comm,
+                    allocate_shared_float::F) where {Nvar,Tm,Tind,F}
         Ti = eltype(local_bottom_vector_indices)
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
 
-        ncol = length(local_bottom_vector_indices)
-        cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
-        column_range_partial = shared_comm_rank*cols_per_proc+1:min((shared_comm_rank+1)*cols_per_proc,ncol)
+        ncol = Tuple(length(bvi) for bvi ∈ local_bottom_vector_indices)
+        cols_per_proc = Tuple((nc + shared_comm_size - 1) ÷ shared_comm_size for nc ∈ ncol)
+        column_ranges_partial = Tuple(shared_comm_rank*cpp+1:min((shared_comm_rank+1)*cpp,nc)
+                                      for (cpp, nc) ∈ zip(cols_per_proc, ncol))
 
-        if isa(matrix, SharedSparseBuffer)
-            n_flat = length(matrix.nzval)
-            entries_per_proc = (n_flat + shared_comm_size - 1) ÷ shared_comm_size
-            flat_range_partial = shared_comm_rank*entries_per_proc+1:min((shared_comm_rank+1)*entries_per_proc,n_flat)
+        if Tm <: SharedSparseBuffer
+            n_flat = Tuple(Tuple(length(m.nzval) for m ∈ row) for row ∈ matrix)
+            entries_per_proc = Tuple(Tuple((n + shared_comm_size - 1) ÷ shared_comm_size
+                                           for n ∈ nrow)
+                                     for nrow ∈ n_flat)
+            flat_ranges_partial = Tuple(Tuple(shared_comm_rank*entries_per_proc[ivar][jvar]+1:min((shared_comm_rank+1)*entries_per_proc[ivar][jvar],n_flat[ivar][jvar])
+                                              for jvar ∈ 1:Nvar)
+                                        for ivar ∈ 1:Nvar)
         else
-            flat_range_partial = column_range_partial
+            flat_ranges_partial = ntuple(i->column_ranges_partial, Nvar)
         end
 
         return new{Nvar,Ti,Tm,typeof(local_bottom_vector_indices)}(
-                   matrix, local_bottom_vector_indices, column_range_partial,
-                   flat_range_partial)
+                   matrix, local_bottom_vector_indices, column_ranges_partial,
+                   flat_ranges_partial)
     end
 end
 
