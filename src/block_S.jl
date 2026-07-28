@@ -7,7 +7,7 @@ struct BlockS{Nvar,Ti,Tm,Trange}
     function BlockS(matrix::NTuple{Nvar,NTuple{Nvar,Tm}},
                     local_bottom_vector_indices::NTuple{Nvar,Tind}, shared_comm,
                     allocate_shared_float::F) where {Nvar,Tm,Tind,F}
-        Ti = eltype(local_bottom_vector_indices)
+        Ti = eltype(local_bottom_vector_indices[1])
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
 
@@ -28,7 +28,7 @@ struct BlockS{Nvar,Ti,Tm,Trange}
             flat_ranges_partial = ntuple(i->column_ranges_partial, Nvar)
         end
 
-        return new{Nvar,Ti,Tm,typeof(local_bottom_vector_indices)}(
+        return new{Nvar,Ti,Tm,Tind}(
                    matrix, local_bottom_vector_indices, column_ranges_partial,
                    flat_ranges_partial)
     end
