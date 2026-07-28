@@ -55,12 +55,14 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
         if level ≤ length(schur_complement_buffer_list)
             this_sc_buffer = schur_complement_buffer_list[level]
+            schur_complement = BlockS(this_sc_buffer,
+                                      Tuple(li.local_bottom_vector_indices for li ∈ level_info),
+                                      shared_comm, allocate_shared_float)
         else
-            this_sc_buffer = second_last_schur_complement_buffer
+            schur_complement = DenseS(second_last_schur_complement_buffer,
+                                      Tuple(li.local_bottom_vector_indices for li ∈ level_info),
+                                      shared_comm, allocate_shared_float)
         end
-        schur_complement = BlockS(this_sc_buffer,
-                                  Tuple(li.local_bottom_vector_indices for li ∈ level_indices),
-                                  shared_comm, allocate_shared_float)
 
         if level == 1 || !sparse_C_blocks
             matrix_template = nothing
