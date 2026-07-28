@@ -228,7 +228,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                     i1 = first_irow
                     while i1 ≤ last_irow
                         full_A_row = col_rv[row_i]
-                        block_global_row = rowinds[i1]
+                        block_global_row = ri[i1]
                         if full_A_row == block_global_row
                             block[i1,j1] = full_A_nzval[row_i+first_i-1]
                             i1 += 1
@@ -377,7 +377,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
         block_output_inds = C.bottom_block_rowinds
         block_output_ranges = C.block_row_ranges
 
-        if eltype(sc_matrix) <: FixedSparseCSC
+        if isa(sc_matrix[1][1], FixedSparseCSC)
             flat_ranges_partial = schur_complement.flat_ranges_partial
             for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
                 for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
@@ -475,8 +475,8 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
                 # as blocks in different hypercube positions can overlap.
                 synchronize_shared()
             end
-        elseif eltype(sc_matrix) <: SharedSparseBuffer
-            flat_range_partial = schur_complement.flat_range_partial
+        elseif isa(sc_matrix[1][1], SharedSparseBuffer)
+            flat_ranges_partial = schur_complement.flat_ranges_partial
             for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
                 for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
                     nzval = matrix_block.nzval
@@ -526,8 +526,9 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
             synchronize_shared()
 
             current_hypercube_position = 1
-            for (mb, output_inds, bhp) ∈ zip(mul_blocks, block_output_inds,
-                                             block_hypercube_positions)
+            for (mb, output_ranges, output_inds, bhp) ∈
+                    zip(mul_blocks, block_output_ranges, block_output_inds,
+                        block_hypercube_positions)
                 for _ ∈ current_hypercube_position:bhp-1
                     # Synchronize in between copying different 'hypercube positions',
                     # as blocks in different hypercube positions can overlap.
@@ -665,7 +666,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
         n_hypercube_positions = C.n_hypercube_positions
         Ainv_dot_B_block = Ainv_dot_B.block
 
-        if eltype(sc_matrix) <: FixedSparseCSC
+        if isa(sc_matrix[1][1], FixedSparseCSC)
             flat_ranges_partial = schur_complement.flat_ranges_partial
             for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
                 for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
@@ -732,7 +733,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS, C::BlockCShared,
                     end
                 end
             end
-        elseif eltype(sc_matrix) <: SharedSparseBuffer
+        elseif isa(sc_matrix[1][1], SharedSparseBuffer)
             flat_ranges_partial = schur_complement.flat_ranges_partial
             for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
                 for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
