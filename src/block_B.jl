@@ -1,10 +1,10 @@
-struct BlockAinvDotBSerial{Tf,Ti,Tb,Trange}
+struct BlockAinvDotBSerial{Nvar,Tf,Ti,Tb,Trange}
     blocks::Vector{Tb}
-    block_rowinds::Vector{Trange}
+    block_rowinds::Vector{NTuple{Nvar,Trange}}
     block_vector_rowinds::Vector{Trange}
-    block_row_ranges::Vector{UnitRange{Ti}}
-    block_colinds::Vector{Trange}
-    block_col_ranges::Vector{UnitRange{Ti}}
+    block_row_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
+    block_colinds::Vector{NTuple{Nvar,Trange}}
+    block_col_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
     bottom_block_vector_colinds::Vector{Trange}
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
@@ -13,28 +13,24 @@ struct BlockAinvDotBSerial{Tf,Ti,Tb,Trange}
                                      block_vector_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
                                      block_colinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
                                      bottom_block_vector_colinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}}) where {Nvar,Tf,Ti}
-        nblock_unfiltered = length(block_indices[1])
-        non_empty_blocks = [!all(isempty(block_rowinds[ivar][ib]) for ivar ∈ 1:Nvar) &&
-                            !all(isempty(block_colinds[ivar][ib]) for ivar ∈ 1:Nvar)
+        nblock_unfiltered = length(block_rowinds)
+        non_empty_blocks = [!all(isempty(vbi) for vbi ∈ block_rowinds[ib]) &&
+                            !all(isempty(vbi) for vbi ∈ block_colinds[ib])
                             for ib ∈ 1:nblock_unfiltered]
-        block_row_range_offsets = [vcat(0, cumsum(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar-1))
-                                   for ib ∈ 1:nblock_unfiltered]
-        block_row_ranges = [Tuple(block_row_range_offsets[ib][ivar] .+ 1:length(block_rowinds[ivar][ib])
-                                  for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_rowinds = [Tuple(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar)
-                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_vector_rowinds = [vcat((block_vector_rowinds[ivar][ib] for ivar ∈ 1:Nvar)...)
-                                for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_col_range_offsets = [vcat(0, cumsum(block_colinds[ivar][ib] for ivar ∈ 1:Nvar-1))
-                                   for ib ∈ 1:nblock_unfiltered]
-        block_col_ranges = [Tuple(block_col_range_offsets[ib][ivar] .+ 1:length(block_colinds[ivar][ib])
-                                  for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_colinds = [Tuple(block_colinds[ivar][ib] for ivar ∈ 1:Nvar)
-                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        bottom_block_vector_colinds = [vcat((bottom_block_vector_colinds[ivar][ib] for ivar ∈ 1:Nvar)...)
-                                       for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        block_rowinds = block_rowinds[non_empty_blocks]
+        block_row_range_offsets = [vcat(0, cumsum(length(vri) for vri ∈ ri[1:end-1]))
+                                   for ri ∈ block_rowinds]
+        block_row_ranges = [Tuple(voffset .+ 1:length(vri)
+                                  for (vri, voffset) ∈ zip(ri, offsets))
+                            for (ri, offsets) ∈ zip(block_rowinds, block_row_range_offsets)]
+        block_vector_rowinds = [vcat(bvri...) for bvri ∈ block_vector_rowinds[non_empty_blocks]]
+        bottom_block_vector_colinds = [vcat(bbvci...) for bbvci ∈ bottom_block_vector_colinds[non_empty_blocks]]
+        block_colinds = block_colinds[non_empty_blocks]
+        block_col_range_offsets = [vcat(0, cumsum(length(vci) for vci ∈ ci[1:end-1]))
+                                   for ci ∈ block_colinds]
+        block_col_ranges = [Tuple(voffset .+ 1:length(vci)
+                                  for (vci, voffset) ∈ zip(ci, offsets))
+                            for (ci, offsets) ∈ zip(block_colinds, block_col_range_offsets)]
         blocks = Matrix{Tf}[]
         vector_buffer_blocks_in = Vector{Tf}[]
         vector_buffer_blocks_out = Vector{Tf}[]
@@ -45,7 +41,7 @@ struct BlockAinvDotBSerial{Tf,Ti,Tb,Trange}
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
         end
-        return new{Tf,Ti,eltype(blocks),eltype(block_rowinds)}(
+        return new{Nvar,Tf,Ti,eltype(blocks),eltype(block_rowinds[1])}(
                    blocks, block_rowinds, block_vector_rowinds, block_row_ranges,
                    block_colinds, block_col_ranges, bottom_block_vector_colinds,
                    vector_buffer_blocks_in, vector_buffer_blocks_out)
@@ -177,7 +173,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                     i1 = first_irow
                     while i1 ≤ last_irow
                         full_A_row = full_A_rowval[flat_i]
-                        block_global_row = rowinds[i1]
+                        block_global_row = ri[i1]
                         if full_A_row == block_global_row
                             block[i1,j1] = full_A_nzval[flat_i]
                             i1 += 1
