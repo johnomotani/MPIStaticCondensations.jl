@@ -63,8 +63,8 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
         offset = 0
         max_length = 0
         for (ri, ci) ∈ zip(block_rowinds, block_colinds)
-            nrow = length(ri)
-            ncol = length(ci)
+            nrow = sum(length(vri) for vri ∈ ri)
+            ncol = sum(length(vci) for vci ∈ ci)
             if matrix_template === nothing
                 push!(blocks, zeros(Tf, nrow, ncol))
             else
@@ -193,7 +193,7 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
 
         nrow_full = length(block_rowinds_full)
         nrow = sum(length(bi) for bi ∈ block_rowinds)
-        ncol = sum(length(bi for bi ∈ block_colinds))
+        ncol = sum(length(bi) for bi ∈ block_colinds)
         if matrix_template === nothing
             block = zeros(Tf, nrow, ncol)
             dense_buffer = nothing
