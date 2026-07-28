@@ -433,6 +433,7 @@ include("blocked_schur_complement.jl")
 function get_mumps_solver end
 
 struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+    nvar::Val{Nvar}
     n::Ti
     schur_complement_solver::Tsolver
     local_top_vector_indices::Tranget
@@ -1379,8 +1380,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
     even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
     if final_level > 1 && !final_sc_solver_is_mumps
-        if level_info_list[end-1].level_shared_comm != MPI.COMM_NULL
-            nbuff = length(level_info_list[end-1].bottom_vector_indices)
+        if level_info_list[end-1][1].level_shared_comm != MPI.COMM_NULL
+            nbuff = length(level_info_list[end-1][1].bottom_vector_indices)
             if n_levels % 2 == 0
                 odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
             else
@@ -1656,22 +1657,21 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
         this_level_schur_solver =
-            MPIStaticCondensationParallel{Nvar}(sum(li.global_size for li ∈ this_level_info),
-                                                this_level_sc,
-                                                all_local_top_vector_indices,
-                                                @view(all_local_top_vector_indices[partial_top_sub_range]),
-                                                partial_top_sub_range,
-                                                all_local_bottom_vector_indices,
-                                                this_shared_local_bottom_vector_indices,
-                                                this_shared_local_bottom_vector_no_overlap_indices,
-                                                this_shared_local_bottom_sub_selection_indices,
-                                                this_shared_local_bottom_sub_selection_no_overlap_indices,
-                                                this_shared_local_bottom_vector_repeat_indices,
-                                                this_shared_local_bottom_periodic_pairs,
-                                                this_u_buffer, this_v_buffer,
-                                                this_y_buffer,
-                                                any(li.has_periodic for li ∈ this_level_info),
-                                                level_synchronize_shared, timer)
+            MPIStaticCondensationParallel(Val(Nvar),
+                                          sum(li.global_size for li ∈ this_level_info),
+                                          this_level_sc, all_local_top_vector_indices,
+                                          @view(all_local_top_vector_indices[partial_top_sub_range]),
+                                          partial_top_sub_range,
+                                          all_local_bottom_vector_indices,
+                                          this_shared_local_bottom_vector_indices,
+                                          this_shared_local_bottom_vector_no_overlap_indices,
+                                          this_shared_local_bottom_sub_selection_indices,
+                                          this_shared_local_bottom_sub_selection_no_overlap_indices,
+                                          this_shared_local_bottom_vector_repeat_indices,
+                                          this_shared_local_bottom_periodic_pairs,
+                                          this_u_buffer, this_v_buffer, this_y_buffer,
+                                          any(li.has_periodic for li ∈ this_level_info),
+                                          level_synchronize_shared, timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.
@@ -1858,9 +1858,13 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
         schur_complement_solver = solver.schur_complement_solver
         if isa(schur_complement_solver, MPISchurComplement)
             @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+                # temporary hack - need to assemble Tuple{Tuple{Matrix}} into single Matrix? as what happens when we use dense matrix instead of SharedSparseBuffer?
+                if isa(A, NTuple)
+                    A = A[1][1]
+                end
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
-                a = @view A[local_top_vector_indices,local_top_vector_indices]
+                a = ((@view(A[local_top_vector_indices,local_top_vector_indices]),),)
                 b = @view A[local_top_vector_indices,local_bottom_vector_indices]
                 c = @view A[local_bottom_vector_indices,local_top_vector_indices]
                 d = @view A[local_bottom_vector_indices,local_bottom_vector_indices]
@@ -1879,8 +1883,8 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
     end
 end
 
-function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
-               U::AbstractVector{T}) where T
+function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,T},
+               U::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
@@ -1964,7 +1968,7 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
         return nothing
     end
 end
-function ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
+function ldiv!(solver::MPIStaticCondensationParallel{Nvar,T}, U::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
