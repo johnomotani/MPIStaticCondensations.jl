@@ -1,3 +1,16 @@
+function extract_block_field_from_Tuple(t::Tuple, fieldname::Symbol)
+    # `t` is a Tuple of structs, length nt. One of the fields of the struct, `fieldname`,
+    # is a Vector, length nv. We want to return a Vector of nv Tuples of nt values from
+    # `fieldname`.
+    nt = length(t)
+    if nt < 1
+        error("Tuple `t=$t` has no entries.")
+    end
+    nv = length(getfield(t[1], fieldname))
+
+    return [Tuple(getfield(t[it], fieldname)[iv] for it ∈ 1:nt) for iv ∈ 1:nv]
+end
+
 struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync,Ttimer}
     A_factorization::TA
     B::TB
@@ -58,10 +71,12 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             schur_complement = BlockS(this_sc_buffer,
                                       Tuple(li.local_bottom_vector_indices for li ∈ level_info),
                                       shared_comm, allocate_shared_float)
+            data_type = eltype(schur_complement.matrix[1][1])
         else
-            schur_complement = DenseS(second_last_schur_complement_buffer,
-                                      Tuple(li.local_bottom_vector_indices for li ∈ level_info),
-                                      shared_comm, allocate_shared_float)
+            schur_complement = BlockDenseS(second_last_schur_complement_buffer,
+                                           Tuple(li.local_bottom_vector_indices for li ∈ level_info),
+                                           shared_comm, allocate_shared_float)
+            data_type = eltype(schur_complement.matrix)
         end
 
         if level == 1 || !sparse_C_blocks
@@ -70,7 +85,6 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             matrix_template = schur_complement_buffer_list[level-1]
         end
 
-        data_type = eltype(schur_complement.matrix)
         nbottom = sum(length(li.local_bottom_vector_indices) for li ∈ level_info)
 
         if use_shared_blocks
@@ -86,10 +100,10 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                                             block_allocate_shared_int,
                                                             block_synchronize_shared)
                 B = BlockAinvDotBShared{data_type}(
-                        Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_indices),
-                        Tuple(li.local_top_vector_a_block_vector_indices[1] for li ∈ level_indices),
-                        Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_indices),
-                        Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_indices),
+                        Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
+                        Tuple(li.local_top_vector_a_block_offset_indices[1] for li ∈ level_info),
+                        Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
+                        Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
                         block_comm_rank, block_comm_size, block_allocate_shared_float,
                         block_synchronize_shared)
                 C_vector_intermediate_buffer =
@@ -103,9 +117,9 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                 block_hypercube_position =
                     get_hypercube_position(level_info[1].iblock_list[:,1], level_info[1].nblock)
 
-                C = BlockCShared{data_type}(Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_indices),
-                                            Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_indices),
-                                            Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_indices),
+                C = BlockCShared{data_type}(Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
+                                            Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
+                                            Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
                                             matrix_template, block_hypercube_position,
                                             n_hypercube_positions,
                                             right_multiplication_buffer_storage,
@@ -120,10 +134,10 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             A_factorization = get_block_diagonal_solver(level_info, data_type, false,
                                                         timer, check_lu)
             B = BlockAinvDotBSerial{data_type}(
-                    Tuple(li.local_top_vector_a_block_indices for li ∈ level_indices),
-                    Tuple(li.local_top_vector_a_block_vector_indices for li ∈ level_indices),
-                    Tuple(li.a_block_off_diagonal_indices for li ∈ level_indices),
-                    Tuple(li.a_block_off_diagonal_bottom_vector_indices for li ∈ level_indices))
+                    extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
+                    extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_offset_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_indices))
             C_vector_intermediate_buffer =
                 allocate_shared_float(n_hypercube_positions, nbottom)
             if shared_comm_rank == 0
@@ -137,15 +151,15 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                  for (iblock, bi) ∈ zip(eachcol(level_info[1].iblock_list), level_info[1].local_top_vector_a_block_indices)
                  if !isempty(bi)]
 
-            C = BlockCSerial{data_type}(Tuple(li.a_block_off_diagonal_indices for li ∈ level_indices),
-                                        Tuple(li.a_block_off_diagonal_bottom_vector_indices for li ∈ level_indices),
-                                        Tuple(li.local_top_vector_a_block_indices for li ∈ level_indices),
-                                        matrix_template, block_hypercube_positions,
-                                        n_hypercube_positions,
-                                        right_multiplication_buffer_storage,
-                                        C_dense_buffer_storage,
-                                        C_vector_intermediate_buffer, C_vector_range,
-                                        block_synchronize_shared, synchronize_shared)
+            C = BlockCSerial{data_type}(
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_indices),
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_offset_indices),
+                    extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
+                    matrix_template, block_hypercube_positions, n_hypercube_positions,
+                    right_multiplication_buffer_storage, C_dense_buffer_storage,
+                    C_vector_intermediate_buffer, C_vector_range,
+                    block_synchronize_shared, synchronize_shared)
         end
 
         if use_shared_blocks
