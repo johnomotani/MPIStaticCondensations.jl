@@ -605,9 +605,10 @@ MPI.Barrier(comm::FakeComm) = nothing
     local_top_vector_indices::Vector{Ti}
     iblock_list::Matrix{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
-    local_top_vector_a_block_vector_indices::Vector{Vector{Ti}}
+    local_top_vector_a_block_offset_indices::Vector{Vector{Ti}}
     a_block_off_diagonal_indices::Vector{Vector{Ti}}
     a_block_off_diagonal_bottom_vector_indices::Vector{Vector{Ti}}
+    a_block_off_diagonal_bottom_vector_offset_indices::Vector{Vector{Ti}}
     n_subgroups::Ti
     subgroup_i::Ti
     subgroup_size::Ti
@@ -644,10 +645,11 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                              global_bottom_vector_size=0, top_vector_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
-                             local_top_vector_a_block_vector_indices=Vector{Ti}[],
+                             local_top_vector_a_block_offset_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),
                              a_block_off_diagonal_indices=Vector{Ti}[],
                              a_block_off_diagonal_bottom_vector_indices=Vector{Ti}[],
+                             a_block_off_diagonal_bottom_vector_offset_indices=Vector{Ti}[],
                              n_subgroups=0, subgroup_i=-1, subgroup_size=0,
                              block_comm=shared_comm, bottom_vector_indices=Ti[],
                              local_bottom_vector_indices=Ti[],
@@ -1113,9 +1115,10 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
                          local_top_vector_a_block_indices=a_block_indices,
-                         local_top_vector_a_block_vector_indices=a_block_indices, # temporary!!! need to add the offset to this to actually support multiple variables
+                         local_top_vector_a_block_offset_indices=a_block_indices, # temporary!!! need to add the offset to this to actually support multiple variables
                          a_block_off_diagonal_indices=a_block_off_diagonal_indices,
                          a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
+                         a_block_off_diagonal_bottom_vector_offset_indices=a_block_off_diagonal_bottom_vector_indices, # temporary!!! need to add the offset to this to actually support multiple variables
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
@@ -1478,7 +1481,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             # temporary hack! need to handle Nvar Tuple of level_info
             fake_level_info = ((global_size=ntop, global_bottom_vector_size=0,
                                local_top_vector_a_block_indices=(1:ntop,),
-                               local_top_vector_a_block_vector_indices=(1:ntop,),
+                               local_top_vector_a_block_offset_indices=(1:ntop,),
                                a_block_off_diagonal_indices=(1:0,),
                                block_comm=last_level_info.block_comm),)
             last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
@@ -1859,9 +1862,6 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
         if isa(schur_complement_solver, MPISchurComplement)
             @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
                 # temporary hack - need to assemble Tuple{Tuple{Matrix}} into single Matrix? as what happens when we use dense matrix instead of SharedSparseBuffer?
-                if isa(A, NTuple)
-                    A = A[1][1]
-                end
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
                 a = ((@view(A[local_top_vector_indices,local_top_vector_indices]),),)
