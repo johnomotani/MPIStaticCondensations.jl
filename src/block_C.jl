@@ -17,10 +17,10 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     block_synchronize_shared::Fsb
     synchronize_shared::Fs
 
-    function BlockCSerial{Tf}(block_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
-                              bottom_block_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
-                              bottom_block_vector_rowinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
-                              block_colinds::NTuple{Nvar,<:Vector{<:AbstractVector{Ti}}},
+    function BlockCSerial{Tf}(block_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
+                              bottom_block_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
+                              bottom_block_vector_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
+                              block_colinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
                               matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
                               block_hypercube_positions::Vector{Ti},
                               n_hypercube_positions::Ti,
@@ -30,28 +30,24 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
                               vector_range::UnitRange{Ti},
                               block_synchronize_shared::Fsb,
                               synchronize_shared::Fs) where {Nvar,Tf,Ti,Fsb<:Function,Fs<:Function}
-        nblock_unfiltered = length(block_indices[1])
-        non_empty_blocks = [!all(isempty(block_rowinds[ivar][ib]) for ivar ∈ 1:Nvar) &&
-                            !all(isempty(block_colinds[ivar][ib]) for ivar ∈ 1:Nvar)
+        nblock_unfiltered = length(block_rowinds)
+        non_empty_blocks = [!all(isempty(vbi) for vbi ∈ block_rowinds[ib]) &&
+                            !all(isempty(vbi) for vbi ∈ block_colinds[ib])
                             for ib ∈ 1:nblock_unfiltered]
-        block_row_range_offsets = [vcat(0, cumsum(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar-1))
-                                   for ib ∈ 1:nblock_unfiltered]
-        block_row_ranges = [Tuple(block_row_range_offsets[ib][ivar] .+ 1:length(block_rowinds[ivar][ib])
-                                  for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_rowinds = [Tuple(block_rowinds[ivar][ib] for ivar ∈ 1:Nvar)
-                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        bottom_block_rowinds = [Tuple(bottom_block_rowinds[ivar][ib] for ivar ∈ 1:Nvar)
-                                for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        bottom_block_vector_rowinds = [vcat((bottom_block_vector_rowinds[ivar][ib] for ivar ∈ 1:Nvar)...)
-                                       for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_col_range_offsets = [vcat(0, cumsum(block_colinds[ivar][ib] for ivar ∈ 1:Nvar-1))
-                                   for ib ∈ 1:nblock_unfiltered]
-        block_col_ranges = [Tuple(block_col_range_offsets[ib][ivar] .+ 1:length(block_colinds[ivar][ib])
-                                  for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_colinds = [Tuple(block_colinds[ivar][ib] for ivar ∈ 1:Nvar)
-                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        block_rowinds = block_rowinds[non_empty_blocks]
+        block_row_range_offsets = [vcat(0, cumsum(length(vri) for vri ∈ ri[1:end-1]))
+                                   for ri ∈ block_rowinds]
+        block_row_ranges = [Tuple(voffset .+ 1:length(vri)
+                                  for (vri, voffset) ∈ zip(ri, offsets))
+                            for (ri, offsets) ∈ zip(block_rowinds, block_row_range_offsets)]
+        bottom_block_rowinds = bottom_block_rowinds[non_empty_blocks]
+        bottom_block_vector_rowinds = [vcat(bbvri...) for bbvri ∈ bottom_block_vector_rowinds[non_empty_blocks]]
+        block_colinds = block_colinds[non_empty_blocks]
+        block_col_range_offsets = [vcat(0, cumsum(length(vci) for vci ∈ ci[1:end-1]))
+                                   for ci ∈ block_colinds]
+        block_col_ranges = [Tuple(voffset .+ 1:length(vci)
+                                  for (vci, voffset) ∈ zip(ci, offsets))
+                            for (ci, offsets) ∈ zip(block_colinds, block_col_range_offsets)]
         if matrix_template === nothing
             blocks = Matrix{Tf}[]
         else
@@ -101,7 +97,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{Nvar,eltype(blocks),eltype(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
+        return new{Nvar,eltype(blocks),eltype(block_rowinds[1]),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
                    blocks, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_col_ranges,
                    block_hypercube_positions, n_hypercube_positions,
@@ -186,7 +182,7 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
                                    for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full))
         block_rowinds = Tuple(cr[br] for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full))
         bottom_block_rowinds = Tuple(cr[br] for (br, ri) ∈ zip(rows_per_proc, bottom_block_rowinds_full))
-        block_row_range_offsets = vcat(0, cumsum(block_rowinds[ivar] for ivar ∈ 1:Nvar-1))
+        block_row_range_offsets = vcat(0, cumsum(length(block_rowinds[ivar]) for ivar ∈ 1:Nvar-1))
         block_row_ranges = Tuple(block_row_range_offsets[ivar] .+ partial_row_ranges[ivar]
                                  for ivar ∈ 1:Nvar)
 
@@ -300,7 +296,7 @@ function copy_C_submatrix!(block_C::BlockCSerial,
                         i1 = first_irow
                         while i1 ≤ last_irow
                             full_A_row = full_A_rowval[flat_i]
-                            block_global_row = rowinds[i1]
+                            block_global_row = ri[i1]
                             if full_A_row == block_global_row
                                 block[i1,j1] = full_A_nzval[flat_i]
                                 i1 += 1
