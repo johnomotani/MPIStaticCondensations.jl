@@ -7,38 +7,35 @@ struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
     local_block_solver::Vector{Tsolver}
     block_indices::Tinds
     block_vector_indices::Tvecinds
-    block_ranges::NTuple{Nvar,UnitRange{Ti}}
+    block_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
     x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     B_column_indices::Tinds
-    B_column_ranges::NTuple{Nvar,UnitRange{Ti}}
+    B_column_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
     B_buffers_out::Vector{Matrix{Tf}}
     check_lu::Bool
-    function BlockDiagonalSolverSerial{Tf}(n::Ti, block_indices, block_vector_indices,
-                                           B_column_indices, timer,
-                                           check_lu) where {Tf, Ti <: Integer}
-        Nvar = length(block_indices)
-        nblock_unfiltered = length(block_indices[1])
-        non_empty_blocks = [!all(isempty(block_indices[ivar][ib]) for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered]
+    function BlockDiagonalSolverSerial{Tf}(n::Ti,
+                                           block_indices::Vector{<:NTuple{Nvar,AbstractVector{Ti}}},
+                                           block_vector_indices::Vector{<:NTuple{Nvar,AbstractVector{Ti}}},
+                                           B_column_indices::Vector{<:NTuple{Nvar,AbstractVector{Ti}}},
+                                           timer,
+                                           check_lu) where {Nvar, Tf<:AbstractFloat, Ti<:Integer}
         # Don't need a solver for any empty entries in block_indices, as these blocks have
         # no interior points.
-        block_range_offsets = [vcat(0, cumsum(block_indices[ivar][ib] for ivar ∈ 1:Nvar-1))
-                               for ib ∈ 1:nblock_unfiltered]
-        block_ranges = [Tuple(block_range_offsets[ib][ivar] .+ 1:length(block_indices[ivar][ib])
-                              for ivar ∈ 1:Nvar)
-                        for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_indices = [Tuple(block_indices[ivar][ib] for ivar ∈ 1:Nvar)
-                         for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        block_vector_indices = [vcat((block_vector_indices[ivar][ib] for ivar ∈ 1:Nvar)...)
-                                for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        B_column_range_offsets = [vcat(0, cumsum(B_column_indices[ivar][ib] for ivar ∈ 1:Nvar-1))
-                                  for ib ∈ 1:nblock_unfiltered]
-        B_column_ranges = [Tuple(B_column_range_offsets[ib][ivar] .+ 1:length(B_column_indices[ivar][ib])
-                                 for ivar ∈ 1:Nvar)
-                           for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
-        B_column_indices = [Tuple(B_column_indices[ivar][ib] for ivar ∈ 1:Nvar)
-                            for ib ∈ 1:nblock_unfiltered if non_empty_blocks[ib]]
+        non_empty_blocks = [!all(isempty(vbi) for vbi ∈ bi) for bi ∈ block_indices]
+        block_indices = block_indices[non_empty_blocks]
+        block_range_offsets = [vcat(0, cumsum(length(vbi) for vbi ∈ bi[1:end-1]))
+                               for bi ∈ block_indices]
+        block_ranges = [Tuple(voffset .+ 1:length(vbi)
+                              for (vbi, voffset) ∈ zip(bi, offsets))
+                        for (bi, offsets) ∈ zip(block_indices, block_range_offsets)]
+        block_vector_indices = [vcat(bvbi...) for bvbi ∈ block_vector_indices[non_empty_blocks]]
+        B_column_indices = B_column_indices[non_empty_blocks]
+        B_column_range_offsets = [vcat(0, cumsum(length(vBci) for vBci ∈ Bci[1:end-1]))
+                                  for Bci ∈ B_column_indices]
+        B_column_ranges = [Tuple(voffset .+ 1:length(vBci)
+                                 for (vBci, voffset) ∈ zip(Bci, offsets))
+                           for (Bci, offsets) ∈ zip(B_column_indices, B_column_range_offsets)]
         block_sizes = [sum(length(vbi) for vbi ∈ bi) for bi ∈ block_indices]
         block_size = maximum(block_sizes; init=0)
         function get_identity(bs)
@@ -47,7 +44,7 @@ struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
             return identity
         end
         if block_size > 0
-            local_block_solver = [lu(get_identity(length(bi))) for bi ∈ block_indices]
+            local_block_solver = [lu(get_identity(length(bi))) for bi ∈ block_vector_indices]
         else
             local_block_solver = [nothing]
         end
@@ -166,16 +163,17 @@ function get_block_diagonal_solver(level_info, data_type, use_shared_blocks, tim
     elseif use_shared_blocks
         return BlockDiagonalSolverShared{data_type}(
                    n, Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
-                   Tuple(li.local_top_vector_a_block_vector_indices[1] for li ∈ level_info),
+                   Tuple(li.local_top_vector_a_block_offset_indices[1] for li ∈ level_info),
                    Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
                    level_info[1].block_comm, block_allocate_shared_float,
                    block_allocate_shared_int, block_synchronize_shared, timer, check_lu)
     else
         return BlockDiagonalSolverSerial{data_type}(
-                   n, Tuple(li.local_top_vector_a_block_indices for li ∈ level_info),
-                   Tuple(li.local_top_vector_a_block_vector_indices for li ∈ level_info),
-                   Tuple(li.a_block_off_diagonal_indices for li ∈ level_info), timer,
-                   check_lu)
+                   n,
+                   extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
+                   extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_offset_indices),
+                   extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
+                   timer, check_lu)
     end
 end
 
@@ -550,14 +548,14 @@ function ldiv_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
     end
 end
 function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
-                             B::BlockAinvDotBSerial{T}) where {Nvar,T}
+                             B::BlockAinvDotBSerial{Nvar,T}) where {Nvar,T}
     for (solver, block) ∈ zip(block_diagonal_solver.local_block_solver, B.blocks)
         ldiv!(solver, block)
     end
     return nothing
 end
 function ldiv_block_Bmatrix!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
-                             B::BlockAinvDotBShared{T}) where {Nvar,T}
+                             B::BlockAinvDotBShared{Nvar,T}) where {Nvar,T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_serial_solver
         if solver !== nothing
