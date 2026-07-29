@@ -50,14 +50,14 @@ end
 
 # This version has a single block, and operations are parallelised using shared-memory
 # MPI.
-struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Trange,Tsync}
+struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Tind,Tsync}
     block::Tb
     partial_block::Matrix{Tf}
-    block_rowinds::NTuple{Nvar,Trange}
+    block_rowinds::NTuple{Nvar,Tind}
     block_partial_vector_rowinds::Vector{Ti}
-    block_colinds::NTuple{Nvar,Trange}
+    block_colinds::NTuple{Nvar,Tind}
     block_partial_colinds::NTuple{Nvar,Vector{Ti}}
-    bottom_block_vector_colinds::Trange
+    bottom_block_vector_colinds::Tind
     bottom_block_partial_vector_colinds::Vector{Ti}
     partial_col_ranges::NTuple{Nvar,UnitRange{Ti}}
     partial_vector_col_range::UnitRange{Ti}
@@ -66,15 +66,15 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Trange,Tsync}
     vector_buffer_block_out::Vector{Tf}
     synchronize_shared::Tsync
 
-    function BlockAinvDotBShared{Tf}(block_rowinds::NTuple{Nvar,<:AbstractVector{Ti}},
-                                     block_vector_rowinds::NTuple{Nvar,<:AbstractVector{Ti}},
-                                     block_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
-                                     bottom_block_vector_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
+    function BlockAinvDotBShared{Tf}(block_rowinds::NTuple{Nvar,Tind},
+                                     block_vector_rowinds::NTuple{Nvar,Tind},
+                                     block_colinds::NTuple{Nvar,Tind},
+                                     bottom_block_vector_colinds::NTuple{Nvar,Tind},
                                      block_comm_rank::Integer, block_comm_size::Integer,
                                      allocate_shared_float::Fa,
-                                     synchronize_shared::Fs) where {Nvar,Tf,Ti,Fa,Fs}
+                                     synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa,Fs}
         if isempty(block_rowinds) || isempty(block_colinds)
-            return new{Nvar,Tf,Ti,Matrix{Tf},typeof(block_colinds),Fs}(
+            return new{Nvar,Tf,Ti,Matrix{Tf},Tind,Fs}(
                        zeros(Tf, 0, 0), zeros(Tf, 0, 0), ntuple(i->zeros(Ti, 0), Nvar),
                        zeros(Ti, 0), ntuple(i->zeros(Ti, 0), Nvar),
                        ntuple(i->zeros(Ti, 0), Nvar), zeros(Ti, 0), zeros(Ti, 0),
@@ -85,19 +85,19 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Trange,Tsync}
         nrow = sum(length(bi) for bi ∈ block_rowinds)
         ncol = sum(length(bi) for bi ∈ block_colinds)
         block = allocate_shared_float(nrow, ncol)
-        cols_per_proc = [(length(ci) + block_comm_size - 1) ÷ block_comm_size for ci ∈ block_colinds]
-        partial_col_ranges = [block_comm_rank*bc+1:min((block_comm_rank+1)*cols_per_proc,length(ci))
-                              for (bc, ci) ∈ zip(cols_per_proc, block_colinds)]
-        block_partial_colinds = [ci[bc] for (bc, ci) ∈ zip(cols_per_proc, block_colinds)]
+        cols_per_proc = Tuple((length(ci) + block_comm_size - 1) ÷ block_comm_size for ci ∈ block_colinds)
+        partial_col_ranges = Tuple(block_comm_rank*cpp+1:min((block_comm_rank+1)*cpp,length(ci))
+                                   for (cpp, ci) ∈ zip(cols_per_proc, block_colinds))
+        block_partial_colinds = Tuple(ci[pcr] for (pcr, ci) ∈ zip(partial_col_ranges, block_colinds))
         bottom_block_vector_colinds = vcat(bottom_block_vector_colinds...)
         vector_cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
-        partial_vector_col_range = block_comm_rank*cols_per_proc+1:min((block_comm_rank+1)*vector_cols_per_proc,ncol)
+        partial_vector_col_range = block_comm_rank*vector_cols_per_proc+1:min((block_comm_rank+1)*vector_cols_per_proc,ncol)
         bottom_block_partial_vector_colinds = bottom_block_vector_colinds[partial_vector_col_range]
         block_vector_rowinds = vcat(block_vector_rowinds...)
         vector_rows_per_proc = (nrow + block_comm_size - 1) ÷ block_comm_size
         partial_vector_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,nrow)
         partial_nrow = length(partial_vector_row_range)
-        block_partial_vector_rowinds = block_vector_rowinds[partial_row_range]
+        block_partial_vector_rowinds = block_vector_rowinds[partial_vector_row_range]
         vector_buffer_block_in = allocate_shared_float(ncol)
         vector_buffer_block_out = zeros(Tf, partial_nrow)
         partial_block = zeros(Tf, partial_nrow, ncol)
@@ -106,7 +106,7 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Trange,Tsync}
         vector_buffer_block_in[partial_vector_col_range] .= 0.0
         vector_buffer_block_out .= 0.0
 
-        return new{Nvar,Tf,Ti,typeof(block),typeof(block_rowinds),Fs}(
+        return new{Nvar,Tf,Ti,typeof(block),Tind,Fs}(
                    block, partial_block, block_rowinds, block_partial_vector_rowinds,
                    block_colinds, block_partial_colinds, bottom_block_vector_colinds,
                    bottom_block_partial_vector_colinds, partial_col_ranges,
@@ -313,19 +313,17 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
             return nothing
         end
         block_rowinds = Ainv_dot_B.block_rowinds
-        block_row_ranges = Ainv_dot_B.block_row_ranges
         block_colinds = Ainv_dot_B.block_colinds
         partial_col_ranges = Ainv_dot_B.partial_col_ranges
         partial_col_ranges = Ainv_dot_B.partial_col_ranges
 
         for (vcol, ci, pcr) ∈ zip(1:Nvar, block_colinds, partial_col_ranges),
-                (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
             A_variable_block = full_A[vrow][vcol]
             full_A_colptr = A_variable_block.colptr
             full_A_rowval_list = A_variable_block.rowval_list
             full_A_nzval = A_variable_block.nzval
-            first_irow = first(rr)
-            last_irow = last(rr)
+            last_irow = length(ri)
             first_row = first(ri)
             for j1 ∈ pcr
                 j2 = ci[j1]
@@ -333,10 +331,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
                 col_rv = full_A_rowval_list[j2]
                 last_row_i = length(col_rv)
                 row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                i1 = first_irow
+                i1 = 1
                 while i1 ≤ last_irow
                     full_A_row = col_rv[row_i]
-                    block_global_row = block_rowinds[i1]
+                    block_global_row = ri[i1]
                     if full_A_row == block_global_row
                         block[i1,j1] = full_A_nzval[row_i+first_i-1]
                         i1 += 1
@@ -931,7 +929,8 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
         C_block = C.block
         mul_block = C.right_multiplication_buffer_block
         dense_C = C.dense_buffer
-        block_output_inds = C.bottom_block_vector_rowinds
+        block_output_rowinds = C.bottom_block_vector_rowinds
+        block_output_colinds = C.bottom_block_vector_colinds
         block_hypercube_position = C.block_hypercube_position
         n_hypercube_positions = C.n_hypercube_positions
         Ainv_dot_B_block = Ainv_dot_B.block
@@ -964,8 +963,8 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
             synchronize_shared()
             if hp == block_hypercube_position && length(mul_block) != 0
                 # Add result from mul_block into schur_complement matrix.
-                for (j1, j2) ∈ enumerate(block_output_inds), (i1, i2) ∈ enumerate(block_output_inds)
-                    sc_matrix[i2,j2] += mb[i1,j1]
+                for (j1, j2) ∈ enumerate(block_output_colinds), (i1, i2) ∈ enumerate(block_output_rowinds)
+                    sc_matrix[i2,j2] += mul_block[i1,j1]
                 end
             end
         end
@@ -1018,7 +1017,7 @@ function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
         synchronize_shared()
 
         mul!(vector_buffer_block_out, partial_block, vector_buffer_block_in)
-        for (i3, (i1, i2)) ∈ enumerate(zip(block_partial_vector_rowinds, partial_row_range))
+        for (i3, (i1, i2)) ∈ enumerate(zip(block_partial_vector_rowinds, partial_vector_row_range))
             x[i1] = Ainv_dot_u[i2] - vector_buffer_block_out[i3]
         end
         return nothing
