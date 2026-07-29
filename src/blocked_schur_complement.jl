@@ -122,6 +122,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
                 C = BlockCShared{data_type}(Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
                                             Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
+                                            Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
                                             Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
                                             matrix_template, block_hypercube_position,
                                             n_hypercube_positions,
