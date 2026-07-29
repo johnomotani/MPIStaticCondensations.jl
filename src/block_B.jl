@@ -565,75 +565,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
                 synchronize_shared()
             end
         else
-            column_ranges_partial = schur_complement.flat_ranges_partial
-            for (column_ranges_row, matrix_row) ∈ zip(column_ranges_partial, sc_matrix)
-                for (cr, matrix_block) ∈ zip(column_ranges_row, matrix_row)
-                    if !isempty(cr)
-                        matrix_block[:,cr] .= 0.0
-                    end
-                end
-            end
-
-            synchronize_shared()
-
-            # The rows are labelled by block_hypercube_position, so there are no overlaps,
-            # and we can directly set entries, instead of adding to them, and so do not
-            # need to zero-initialise the output buffer.
-            block_hypercube_positions = C.block_hypercube_positions
-            if dense_buffer_storage === nothing
-                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                              block_hypercube_positions)
-                    mul!(mb, Cb, AiBb, -1.0, 0.0)
-                end
-            else
-                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                              block_hypercube_positions)
-                    nrow, ncol = size(Cb)
-                    dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
-                                           ncol)
-                    C_colptr = Cb.colptr
-                    C_rowval = Cb.rowval
-                    C_nzval = Cb.nzval
-                    dense_buffer .= 0.0
-                    for j ∈ 1:ncol
-                        col_start = C_colptr[j]
-                        col_end = C_colptr[j+1]-1
-                        for flat_i ∈ col_start:col_end
-                            i = C_rowval[flat_i]
-                            dense_buffer[i,j] = C_nzval[flat_i]
-                        end
-                    end
-                    mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
-                end
-            end
-
-            current_hypercube_position = 1
-            for (mb, output_inds, bhp) ∈ zip(mul_blocks, block_output_inds,
-                                             block_hypercube_positions)
-                for _ ∈ current_hypercube_position:bhp-1
-                    # Synchronize in between copying different 'hypercube positions',
-                    # as blocks in different hypercube positions can overlap.
-                    # Note that the blocks are sorted by hypercube position, so this loop
-                    # will include every block owned by this process.
-                    synchronize_shared()
-                end
-                current_hypercube_position = bhp
-
-                # Copy result from mb into schur_complement.
-                for (jvar, col_range, colinds) ∈ zip(1:Nvar, output_ranges, output_inds),
-                        (ivar, row_range, rowinds) ∈ zip(1:Nvar, output_ranges, output_inds)
-                    sc_matrix_variable_block = sc_matrix[ivar][jvar]
-                    for (j, col) ∈ zip(col_range, colinds), (i, row) ∈ zip(row_range, rowinds)
-                        sc_matrix[row,col] += mb[i,j]
-                    end
-                end
-            end
-
-            for _ ∈ current_hypercube_position:n_hypercube_positions-1
-                # Synchronize in between copying different 'hypercube positions',
-                # as blocks in different hypercube positions can overlap.
-                synchronize_shared()
-            end
+            error("Unexpected type for sc_matrix[1][1] ($(typeof(sc_matrix[1][1]))).")
         end
 
         return nothing
@@ -790,48 +722,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCShared{Nvar}
                 end
             end
         else
-            column_ranges_partial = schur_complement.flat_ranges_partial
-            for (column_ranges_row, matrix_row) ∈ zip(column_ranges_partial, sc_matrix)
-                for (cr, matrix_block) ∈ zip(column_ranges_row, matrix_row)
-                    if !isempty(cr)
-                        matrix_block[:,cr] .= 0.0
-                    end
-                end
-            end
-
-            if length(mul_block) != 0
-                if dense_C === nothing
-                    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
-                else
-                    ncol = size(C_block, 2)
-                    C_colptr = C_block.colptr
-                    C_rowval = C_block.rowval
-                    C_nzval = C_block.nzval
-                    dense_C .= 0.0
-                    for j ∈ 1:ncol
-                        col_start = C_colptr[j]
-                        col_end = C_colptr[j+1]-1
-                        for flat_i ∈ col_start:col_end
-                            i = C_rowval[flat_i]
-                            dense_C[i,j] = C_nzval[flat_i]
-                        end
-                    end
-                    mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
-                end
-            end
-
-            for hp ∈ 1:n_hypercube_positions
-                synchronize_shared()
-                if hp == block_hypercube_position && length(mul_block) != 0
-                    for (jvar, col_range, colinds) ∈ zip(1:Nvar, block_output_ranges, block_output_inds),
-                            (ivar, row_range, rowinds) ∈ zip(1:Nvar, block_output_ranges, block_output_inds)
-                        sc_matrix_variable_block = sc_matrix[ivar][jvar]
-                        for (j, col) ∈ zip(col_range, colinds), (i, row) ∈ zip(row_range, rowinds)
-                            sc_matrix[row,col] += mb[i,j]
-                        end
-                    end
-                end
-            end
+            error("Unexpected type for sc_matrix[1][1] ($(typeof(sc_matrix[1][1]))).")
         end
 
         return nothing

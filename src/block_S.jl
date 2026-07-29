@@ -175,74 +175,8 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                     error("Unsupported type '$(typeof(A_variable_block))' for `A_variable_block`.")
                 end
             else
-                if isa(A_variable_block, AbstractSparseMatrixCSC)
-                    full_A_colptr = A_variable_block.colptr
-                    full_A_rowval = A_variable_block.rowval
-                    full_A_nzval = A_variable_block.nzval
-
-                    nrow = length(ri)
-                    first_full_row = sc_indices[1]
-                    for j ∈ cr
-                        full_j = sc_indices[j]
-                        full_first_i = full_A_colptr[full_j]
-                        full_last_i = full_A_colptr[full_j+1]-1
-                        if full_last_i < full_first_i
-                            continue
-                        end
-
-                        full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_full_row) - 1, 1) + full_first_i - 1
-                        irow = 1
-                        while irow ≤ nrow && full_flat_i ≤ full_last_i
-                            row = sc_indices[irow]
-                            full_row = full_A_rowval[full_flat_i]
-                            if row == full_row
-                                sc_matrix_variable_block[irow,j] += full_A_nzval[full_flat_i]
-                                irow += 1
-                                full_flat_i += 1
-                            elseif row < full_row
-                                irow += 1
-                            else
-                                full_flat_i += 1
-                            end
-                        end
-                    end
-                elseif isa(A_variable_block, SharedSparseBuffer)
-                    full_A_colptr = A_variable_block.colptr
-                    full_A_rowval_list = A_variable_block.rowval_list
-                    full_A_nzval = A_variable_block.nzval
-                    sc_indices = schur_complement.indices
-
-                    nrow = length(sc_indices)
-                    first_full_row = sc_indices[1]
-                    for j ∈ cr
-                        full_j = sc_indices[j]
-                        full_first_i = full_A_colptr[full_j]
-                        full_last_i = full_A_colptr[full_j+1]-1
-                        if full_last_i < full_first_i
-                            continue
-                        end
-
-                        full_col_rv = full_A_rowval_list[full_j]
-                        full_last_row_i = length(full_col_rv)
-                        full_row_i = max(searchsortedlast(full_col_rv, first_full_row) - 1, 1)
-                        irow = 1
-                        while irow ≤ nrow && full_row_i ≤ full_last_row_i
-                            row = sc_indices[irow]
-                            full_row = full_col_rv[full_row_i]
-                            if row == full_row
-                                sc_matrix_variable_block[irow,j] += full_A_nzval[full_row_i+full_first_i-1]
-                                irow += 1
-                                full_row_i += 1
-                            elseif row < full_row
-                                irow += 1
-                            else
-                                full_row_i += 1
-                            end
-                        end
-                    end
-                else
-                    error("Unsupported type '$(typeof(A_variable_block))' for `A_variable_block`.")
-                end
+                error("Unexpected type for sc_matrix_variable_block "
+                      * "($(typeof(sc_matrix_variable_block))).")
             end
         end
         return nothing
