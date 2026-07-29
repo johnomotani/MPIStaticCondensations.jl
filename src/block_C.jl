@@ -1,4 +1,4 @@
-struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
+struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
     blocks::Vector{Tb}
     block_rowinds::Vector{NTuple{Nvar,Trange}}
     block_row_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
@@ -17,11 +17,11 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     block_synchronize_shared::Fsb
     synchronize_shared::Fs
 
-    function BlockCSerial{Tf}(block_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                              bottom_block_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                              bottom_block_vector_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                              block_colinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                              matrix_template::Union{AbstractSparseMatrixCSC,SharedSparseBuffer,Nothing},
+    function BlockCSerial{Tf}(block_rowinds::Vector{NTuple{Nvar,Tind}},
+                              bottom_block_rowinds::Vector{NTuple{Nvar,Tind}},
+                              bottom_block_vector_rowinds::Vector{NTuple{Nvar,Tind}},
+                              block_colinds::Vector{NTuple{Nvar,Tind}},
+                              matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractSparseMatrixCSC,SharedSparseBuffer}}},Nothing},
                               block_hypercube_positions::Vector{Ti},
                               n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
@@ -29,7 +29,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
                               vector_intermediate_buffer::AbstractMatrix{Tf},
                               vector_range::UnitRange{Ti},
                               block_synchronize_shared::Fsb,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Fsb<:Function,Fs<:Function}
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fsb<:Function,Fs<:Function}
         nblock_unfiltered = length(block_rowinds)
         non_empty_blocks = [!all(isempty(vbi) for vbi ∈ block_rowinds[ib]) &&
                             !all(isempty(vbi) for vbi ∈ block_colinds[ib])
@@ -97,7 +97,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{Nvar,eltype(blocks),eltype(block_rowinds[1]),Tf,Ti,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
+        return new{Nvar,Tf,Ti,eltype(blocks),Tind,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
                    blocks, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_col_ranges,
                    block_hypercube_positions, n_hypercube_positions,
@@ -108,7 +108,7 @@ struct BlockCSerial{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     end
 end
 
-struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
     block_rowinds::NTuple{Nvar,Trange}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
@@ -221,7 +221,7 @@ struct BlockCShared{Nvar,Tb,Trange,Tf,Ti,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{Nvar,typeof(block),typeof(block_rowinds),Tf,Ti,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+        return new{Nvar,Tf,Ti,typeof(block),typeof(block_rowinds),typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_hypercube_position,
                    n_hypercube_positions, right_multiplication_buffer_block, dense_buffer,
