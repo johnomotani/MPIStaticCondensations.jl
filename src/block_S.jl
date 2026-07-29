@@ -34,11 +34,12 @@ struct BlockS{Nvar,Ti,Tm,Trange}
     end
 end
 
-struct BlockDenseS{Nvar,Ti,Tm,Trange}
+struct BlockDenseS{Nvar,Ti,Tm,Tind}
     matrix::Tm
-    indices::NTuple{Nvar,Trange}
-    column_range_partial::UnitRange{Ti}
+    indices::NTuple{Nvar,Tind}
+    partial_indices::NTuple{Nvar,Tind}
     partial_ranges::NTuple{Nvar,UnitRange{Ti}}
+    column_range_partial::UnitRange{Ti}
 
     function BlockDenseS(matrix::Tm, local_bottom_vector_indices::NTuple{Nvar,Tind},
                          shared_comm,
@@ -58,10 +59,12 @@ struct BlockDenseS{Nvar,Ti,Tm,Trange}
                                       for (offset, cpp, nc) ∈ zip(block_range_offsets,
                                                                   block_n_per_proc,
                                                                   block_n))
+        partial_indices = Tuple(inds[pr] for (inds, pr) ∈ zip(local_bottom_vector_indices,
+                                                              partial_ranges))
 
-        return new{Nvar,Ti,Tm,eltype(local_bottom_vector_indices)}(
-                   matrix, local_bottom_vector_indices, column_range_partial,
-                   partial_ranges)
+        return new{Nvar,Ti,Tm,Tind}(
+                   matrix, local_bottom_vector_indices, partial_indices,
+                   partial_ranges, column_range_partial)
     end
 end
 
@@ -253,9 +256,10 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
         # `schur_complement`.
         sc_matrix = schur_complement.matrix
         indices = schur_complement.indices
+        partial_indices = schur_complement.partial_indices
         partial_ranges = schur_complement.partial_ranges
-        for (vcol, ci, cr) ∈ zip(1:Nvar, indices, partial_ranges),
-                (vrow, ri, rr) ∈ zip(1:Nvar, indices, partial_ranges)
+        for (vcol, ci, cr) ∈ zip(1:Nvar, partial_indices, partial_ranges),
+                (vrow, ri) ∈ zip(1:Nvar, indices)
             A_variable_block = full_A[vrow][vcol]
             first_row = first(ri)
             if isa(A_variable_block, AbstractSparseMatrixCSC)
@@ -272,13 +276,16 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
 
                     last_full_row = full_A_rowval[full_last_i]
                     full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
-                    for (i, full_i) ∈ zip(rr, ri)
-                        while full_A_rowval[full_flat_i] < full_i && full_flat_i < full_last_i
+                    for (i, full_i) ∈ enumerate(ri)
+                        while full_flat_i < full_last_i && full_A_rowval[full_flat_i] < full_i
                             full_flat_i += 1
                         end
                         if full_i == full_A_rowval[full_flat_i]
                             sc_matrix[i,j] += full_A_nzval[full_flat_i]
                             full_flat_i += 1
+                            if full_flat_i > full_last_i
+                                break
+                            end
                         end
                         if full_i > last_full_row
                             break
@@ -301,13 +308,16 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                     last_full_row = full_col_rv[end]
                     last_full_row_i = length(full_col_rv)
                     full_row_i = max(searchsortedlast(full_col_rv, first_row) - 1, 1)
-                    for (i, full_i) ∈ zip(rr, ri)
-                        while full_col_rv[full_row_i] < full_i && full_row_i < last_full_row_i
+                    for (i, full_i) ∈ enumerate(ri)
+                        while full_row_i < last_full_row_i && full_col_rv[full_row_i] < full_i
                             full_row_i += 1
                         end
                         if full_i == full_col_rv[full_row_i]
                             sc_matrix[i,j] += full_A_nzval[full_row_i+full_first_i-1]
                             full_row_i += 1
+                            if full_row_i > last_full_row_i
+                                break
+                            end
                         end
                         if full_i > last_full_row
                             break
