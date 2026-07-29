@@ -63,7 +63,7 @@ Base.size(Alu::BlockDiagonalSolverSerial, d::Integer) = size(Alu)[d]
 
 # When this solver is used there are more processes than blocks, so we use multiple
 # processes to solve each block, with shared-memory parallelism.
-struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Tinds,Tsync} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing,Missing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Tinds,Tsync} <: MPISchurComplementAFactorization{Tf}
     n::Ti
     local_block_solver::Tsolver
     local_block_serial_solver::Tserialsolver
@@ -131,7 +131,8 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
                 local_block_solver = LU(factors, ipiv, block_size)
                 local_block_serial_solver = local_block_solver
             else
-                local_block_solver = nothing
+                # Use `missing` here to distinguish from the `block_size == 0` case above.
+                local_block_solver = missing
                 local_block_serial_solver = LU(factors, ipiv, block_size)
             end
             x_buffer = fill(NaN, block_size)
@@ -257,9 +258,8 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
         if solver === nothing
             # Nothing to do.
         else
-            for (vcol, colrange, colinds, partial_colrange, partial_colinds) ∈
-                        zip(1:Nvar, block_ranges, block_indices, partial_col_ranges,
-                            partial_block_indices),
+            for (vcol, partial_colrange, partial_colinds) ∈
+                        zip(1:Nvar, partial_col_ranges, partial_block_indices),
                     (vrow, rowrange, rowinds) ∈ zip(1:Nvar, block_ranges, block_indices)
                 A_variable_block = full_A[vrow][vcol]
                 if isa(A_variable_block, AbstractSparseMatrixCSC)
