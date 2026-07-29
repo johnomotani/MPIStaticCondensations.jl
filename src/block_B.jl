@@ -9,10 +9,10 @@ struct BlockAinvDotBSerial{Nvar,Tf,Ti,Tb,Trange}
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
 
-    function BlockAinvDotBSerial{Tf}(block_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                                     block_vector_rowinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                                     block_colinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}},
-                                     bottom_block_vector_colinds::Vector{<:NTuple{Nvar,<:AbstractVector{Ti}}}) where {Nvar,Tf,Ti}
+    function BlockAinvDotBSerial{Tf}(block_rowinds::Vector{NTuple{Nvar,Tind}},
+                                     block_vector_rowinds::Vector{NTuple{Nvar,Tind}},
+                                     block_colinds::Vector{NTuple{Nvar,Tind}},
+                                     bottom_block_vector_colinds::Vector{NTuple{Nvar,Tind}}) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti}}
         nblock_unfiltered = length(block_rowinds)
         non_empty_blocks = [!all(isempty(vbi) for vbi ∈ block_rowinds[ib]) &&
                             !all(isempty(vbi) for vbi ∈ block_colinds[ib])
@@ -41,7 +41,7 @@ struct BlockAinvDotBSerial{Nvar,Tf,Ti,Tb,Trange}
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
             push!(vector_buffer_blocks_out, zeros(Tf, nrow))
         end
-        return new{Nvar,Tf,Ti,eltype(blocks),eltype(block_rowinds[1])}(
+        return new{Nvar,Tf,Ti,eltype(blocks),Tind}(
                    blocks, block_rowinds, block_vector_rowinds, block_row_ranges,
                    block_colinds, block_col_ranges, bottom_block_vector_colinds,
                    vector_buffer_blocks_in, vector_buffer_blocks_out)
@@ -395,17 +395,14 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
             # need to zero-initialise the output buffer.
             block_hypercube_positions = C.block_hypercube_positions
             if dense_buffer_storage === nothing
-                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                           Ainv_dot_B_blocks,
-                                                           block_output_inds,
-                                                           block_hypercube_positions)
+                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
+                                              block_hypercube_positions)
                     mul!(mb, Cb, AiBb, -1.0, 0.0)
                 end
             else
-                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                           Ainv_dot_B_blocks,
-                                                           block_output_inds,
-                                                           block_hypercube_positions)
+                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
+                                              block_output_inds,
+                                              block_hypercube_positions)
                     nrow, ncol = size(Cb)
                     dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
                                            ncol)
@@ -457,12 +454,12 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
                         flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_flat_i - 1
                         i = first_i
                         while flat_i ≤ last_flat_i && i ≤ last_i
-                            if rowval[flat_i] == output_inds[i]
+                            if rowval[flat_i] == ri[i]
                                 nzval[flat_i] += mb[i,j]
                                 flat_i += 1
                                 i += 1
                             else
-                                # rowval[flat_i] must be less than output_inds[i]
+                                # rowval[flat_i] must be less than ri[i]
                                 flat_i += 1
                             end
                         end
@@ -493,17 +490,13 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
             # need to zero-initialise the output buffer.
             block_hypercube_positions = C.block_hypercube_positions
             if dense_buffer_storage === nothing
-                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                           Ainv_dot_B_blocks,
-                                                           block_output_inds,
-                                                           block_hypercube_positions)
+                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
+                                              block_hypercube_positions)
                     mul!(mb, Cb, AiBb, -1.0, 0.0)
                 end
             else
-                for (mb, Cb, AiBb, output_inds, bhp) ∈ zip(mul_blocks, C_blocks,
-                                                           Ainv_dot_B_blocks,
-                                                           block_output_inds,
-                                                           block_hypercube_positions)
+                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
+                                              block_hypercube_positions)
                     nrow, ncol = size(Cb)
                     dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
                                            ncol)
@@ -555,12 +548,12 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
                         row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
                         i = first_i
                         while row_i ≤ last_row_i && i ≤ last_i
-                            if col_rv[row_i] == output_inds[i]
+                            if col_rv[row_i] == rowinds[i]
                                 nzval[row_i+first_flat_i-1] += mb[i,j]
                                 row_i += 1
                                 i += 1
                             else
-                                # col_rv[row_i] must be less than output_inds[i]
+                                # col_rv[row_i] must be less than rowinds[i]
                                 row_i += 1
                             end
                         end
