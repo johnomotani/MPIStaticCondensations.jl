@@ -841,8 +841,8 @@ function assemble_and_scatter_global_multi_variable_rhs(
 end
 
 function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
-                       comm::Union{MPI.Comm}, distributed_comm::Union{MPI.Comm,Nothing},
-                       shared_comm::MPI.Comm)
+                       variable_dimensions, comm::Union{MPI.Comm},
+                       distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -851,6 +851,9 @@ function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
 
     x_global = nothing
     if rank == 0
+        if variable_dimensions !== nothing
+            error("multi variable not supported yet")
+        end
         n_total = prod(d.n for d ∈ dimensions)
         x_global_with_dups = fill(NaN, n_total)
 
