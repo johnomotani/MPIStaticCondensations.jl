@@ -97,11 +97,19 @@ abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
 struct MPIStaticCondensationNull{Tf<:AbstractFloat} <: MPIStaticCondensation{Tf} end
 
-function get_partial_FixedSparseCSC_buffer(row_range, col_range, existing_buffer,
-                                           float_type=Float64)
+function get_partial_FixedSparseCSC_buffer(row_range, col_range,
+                                           existing_buffer::NTuple{Nvar,NTuple{Nvar,Tbuff}},
+                                           float_type=Float64) where {Nvar,Tbuff}
     # Initialize buffer with the same non-zero pattern as existing_buffer, but only for a
     # subset of rows given by row_range and columns given by col_range.
     @inbounds begin
+        if Nvar > 1
+            error("get_partial_FixedSparseCSC_buffer() does not support multiple variables yet")
+        else
+            existing_buffer = existing_buffer[1][1]
+            row_range = row_range[1]
+            col_range = col_range[1]
+        end
         nrow = length(row_range)
         ncol = length(col_range)
         ind_type = eltype(row_range)
