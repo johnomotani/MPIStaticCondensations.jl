@@ -108,19 +108,19 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     end
 end
 
-struct BlockCShared{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
     block::Tb
-    block_rowinds::NTuple{Nvar,Trange}
+    block_rowinds::NTuple{Nvar,Tind}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
-    bottom_block_rowinds::NTuple{Nvar,Trange}
-    bottom_block_vector_rowinds::Trange
-    block_colinds::NTuple{Nvar,Trange}
+    bottom_block_rowinds::NTuple{Nvar,Tind}
+    bottom_block_vector_rowinds::Tind
+    bottom_block_vector_colinds::Tind
+    block_colinds::NTuple{Nvar,Tind}
     block_col_ranges::NTuple{Nvar,UnitRange{Ti}}
     block_hypercube_position::Ti
     n_hypercube_positions::Ti
     right_multiplication_buffer_block::Trmbb
     dense_buffer::Tdb
-    block_right_multiplication_output_colinds::Vector{Ti}
     vector_buffer_block_in::Tbi
     vector_buffer_block_out::Vector{Tf}
     vector_intermediate_buffer_local::Tbuff
@@ -162,10 +162,10 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
     # values, the binary number formed by the string of 0s and 1s (ordered in the same way
     # as the dimensions) is translated back to an integer to give the intermediate buffer
     # column.
-    function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
-                              bottom_block_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
-                              bottom_block_vector_rowinds_full::NTuple{Nvar,<:AbstractVector{Ti}},
-                              block_colinds::NTuple{Nvar,<:AbstractVector{Ti}},
+    function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,Tind},
+                              bottom_block_rowinds_full::NTuple{Nvar,Tind},
+                              bottom_block_vector_rowinds_full::NTuple{Nvar,Tind},
+                              block_colinds::NTuple{Nvar,Tind},
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}},<:NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}},Nothing},
                               block_hypercube_position::Ti, n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
@@ -175,23 +175,29 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
                               block_allocate_shared_float::Fa,
                               block_synchronize_shared::Fbs, block_comm_rank::Integer,
                               block_comm_size::Integer,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Fa<:Function,Fbs<:Function,Fs<:Function}
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa<:Function,Fbs<:Function,Fs<:Function}
         rows_per_proc = Tuple((length(ri) + block_comm_size - 1) ÷ block_comm_size
                               for ri ∈ block_rowinds_full)
-        partial_row_ranges = Tuple(block_comm_rank*br+1:min((block_comm_rank+1)*rows_per_proc,length(ri))
-                                   for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full))
-        block_rowinds = Tuple(cr[br] for (br, ri) ∈ zip(rows_per_proc, block_rowinds_full))
-        bottom_block_rowinds = Tuple(cr[br] for (br, ri) ∈ zip(rows_per_proc, bottom_block_rowinds_full))
-        block_row_range_offsets = vcat(0, cumsum(length(block_rowinds[ivar]) for ivar ∈ 1:Nvar-1))
-        block_row_ranges = Tuple(block_row_range_offsets[ivar] .+ partial_row_ranges[ivar]
-                                 for ivar ∈ 1:Nvar)
+        partial_row_ranges = Tuple(block_comm_rank*rpp+1:min((block_comm_rank+1)*rpp,length(ri))
+                                   for (rpp, ri) ∈ zip(rows_per_proc, block_rowinds_full))
+        block_rowinds = Tuple(ri[prr] for (prr, ri) ∈ zip(partial_row_ranges, block_rowinds_full))
+        bottom_block_rowinds = Tuple(ri[prr] for (prr, ri) ∈ zip(partial_row_ranges, bottom_block_rowinds_full))
+        block_row_range_offsets = vcat(0, cumsum(length(ri) for ri ∈ block_rowinds[1:end-1]))
+        block_row_ranges = Tuple(offset .+ prr
+                                 for (offset, prr) ∈ zip(block_row_range_offsets, partial_row_ranges))
 
         all_bottom_block_vector_rowinds_full = vcat((ri for ri ∈ bottom_block_vector_rowinds_full)...)
         vector_rows_per_proc = (length(all_bottom_block_vector_rowinds_full) + block_comm_size - 1) ÷ block_comm_size
         vector_partial_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,length(all_bottom_block_vector_rowinds_full))
         bottom_block_vector_rowinds = all_bottom_block_vector_rowinds_full[vector_partial_row_range]
+        bottom_block_vector_colinds = all_bottom_block_vector_rowinds_full
 
-        nrow_full = length(block_rowinds_full)
+        col_ranges = Tuple(1:length(ci) for ci ∈ block_colinds)
+        block_col_range_offsets = vcat(0, cumsum(length(ci) for ci ∈ block_colinds[1:end-1]))
+        block_col_ranges = Tuple(offset .+ cr
+                                 for (offset, cr) ∈ zip(block_col_range_offsets, col_ranges))
+
+        nrow_full = sum(length(bi) for bi ∈ block_rowinds_full)
         nrow = sum(length(bi) for bi ∈ block_rowinds)
         ncol = sum(length(bi) for bi ∈ block_colinds)
         if matrix_template === nothing
@@ -221,14 +227,14 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,F
         else
             vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
         end
-        return new{Nvar,Tf,Ti,typeof(block),typeof(block_rowinds),typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,
-                   bottom_block_vector_rowinds, block_colinds, block_hypercube_position,
+                   bottom_block_vector_rowinds, bottom_block_vector_colinds,
+                   block_colinds, block_col_ranges, block_hypercube_position,
                    n_hypercube_positions, right_multiplication_buffer_block, dense_buffer,
-                   bottom_block_rowinds_full, vector_buffer_block_in,
-                   vector_buffer_block_out, vector_intermediate_buffer_local,
-                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
-                   synchronize_shared)
+                   vector_buffer_block_in, vector_buffer_block_out,
+                   vector_intermediate_buffer_local, vector_intermediate_buffer,
+                   vector_range, block_synchronize_shared, synchronize_shared)
     end
 end
 
@@ -567,26 +573,24 @@ function copy_C_submatrix!(block_C::BlockCShared,
             return nothing
         end
         block_rowinds = block_C.block_rowinds
-        block_row_ranges = block_C.block_row_ranges
         block_colinds = block_C.block_colinds
         block_col_ranges = block_C.block_col_ranges
         if isa(block, Matrix)
             for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
-                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                    (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
                 A_variable_block = full_A[vrow][vcol]
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval_list = A_variable_block.rowval_list
                 full_A_nzval = A_variable_block.nzval
-                first_irow = first(rr)
-                last_irow = last(rr)
                 first_row = first(ri)
+                nrow = length(ri)
                 for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     col_rv = full_A_rowval_list[j2]
                     last_row = length(col_rv)
                     row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                    i1 = first_irow
-                    while i1 ≤ last_irow
+                    i1 = 1
+                    while i1 ≤ nrow
                         full_A_row = col_rv[row_i]
                         block_global_row = ri[i1]
                         if full_A_row == block_global_row
@@ -609,12 +613,11 @@ function copy_C_submatrix!(block_C::BlockCShared,
             block_rowval = block.rowval
             block_nzval = block.nzval
             for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
-                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                    (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
                 A_variable_block = full_A[vrow][vcol]
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval_list = A_variable_block.rowval_list
                 full_A_nzval = A_variable_block.nzval
-                first_irow = first(rr)
                 first_row = first(ri)
                 last_row = last(ri)
                 for (j1, j2) ∈ zip(cr, ci)
@@ -624,7 +627,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
                     row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
                     first_block_i = block_colptr[j1]
                     last_block_i = block_colptr[j1+1] - 1
-                    block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_irow) - 1, 1) + first_block_i - 1
+                    block_i = first_block_i
                     while block_i ≤ last_block_i
                         full_A_row = col_rv[row_i]
                         block_global_row = ri[block_rowval[block_i]]
