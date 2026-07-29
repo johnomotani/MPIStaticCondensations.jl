@@ -113,6 +113,7 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<
     block_rowinds::NTuple{Nvar,Tind}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
     bottom_block_rowinds::NTuple{Nvar,Tind}
+    bottom_block_colinds::NTuple{Nvar,Tind}
     bottom_block_vector_rowinds::Tind
     bottom_block_vector_colinds::Tind
     block_colinds::NTuple{Nvar,Tind}
@@ -182,6 +183,7 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<
                                    for (rpp, ri) ∈ zip(rows_per_proc, block_rowinds_full))
         block_rowinds = Tuple(ri[prr] for (prr, ri) ∈ zip(partial_row_ranges, block_rowinds_full))
         bottom_block_rowinds = Tuple(ri[prr] for (prr, ri) ∈ zip(partial_row_ranges, bottom_block_rowinds_full))
+        bottom_block_colinds = bottom_block_rowinds_full
         block_row_range_offsets = vcat(0, cumsum(length(ri) for ri ∈ block_rowinds[1:end-1]))
         block_row_ranges = Tuple(offset .+ prr
                                  for (offset, prr) ∈ zip(block_row_range_offsets, partial_row_ranges))
@@ -229,9 +231,10 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<
         end
         return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,
-                   bottom_block_vector_rowinds, bottom_block_vector_colinds,
-                   block_colinds, block_col_ranges, block_hypercube_position,
-                   n_hypercube_positions, right_multiplication_buffer_block, dense_buffer,
+                   bottom_block_colinds, bottom_block_vector_rowinds,
+                   bottom_block_vector_colinds, block_colinds, block_col_ranges,
+                   block_hypercube_position, n_hypercube_positions,
+                   right_multiplication_buffer_block, dense_buffer,
                    vector_buffer_block_in, vector_buffer_block_out,
                    vector_intermediate_buffer_local, vector_intermediate_buffer,
                    vector_range, block_synchronize_shared, synchronize_shared)
