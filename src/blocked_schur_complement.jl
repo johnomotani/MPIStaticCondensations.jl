@@ -6,9 +6,12 @@ function extract_block_field_from_Tuple(t::Tuple, fieldname::Symbol)
     if nt < 1
         error("Tuple `t=$t` has no entries.")
     end
-    nv = length(getfield(t[1], fieldname))
+    first_field = getfield(t[1], fieldname)
+    nv = length(first_field)
+    fieldtype = eltype(first_field)
 
-    return [Tuple(getfield(t[it], fieldname)[iv] for it ∈ 1:nt) for iv ∈ 1:nv]
+    return NTuple{nt,fieldtype}[Tuple(getfield(t[it], fieldname)[iv]
+                                      for it ∈ 1:nt) for iv ∈ 1:nv]
 end
 
 struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync,Ttimer}
