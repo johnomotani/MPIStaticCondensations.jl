@@ -10,8 +10,9 @@ using MUMPS: set_job!, invoke_mumps!, finalize!
 using TimerOutputs
 
 function get_mumps_solver(dimensions::Vector{<:Dimension},
-                          matrix_buffer::SharedSparseBuffer, comm, synchronize_shared::Fs,
-                          timer) where Fs
+                          matrix_buffer::NTuple{Nvar,NTuple{Nvar,SharedSparseBuffer{Tf,Ti}}},
+                          comm, synchronize_shared::Fs,
+                          timer) where {Nvar,Tf,Ti,Fs}
     return MPIStaticCondensationMUMPS(matrix_buffer, comm, synchronize_shared, timer)
 end
 
@@ -36,8 +37,15 @@ struct MPIStaticCondensationMUMPS{Tf<:AbstractFloat,Ti<:Integer,Tmumps<:Mumps{Tf
     synchronize_shared::Tsync
     timer::Ttimer
 
-    function MPIStaticCondensationMUMPS(matrix_buffer::SharedSparseBuffer{Tf,Ti}, comm,
-                                        synchronize_shared::Fs, timer) where {Tf,Ti,Fs}
+    function MPIStaticCondensationMUMPS(matrix_buffer::NTuple{Nvar,NTuple{Nvar,SharedSparseBuffer{Tf,Ti}}},
+                                        comm, synchronize_shared::Fs,
+                                        timer) where {Nvar,Tf,Ti,Fs}
+        if Nvar > 1
+            error("MPIStaticCondensationMUMPS does not yet support solves with more than one variable")
+        else
+            matrix_buffer = matrix_buffer[1][1]
+        end
+
         comm_rank = MPI.Comm_rank(comm)
         comm_size = MPI.Comm_size(comm)
         is_root = (comm_rank == 0)
