@@ -1486,7 +1486,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     else
         even_buffer = zeros(data_type, 0)
     end
-    # This is a temporary hack! schur_complement_buffer_list needs to be a Vector of NTuple(NTuple) of (possibly rectangular) buffers to actually support multiple variables.
     schur_complement_buffer_list =
         [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
          for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
@@ -1521,27 +1520,26 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             get_mumps_solver(dimensions, schur_complement_buffer_list[end], comm,
                              level_synchronize_shared, timer)
     elseif level_info_list[end][1].level_shared_comm != MPI.COMM_NULL
-        # temporary hack! need to handle Nvar Tuple of level_info
-        last_level_info = level_info_list[end][1]
+        last_level_info = level_info_list[end]
         last_use_shared_blocks = (length(level_info_list) > 1
-                                  && length(last_level_info.local_top_vector_a_block_indices) == 1
-                                  && MPI.Comm_size(last_level_info.block_comm) > 1)
+                                  && length(last_level_info[1].local_top_vector_a_block_indices) == 1
+                                  && MPI.Comm_size(last_level_info[1].block_comm) > 1)
         # Always use 'shared memory' solver on last level
-        if last_level_info.block_comm != MPI.COMM_NULL
-            block_comm_rank = MPI.Comm_rank(last_level_info.block_comm)
-            block_comm_size = MPI.Comm_size(last_level_info.block_comm)
+        if last_level_info[1].block_comm != MPI.COMM_NULL
+            block_comm_rank = MPI.Comm_rank(last_level_info[1].block_comm)
+            block_comm_size = MPI.Comm_size(last_level_info[1].block_comm)
             if block_comm_size == shared_comm_size
                 last_block_allocate_shared_float = allocate_shared_float
                 last_block_allocate_shared_int = allocate_shared_int
                 if synchronize_shared === nothing
-                    last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+                    last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_comm)
                 else
                     last_block_synchronize_shared = synchronize_shared
                 end
             else
-                last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info.block_comm)
-                last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info.block_comm)
-                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info.block_comm)
+                last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info[1].block_comm)
+                last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info[1].block_comm)
+                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_comm)
             end
 
             if !all(nblock_list[length(level_info_list)] .== 1)
@@ -1559,13 +1557,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             # Fake the LevelInfo argument here, because this solver will be passed
             # matrices and rhs/solution vectors that do not need the 'top vector' entries
             # selecting out of them.
-            ntop = length(last_level_info.local_top_vector_indices)
-            # temporary hack! need to handle Nvar Tuple of level_info
+            ntop = sum(length(li.local_top_vector_indices) for li ∈ last_level_info)
             fake_level_info = ((global_size=ntop, global_bottom_vector_size=0,
                                local_top_vector_a_block_indices=(1:ntop,),
                                local_top_vector_a_block_offset_indices=(1:ntop,),
                                a_block_off_diagonal_indices=(1:0,),
-                               block_comm=last_level_info.block_comm),)
+                               block_comm=last_level_info[1].block_comm),)
             last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
                                                             true, timer, check_lu,
                                                             last_block_allocate_shared_float,
@@ -1942,7 +1939,6 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
         schur_complement_solver = solver.schur_complement_solver
         if isa(schur_complement_solver, MPISchurComplement)
             @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
-                # temporary hack - need to assemble Tuple{Tuple{Matrix}} into single Matrix? as what happens when we use dense matrix instead of SharedSparseBuffer?
                 local_top_vector_indices = solver.local_top_vector_indices
                 local_bottom_vector_indices = solver.local_bottom_vector_indices
                 a = ((@view(A[local_top_vector_indices,local_top_vector_indices]),),)
