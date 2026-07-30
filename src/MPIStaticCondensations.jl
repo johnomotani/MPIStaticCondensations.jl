@@ -1882,7 +1882,7 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
             if isa(A, AbstractMatrix) && Nvar == 1
                 lu!(solver, ((A,),))
             else
-                @sc_timeit solver.timer "Static condensation lu! $(size(A))" begin
+                @sc_timeit solver.timer "Static condensation lu! $(size(solver))" begin
                     lu!(schur_complement_solver, A)
                 end
             end
