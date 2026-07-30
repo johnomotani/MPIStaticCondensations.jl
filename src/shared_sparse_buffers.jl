@@ -10,17 +10,31 @@ Base.size(b::SharedSparseBuffer) = (b.m, b.n)
 Base.size(b::SharedSparseBuffer, dim::Integer) = size(b)[dim]
 SparseArrays.nnz(b::SharedSparseBuffer) = length(b.nzval)
 
-function get_shared_sparse_buffer(buffer_info::NamedTuple,
+function get_shared_sparse_buffer(buffer_info::Matrix{<:NamedTuple},
                                   storage::AbstractVector{<:AbstractFloat})
-    flat_n = buffer_info.nzval_length
+    flat_n = sum(bi.nzval_length for bi ∈ buffer_info)
     if length(storage) < flat_n
         error("Construction of SharedSparseBuffer requires a storage array of at least "
               * "length $(flat_n), but got array with length $(length(storage)).")
     end
-    nzval = @view storage[1:flat_n]
+    Tf = eltype(storage)
+    Ti = typeof(buffer_info[1,1].m)
+    Tcp = typeof(buffer_info[1,1].colptr)
+    Trv = eltype(buffer_info[1,1].rowval_list)
+    Tnz = typeof(@view storage[1:0])
 
-    return SharedSparseBuffer(buffer_info.m, buffer_info.n, buffer_info.colptr,
-                              buffer_info.rowval_list, nzval)
+    buffer = Matrix{SharedSparseBuffer{Tf,Ti,Tcp,Trv,Tnz}}(undef, size(buffer_info)...)
+    offset = 0
+    for (i, bi) ∈ enumerate(buffer_info)
+        flat_n = bi.nzval_length
+        nzval = @view storage[offset+1:offset+flat_n]
+
+        buffer[i] = SharedSparseBuffer(bi.m, bi,n, bi.colptr, bi.rowval_list, nzval)
+
+        offset += flat_n
+    end
+
+    return buffer
 end
 
 function get_dim_indices!(dimensions, block_sizes, flat_i)

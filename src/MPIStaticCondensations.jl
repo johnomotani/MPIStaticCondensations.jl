@@ -1411,11 +1411,46 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     final_level = n_levels
     for (level, (li, lai)) ∈ enumerate(zip(level_info_list[1:end-2],
                                            level_allocate_shared_int_list[1:end-2]))
-        # This is a temporary hack! sc_info needs to be an NTuple(NTuple) of (possibly rectangular) buffers to actually support multiple variables.
-        sc_info =
+        first_sc_info =
             get_shared_sparse_matrix_info(dimensions, li[1].level_shared_comm, lai,
                                           li[1].block_sizes, li[1].bottom_vector_indices,
                                           li[1].bottom_vector_indices; ind_type)
+        sc_info = Matrix{typeof(first_sc_info)}(undef, Nvar, Nvar)
+        sc_info[1,1] = first_sc_info
+        for ivar ∈ 2:Nvar
+            vfirst = duplicate_var_first_position[ivar]
+            if vfirst < ivar
+                sc_info[ivar,1] = sc_info[vfirst,1]
+            else
+                sc_info[ivar,1] =
+                    get_shared_sparse_matrix_info(dimensions, li[1].level_shared_comm,
+                                                  lai, li[1].block_sizes,
+                                                  li[ivar].bottom_vector_indices,
+                                                  li[1].bottom_vector_indices; ind_type)
+            end
+        end
+        for jvar ∈ 2:Nvar
+            vfirst = duplicate_var_first_position[jvar]
+            if vfirst < jvar
+                sc_info[:,jvar] .= @view sc_info[:,vfirst]
+            else
+                for ivar ∈ 1:Nvar
+                    vfirst = duplicate_var_first_position[ivar]
+                    if vfirst < ivar
+                        sc_info[ivar,jvar] = sc_info[vfirst,jvar]
+                    else
+                        sc_info[ivar,jvar] =
+                            get_shared_sparse_matrix_info(dimensions,
+                                                          li[1].level_shared_comm, lai,
+                                                          li[1].block_sizes,
+                                                          li[ivar].bottom_vector_indices,
+                                                          li[jvar].bottom_vector_indices;
+                                                          ind_type)
+                    end
+                end
+            end
+        end
+
         push!(schur_complement_buffer_info_list, sc_info)
 
         if level < n_levels && sc_info.nzval_length / (sc_info.m * sc_info.n) > mumps_fill_in_threshold
@@ -1425,13 +1460,13 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
     end
 
-    schur_complement_nnz_list = [sc.nzval_length
+    schur_complement_nnz_list = [sum(var_block_sc.nzval_length for var_block_sc ∈ sc)
                                  for sc ∈ schur_complement_buffer_info_list]
     odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
     even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
     if final_level > 1 && !final_sc_solver_is_mumps
         if level_info_list[end-1][1].level_shared_comm != MPI.COMM_NULL
-            nbuff = length(level_info_list[end-1][1].bottom_vector_indices)
+            nbuff = sum(length(li.bottom_vector_indices) for li ∈ level_info_list[end-1])
             if n_levels % 2 == 0
                 odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
             else
@@ -1453,7 +1488,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     end
     # This is a temporary hack! schur_complement_buffer_list needs to be a Vector of NTuple(NTuple) of (possibly rectangular) buffers to actually support multiple variables.
     schur_complement_buffer_list =
-        [((get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer),),)
+        [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
          for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
     if final_level > 1 && !final_sc_solver_is_mumps
         if level_info_list[final_level-1][1].level_shared_comm != MPI.COMM_NULL
