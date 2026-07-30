@@ -608,7 +608,9 @@ MPI.Barrier(comm::FakeComm) = nothing
     block_sizes::Vector{Ti}
     nblock::Vector{Ti}
     global_size::Ti
+    global_offset::Ti
     global_bottom_vector_size::Ti
+    global_bottom_vector_offset::Ti
     top_vector_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     iblock_list::Matrix{Ti}
@@ -634,11 +636,12 @@ end
 
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
 # for testing of the index generation.
-function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti},
-                      block_sizes::Vector{Ti}, nblock::Vector{Ti}, global_size::Ti,
-                      is_top_level::Bool, is_bottom_level::Bool,
-                      distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
-                      shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
+function get_level_info_for_variable(
+             dimensions::Vector{<:Dimension}, level_indices::Vector{Ti},
+             block_sizes::Vector{Ti}, nblock::Vector{Ti}, global_size::Ti,
+             global_offset::Ti, global_bottom_vector_offset::Ti, is_top_level::Bool,
+             is_bottom_level::Bool, distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
+             shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
         if length(dimensions) != length(block_sizes)
             error("dimensions and block_sizes should be the same length")
@@ -650,7 +653,8 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
             # This processor does no work on this level, so just fill level_info with dummy
             # values.
             return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
-                             global_bottom_vector_size=0, top_vector_indices=Ti[],
+                             global_offset=0, global_bottom_vector_size=0,
+                             global_bottom_vector_offset=0, top_vector_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              local_top_vector_a_block_offset_indices=Vector{Ti}[],
@@ -668,73 +672,88 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
                              level_shared_comm=shared_comm)
         end
 
+        other_dimensions = setdiff(1:length(dimensions), variable_dimensions)
+
         # Divide the grid into blocks where the number of elements in a block in each
         # dimension is given by `block_sizes`.
-        boundary_indices = Ti[]
-        function get_boundary_indices!(idim, this_dim, flat_i)
-            if this_dim ≤ 0
-                push!(boundary_indices, flat_i + 1)
+        # The grid for a certain variable can only be divided once the block size reaches
+        # the total number of elements in all of the 'other dimensions' - otherwise the
+        # off-diagonal coupling from the variable (which couples all points in the 'other
+        # dimensions') would couple the interiors of different blocks.
+        # Note `all()` returns `true` when the generator expression has no entries, i.e.
+        # when there are no 'other dimensions'.
+        split_variable = all(block_sizes[id] == dimensions[id].nelement
+                             for id ∈ other_dimensions)
+        if !split_variable
+            boundary_indices = level_indices
+            interior_indices = Ti[]
+        else
+            boundary_indices = Ti[]
+            function get_boundary_indices!(idim, this_dim, flat_i)
+                if this_dim ≤ 0
+                    push!(boundary_indices, flat_i + 1)
+                    return nothing
+                end
+
+                next_dim = this_dim - 1
+                d = dimensions[this_dim]
+                n = d.n
+                n_local = d.n_local
+                flat_i *= n
+
+                # Add offset for distributed blocks.
+                flat_i += d.irank * (n_local - 1)
+
+                if idim == this_dim
+                    bs = block_sizes[idim]
+                    nelement_local = d.nelement ÷ d.nrank
+                    ngrid = d.ngrid
+
+                    if d.remove_boundaries || d.periodic
+                        # Always add first and last points to 'boundary points'.
+                        get_boundary_indices!(idim, next_dim, flat_i)
+                        get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
+                    else
+                        # Keep boundary points on first/last shared-memory blocks of processes.
+                        if d.irank > 0
+                            get_boundary_indices!(idim, next_dim, flat_i)
+                        end
+                        if d.irank < d.nrank - 1
+                            get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
+                        end
+                    end
+
+                    # Add the interior boundary points
+                    nblocks = (nelement_local + bs - 1) ÷ bs
+                    for b ∈ 1:nblocks-1
+                        # Note we do not `+1` to boundary here because it is more convenient to
+                        # construct `flat_i` as a 0-based index, and only convert to 1-based just
+                        # before pushing into `boundary_indices`.
+                        boundary = b * bs * (ngrid - 1)
+                        if boundary < n_local
+                            get_boundary_indices!(idim, next_dim, flat_i + boundary)
+                        end
+                    end
+                else
+                    # Add all points from `d`.
+                    for i ∈ 0:n_local-1
+                        get_boundary_indices!(idim, next_dim, flat_i + i)
+                    end
+                end
+
                 return nothing
             end
-
-            next_dim = this_dim - 1
-            d = dimensions[this_dim]
-            n = d.n
-            n_local = d.n_local
-            flat_i *= n
-
-            # Add offset for distributed blocks.
-            flat_i += d.irank * (n_local - 1)
-
-            if idim == this_dim
-                bs = block_sizes[idim]
-                nelement_local = d.nelement ÷ d.nrank
-                ngrid = d.ngrid
-
-                if d.remove_boundaries || d.periodic
-                    # Always add first and last points to 'boundary points'.
-                    get_boundary_indices!(idim, next_dim, flat_i)
-                    get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
-                else
-                    # Keep boundary points on first/last shared-memory blocks of processes.
-                    if d.irank > 0
-                        get_boundary_indices!(idim, next_dim, flat_i)
-                    end
-                    if d.irank < d.nrank - 1
-                        get_boundary_indices!(idim, next_dim, flat_i + n_local - 1)
-                    end
-                end
-
-                # Add the interior boundary points
-                nblocks = (nelement_local + bs - 1) ÷ bs
-                for b ∈ 1:nblocks-1
-                    # Note we do not `+1` to boundary here because it is more convenient to
-                    # construct `flat_i` as a 0-based index, and only convert to 1-based just
-                    # before pushing into `boundary_indices`.
-                    boundary = b * bs * (ngrid - 1)
-                    if boundary < n_local
-                        get_boundary_indices!(idim, next_dim, flat_i + boundary)
-                    end
-                end
-            else
-                # Add all points from `d`.
-                for i ∈ 0:n_local-1
-                    get_boundary_indices!(idim, next_dim, flat_i + i)
-                end
+            for idim ∈ 1:length(dimensions)
+                get_boundary_indices!(idim, length(dimensions), 0)
             end
+            # There will be duplicated points in boundary_indices. Sort the list and remove
+            # the duplicates.
+            sort!(boundary_indices)
+            unique!(boundary_indices)
 
-            return nothing
+            # Interior indices are all the indices in level_indices that are not boundary indices.
+            interior_indices = setdiff(level_indices, boundary_indices)
         end
-        for idim ∈ 1:length(dimensions)
-            get_boundary_indices!(idim, length(dimensions), 0)
-        end
-        # There will be duplicated points in boundary_indices. Sort the list and remove
-        # the duplicates.
-        sort!(boundary_indices)
-        unique!(boundary_indices)
-
-        # Interior indices are all the indices in level_indices that are not boundary indices.
-        interior_indices = setdiff(level_indices, boundary_indices)
 
         # Get interior indices of the blocks that should be inverted by this processor.
         nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
@@ -1325,11 +1344,16 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     n_levels = length(block_sizes_list)
     level_info_list = Vector{NTuple{Nvar,LevelInfo{ind_type,typeof(shared_comm)}}}(undef, n_levels)
-    level_indices = get_global_indices(dimensions_without_periodic,
-                                       collect(1:prod(d.n_local for d ∈ dimensions)))
+    level_indices = Tuple(get_global_indices(dimensions_without_periodic[vdims],
+                                             collect(1:prod(d.n_local for d ∈ dimensions[vdims])))
+                          for vdims ∈ variable_dimensions)
     level_global_size = prod(d.n for d ∈ dimensions)
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
+    # When variable_dimensions has duplicate indices, we can re-use a single LevelInfo for
+    # each of the duplicates.
+    duplicate_var_first_position = Tuple(findfirst(variable_dimensions .== vdim)
+                                         for vdim ∈ variable_dimensions)
     for (level, (block_sizes, nblock, total_local_nblock)) ∈
             enumerate(zip(block_sizes_list, nblock_list, total_local_nblock_list))
         if level == 1 || level == n_levels
@@ -1353,11 +1377,26 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         # Keep selecting the subset of `1:prod(d.n_local for d ∈ dimensions)` that is
         # involved in each successive level.
-        this_level_info = split_matrix(dims, level_indices, block_sizes, nblock,
-                                       level_global_size, level==1, level==n_levels,
-                                       distributed_comm, level_shared_comm)
-        level_info_list[level] = (this_level_info,) # temporary!!!! need to create level_info for each variable to actually support multiple variables
-        level_indices = this_level_info.bottom_vector_indices
+        this_level_info_list = LevelInfo{Ti,typeof(level_shared_comm)}(undef, Nvar)
+        global_offset = 0
+        global_bottom_vector_offset = 0
+        for (ivar, this_var_dims) ∈ enumerate(variable_dimensions)
+            vfirst = duplicate_var_first_position[ivar]
+            if vfirst < ivar
+                this_level_info = this_level_info_list[vfirst]
+            else
+                this_level_info = get_level_info_for_variable(
+                                      dims, this_var_dims, level_indices, block_sizes,
+                                      global_offset, global_bottom_vector_offset, nblock,
+                                      level_global_size, level==1, level==n_levels,
+                                      distributed_comm, level_shared_comm)
+            end
+            this_level_info_list[ivar] = this_level_info
+            global_offset += this_level_info.global_size
+            global_bottom_vector_offset += this_level_info.global_bottom_vector_size
+        end
+        level_info_list[level] = Tuple(this_level_info_list...)
+        level_indices = Tuple(li.bottom_vector_indices for li ∈ level_info_list[level])
         level_global_size = this_level_info.global_bottom_vector_size
     end
 
