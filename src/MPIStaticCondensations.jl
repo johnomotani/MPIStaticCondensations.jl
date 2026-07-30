@@ -1593,7 +1593,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              this_level_shared_comm,
                                              level_synchronize_shared,
                                              level_allocate_shared_float,
-                                             level_allocate_shared_int,
                                              block_synchronize_shared,
                                              block_allocate_shared_float,
                                              block_allocate_shared_int,

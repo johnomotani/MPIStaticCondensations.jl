@@ -29,11 +29,10 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                  schur_complement_buffer_list, second_last_schur_complement_buffer,
                  schur_complement_solver, use_shared_blocks::Bool,
                  sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
-                 allocate_shared_float::Faf, allocate_shared_int::Fai,
-                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
-                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
-                 C_dense_buffer_storage,
-                 check_lu::Bool) where {Fsync,Faf,Fai,Fbsync,Fbaf,Fbai}
+                 allocate_shared_float::Faf, block_synchronize_shared::Fbsync,
+                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
+                 right_multiplication_buffer_storage, C_dense_buffer_storage,
+                 check_lu::Bool) where {Fsync,Faf,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
             # This process should do no work
