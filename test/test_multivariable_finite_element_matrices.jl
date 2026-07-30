@@ -16,11 +16,12 @@ const stencil_matrix = ["element" "empty"   "point"   "element";
                         "empty"   "element" "element" "point";
                         "point"   "element" "empty"   "element"]
 
-function test_matrix(dimensions::Vector{<:Dimension}, variable_dimensions::Tuple,
-                     n_shared::Integer, random_seed::Integer, sparse_stencils::Bool,
-                     block_sizes_heuristic, reduce_proc_count_with_blocks::Bool,
-                     sparse_C_blocks::Bool, mumps_fill_in_threshold::AbstractFloat,
-                     tol::AbstractFloat)
+function test_multivariable_matrix(
+             dimensions::Vector{<:Dimension}, variable_dimensions::Tuple,
+             n_shared::Integer, random_seed::Integer, sparse_stencils::Bool,
+             block_sizes_heuristic, reduce_proc_count_with_blocks::Bool,
+             sparse_C_blocks::Bool, mumps_fill_in_threshold::AbstractFloat,
+             tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -136,11 +137,10 @@ function test_matrix(dimensions::Vector{<:Dimension}, variable_dimensions::Tuple
     return nothing
 end
 
-function test_dimension_combinations(nelement_list, ngrid_list, variable_dimensions, rank,
-                                     comm_size, n_shared, tol, this_seed;
-                                     all_sparse_stencils=true,
-                                     all_block_sizes_heuristics=true, all_periodic=true,
-                                     all_dense_boundaries=true, both_remove_procs=true)
+function test_multivariable_dimension_combinations(
+             nelement_list, ngrid_list, variable_dimensions, rank, comm_size, n_shared,
+             tol, this_seed; all_sparse_stencils=true, all_block_sizes_heuristics=true,
+             all_periodic=true, all_dense_boundaries=true, both_remove_procs=true)
     if length(nelement_list) != length(ngrid_list)
         error("nelement_list and ngrid_list must have the same length")
     end
@@ -191,16 +191,16 @@ function test_dimension_combinations(nelement_list, ngrid_list, variable_dimensi
                                           this_irank_list, this_nrank_list, periodic_list,
                                           dense_boundaries_list))]
 
-            test_matrix(dimensions, variable_dimensions, n_shared, this_seed,
-                        sparse_stencils, block_sizes_heuristic,
-                        reduce_proc_count_with_blocks, sparse_C_blocks,
-                        mumps_fill_in_threshold, tol)
+            test_multivariable_matrix(dimensions, variable_dimensions, n_shared,
+                                      this_seed, sparse_stencils, block_sizes_heuristic,
+                                      reduce_proc_count_with_blocks, sparse_C_blocks,
+                                      mumps_fill_in_threshold, tol)
             this_seed += 1
         end
     end
 end
 
-function test_finite_element_matrices()
+function test_multivariable_finite_element_matrices()
     if !MPI.Initialized()
         MPI.Init()
     end
@@ -213,39 +213,39 @@ function test_finite_element_matrices()
             @testset "1D" begin
                 tol = 4.0e-11
                 variable_dimensions_1d = (nothing, [1], [1], [1])
-                test_dimension_combinations([1], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1000)
-                test_dimension_combinations([2], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1001)
-                test_dimension_combinations([2], [4], (nothing, nothing, nothing, nothing), rank, comm_size, n_shared, tol, 1002)
-                test_dimension_combinations([2], [5], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1003; all_block_sizes_heuristics=false)
-                test_dimension_combinations([3], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1004; all_block_sizes_heuristics=false)
-                test_dimension_combinations([4], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1005; all_block_sizes_heuristics=false)
-                test_dimension_combinations([5], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1006)
-                test_dimension_combinations([6], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1007; all_block_sizes_heuristics=false)
-                test_dimension_combinations([7], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1008; all_block_sizes_heuristics=false)
-                test_dimension_combinations([8], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1009; all_block_sizes_heuristics=false)
-                test_dimension_combinations([16], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1010; all_block_sizes_heuristics=false)
-                test_dimension_combinations([32], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1000)
+                test_multivariable_dimension_combinations([2], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1001)
+                test_multivariable_dimension_combinations([2], [4], (nothing, nothing, nothing, nothing), rank, comm_size, n_shared, tol, 1002)
+                test_multivariable_dimension_combinations([2], [5], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1003; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([3], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1004; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([4], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1005; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([5], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1006)
+                test_multivariable_dimension_combinations([6], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1007; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([7], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1008; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([8], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1009; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([16], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1010; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([32], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
                 tol = 1.0e-6
                 variable_dimensions_2d = (nothing, [2], [2], [2])
-                test_dimension_combinations([1, 1], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2000)
-                test_dimension_combinations([1, 2], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2001)
-                test_dimension_combinations([1, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
-                test_dimension_combinations([1, 3], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2003; all_block_sizes_heuristics=false)
-                test_dimension_combinations([2, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2004; all_block_sizes_heuristics=false)
-                test_dimension_combinations([2, 3], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2005; all_block_sizes_heuristics=false)
-                test_dimension_combinations([2, 4], [3, 5], ([1], nothing, [2], nothing), rank, comm_size, n_shared, tol, 2006; all_block_sizes_heuristics=false)
-                test_dimension_combinations([1, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2007; all_block_sizes_heuristics=false)
-                test_dimension_combinations([1, 16], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2008; all_block_sizes_heuristics=false)
-                test_dimension_combinations([2, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2009; all_block_sizes_heuristics=false)
-                test_dimension_combinations([4, 4], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2010; all_block_sizes_heuristics=false)
-                test_dimension_combinations([4, 4], [5, 5], (nothing, nothing, nothing, [1, 2]), rank, comm_size, n_shared, tol, 2011)
-                test_dimension_combinations([1, 32], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2012; all_block_sizes_heuristics=false)
-                test_dimension_combinations([2, 16], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2013; all_block_sizes_heuristics=false)
-                test_dimension_combinations([4, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2014; all_block_sizes_heuristics=false)
-                test_dimension_combinations([4, 8], [5, 5], ([2], nothing, [1], [2]), rank, comm_size, n_shared, tol, 2015; all_block_sizes_heuristics=false)
-                test_dimension_combinations([16, 15], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2016)
+                test_multivariable_dimension_combinations([1, 1], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2000)
+                test_multivariable_dimension_combinations([1, 2], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2001)
+                test_multivariable_dimension_combinations([1, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 3], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2003; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2004; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 3], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2005; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 4], [3, 5], ([1], nothing, [2], nothing), rank, comm_size, n_shared, tol, 2006; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2007; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 16], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2008; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2009; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([4, 4], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2010; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([4, 4], [5, 5], (nothing, nothing, nothing, [1, 2]), rank, comm_size, n_shared, tol, 2011)
+                test_multivariable_dimension_combinations([1, 32], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2012; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 16], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2013; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([4, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2014; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([4, 8], [5, 5], ([2], nothing, [1], [2]), rank, comm_size, n_shared, tol, 2015; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([16, 15], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2016)
             end
             @testset "3D" begin
                 tol = 2.0e-5
