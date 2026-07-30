@@ -1142,10 +1142,10 @@ function get_level_info_for_variable(
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
                          local_top_vector_a_block_indices=a_block_indices,
-                         local_top_vector_a_block_offset_indices=a_block_indices, # temporary!!! need to add the offset to this to actually support multiple variables
+                         local_top_vector_a_block_offset_indices=a_block_indices.+global_offset,
                          a_block_off_diagonal_indices=a_block_off_diagonal_indices,
                          a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
-                         a_block_off_diagonal_bottom_vector_offset_indices=a_block_off_diagonal_bottom_vector_indices, # temporary!!! need to add the offset to this to actually support multiple variables
+                         a_block_off_diagonal_bottom_vector_offset_indices=a_block_off_diagonal_bottom_vector_indices.+global_bottom_vector_offset,
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
