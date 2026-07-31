@@ -847,6 +847,31 @@ end
 function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
                        variable_dimensions, comm::Union{MPI.Comm},
                        distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
+    nd = length(dimensions)
+    variable_dimensions = Tuple(vdim === nothing ? (1:nd) : vdim
+                                for vdim ∈ variable_dimensions)
+    x_global_list = Vector{eltype(x_local)}[]
+    offset = 0
+    for vdims ∈ variable_dimensions
+        this_dimensions = dimensions[vdims]
+        var_length_local = prod(d.n_local for d ∈ this_dimensions)
+        this_x_local = @view x_local[offset+1:offset+var_length_local]
+        push!(x_global_list,
+              gather_single_variable_vector(this_x_local, this_dimensions, comm,
+                                            distributed_comm, shared_comm))
+        offset += var_length_local
+    end
+
+    x_global = vcat(x_global_list...)
+
+    return x_global
+end
+
+function gather_single_variable_vector(x_local::AbstractVector,
+                                       dimensions::Vector{<:Dimension},
+                                       comm::Union{MPI.Comm},
+                                       distributed_comm::Union{MPI.Comm,Nothing},
+                                       shared_comm::MPI.Comm)
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -855,9 +880,6 @@ function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
 
     x_global = nothing
     if rank == 0
-        if variable_dimensions !== nothing
-            error("multi variable not supported yet")
-        end
         n_total = prod(d.n for d ∈ dimensions)
         x_global_with_dups = fill(NaN, n_total)
 
