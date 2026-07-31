@@ -26,14 +26,14 @@ struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
         block_indices = block_indices[non_empty_blocks]
         block_range_offsets = [vcat(0, cumsum(length(vbi) for vbi ∈ bi[1:end-1]))
                                for bi ∈ block_indices]
-        block_ranges = [Tuple(voffset .+ 1:length(vbi)
+        block_ranges = [Tuple(voffset .+ (1:length(vbi))
                               for (vbi, voffset) ∈ zip(bi, offsets))
                         for (bi, offsets) ∈ zip(block_indices, block_range_offsets)]
         block_vector_indices = [vcat(bvbi...) for bvbi ∈ block_vector_indices[non_empty_blocks]]
         B_column_indices = B_column_indices[non_empty_blocks]
         B_column_range_offsets = [vcat(0, cumsum(length(vBci) for vBci ∈ Bci[1:end-1]))
                                   for Bci ∈ B_column_indices]
-        B_column_ranges = [Tuple(voffset .+ 1:length(vBci)
+        B_column_ranges = [Tuple(voffset .+ (1:length(vBci))
                                  for (vBci, voffset) ∈ zip(Bci, offsets))
                            for (Bci, offsets) ∈ zip(B_column_indices, B_column_range_offsets)]
         block_sizes = [sum(length(vbi) for vbi ∈ bi) for bi ∈ block_indices]
@@ -89,7 +89,7 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
         block_comm_size = MPI.Comm_size(block_comm)
 
         block_offsets = vcat(Ti(0), cumsum(length(bi) for bi ∈ block_indices[1:end-1]))
-        block_ranges = Tuple(block_offsets[i] .+ 1:length(bi)
+        block_ranges = Tuple(block_offsets[i] .+ (1:length(bi))
                              for (i, bi) ∈ enumerate(block_indices))
 
         block_vector_indices = vcat(block_vector_indices...)
@@ -200,11 +200,12 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
                             last_i = colptr[j2+1]-1
                             flat_i = max(searchsortedlast(@view(rowval[first_i:last_i]), first_row) - 1, 1) + first_i - 1
                             for (i1, i2) ∈ zip(rowrange, rowinds)
-                                while flat_i ≤ last_i && rowval[flat_i] < i2
+                                while flat_i < last_i && rowval[flat_i] < i2
                                     flat_i += 1
                                 end
-                                if rowval[flat_i] == i2
+                                if flat_i ≤ last_i && rowval[flat_i] == i2
                                     factors[i1,j1] = nzval[flat_i]
+                                    flat_i += 1
                                 else
                                     factors[i1,j1] = 0.0
                                 end
@@ -220,7 +221,6 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
                             col_rowval = rowval_list[j2]
                             row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
                             last_row = length(col_rowval)
-                            flat_i = row_i + first_i - 1
                             for (i1, i2) ∈ zip(rowrange, rowinds)
                                 while row_i < last_row && col_rowval[row_i] < i2
                                     row_i += 1
@@ -292,7 +292,6 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
                         col_rowval = rowval_list[j2]
                         row_i = max(searchsortedlast(col_rowval, first_row) - 1, 1)
                         last_row = length(col_rowval)
-                        flat_i = row_i + first_i - 1
                         for (i1, i2) ∈ zip(rowrange, rowinds)
                             while row_i < last_row && col_rowval[row_i] < i2
                                 row_i += 1

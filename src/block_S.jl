@@ -37,6 +37,7 @@ end
 struct BlockDenseS{Nvar,Ti,Tm,Tind}
     matrix::Tm
     indices::NTuple{Nvar,Tind}
+    ranges::NTuple{Nvar,UnitRange{Ti}}
     partial_indices::NTuple{Nvar,Tind}
     partial_ranges::NTuple{Nvar,UnitRange{Ti}}
     column_range_partial::UnitRange{Ti}
@@ -54,16 +55,18 @@ struct BlockDenseS{Nvar,Ti,Tm,Tind}
 
         block_n = Tuple(length(bvi) for bvi ∈ local_bottom_vector_indices)
         block_n_per_proc = Tuple((nc + shared_comm_size - 1) ÷ shared_comm_size for nc ∈ block_n)
-        block_range_offsets = vcat(0, cumsum(block_n[1:Nvar-1]))
-        partial_ranges = Tuple(offset .+ shared_comm_rank*cpp+1:min((shared_comm_rank+1)*cpp,nc)
-                                      for (offset, cpp, nc) ∈ zip(block_range_offsets,
-                                                                  block_n_per_proc,
-                                                                  block_n))
+        block_range_offsets = vcat(0, cumsum(block_n[1:Nvar-1])...)
+        ranges = Tuple(offset .+ (1:n) for (offset, n) ∈ zip(block_range_offsets,
+                                                             block_n))
+        partial_ranges_without_offset = Tuple(shared_comm_rank*cpp+1:min((shared_comm_rank+1)*cpp,nc)
+                                              for (cpp, nc) ∈ zip(block_n_per_proc, block_n))
+        partial_ranges = Tuple(offset .+ pr for (offset, pr) ∈ zip(block_range_offsets,
+                                                                   partial_ranges_without_offset))
         partial_indices = Tuple(inds[pr] for (inds, pr) ∈ zip(local_bottom_vector_indices,
-                                                              partial_ranges))
+                                                              partial_ranges_without_offset))
 
         return new{Nvar,Ti,Tm,Tind}(
-                   matrix, local_bottom_vector_indices, partial_indices,
+                   matrix, local_bottom_vector_indices, ranges, partial_indices,
                    partial_ranges, column_range_partial)
     end
 end
@@ -190,10 +193,11 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
         # `schur_complement`.
         sc_matrix = schur_complement.matrix
         indices = schur_complement.indices
+        ranges = schur_complement.ranges
         partial_indices = schur_complement.partial_indices
         partial_ranges = schur_complement.partial_ranges
         for (vcol, ci, cr) ∈ zip(1:Nvar, partial_indices, partial_ranges),
-                (vrow, ri) ∈ zip(1:Nvar, indices)
+                (vrow, ri, rr) ∈ zip(1:Nvar, indices, ranges)
             A_variable_block = full_A[vrow][vcol]
             first_row = first(ri)
             if isa(A_variable_block, AbstractSparseMatrixCSC)
@@ -210,7 +214,7 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
 
                     last_full_row = full_A_rowval[full_last_i]
                     full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
-                    for (i, full_i) ∈ enumerate(ri)
+                    for (i, full_i) ∈ zip(rr, ri)
                         while full_flat_i < full_last_i && full_A_rowval[full_flat_i] < full_i
                             full_flat_i += 1
                         end
@@ -242,7 +246,7 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                     last_full_row = full_col_rv[end]
                     last_full_row_i = length(full_col_rv)
                     full_row_i = max(searchsortedlast(full_col_rv, first_row) - 1, 1)
-                    for (i, full_i) ∈ enumerate(ri)
+                    for (i, full_i) ∈ enumerate(rr, ri)
                         while full_row_i < last_full_row_i && full_col_rv[full_row_i] < full_i
                             full_row_i += 1
                         end

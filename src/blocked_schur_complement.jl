@@ -105,7 +105,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                         Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
                         Tuple(li.local_top_vector_a_block_offset_indices[1] for li ∈ level_info),
                         Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
-                        Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
+                        Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
                         block_comm_rank, block_comm_size, block_allocate_shared_float,
                         block_synchronize_shared)
                 C_vector_intermediate_buffer =
@@ -140,7 +140,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                     extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
                     extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_offset_indices),
                     extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
-                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_indices))
+                    extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_offset_indices))
             C_vector_intermediate_buffer =
                 allocate_shared_float(n_hypercube_positions, nbottom)
             if shared_comm_rank == 0

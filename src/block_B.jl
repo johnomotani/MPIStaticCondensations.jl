@@ -20,7 +20,7 @@ struct BlockAinvDotBSerial{Nvar,Tf,Ti,Tb,Trange}
         block_rowinds = block_rowinds[non_empty_blocks]
         block_row_range_offsets = [vcat(0, cumsum(length(vri) for vri ∈ ri[1:end-1]))
                                    for ri ∈ block_rowinds]
-        block_row_ranges = [Tuple(voffset .+ 1:length(vri)
+        block_row_ranges = [Tuple(voffset .+ (1:length(vri))
                                   for (vri, voffset) ∈ zip(ri, offsets))
                             for (ri, offsets) ∈ zip(block_rowinds, block_row_range_offsets)]
         block_vector_rowinds = [vcat(bvri...) for bvri ∈ block_vector_rowinds[non_empty_blocks]]
@@ -28,7 +28,7 @@ struct BlockAinvDotBSerial{Nvar,Tf,Ti,Tb,Trange}
         block_colinds = block_colinds[non_empty_blocks]
         block_col_range_offsets = [vcat(0, cumsum(length(vci) for vci ∈ ci[1:end-1]))
                                    for ci ∈ block_colinds]
-        block_col_ranges = [Tuple(voffset .+ 1:length(vci)
+        block_col_ranges = [Tuple(voffset .+ (1:length(vci))
                                   for (vci, voffset) ∈ zip(ci, offsets))
                             for (ci, offsets) ∈ zip(block_colinds, block_col_range_offsets)]
         blocks = Matrix{Tf}[]
@@ -162,30 +162,34 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval = A_variable_block.rowval
                 full_A_nzval = A_variable_block.nzval
-                first_irow = first(rr)
+                if length(full_A_nzval) == 0
+                    block[rr,cr] .= 0.0
+                    continue
+                end
                 last_irow = last(rr)
                 first_row = first(ri)
+                nrow = length(ri)
                 for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     last_i = full_A_colptr[j2+1] - 1
                     col_rv = @view full_A_rowval[first_i:last_i]
                     flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                    i1 = first_irow
-                    while i1 ≤ last_irow
+                    i1 = 1
+                    while i1 ≤ nrow
                         full_A_row = full_A_rowval[flat_i]
                         block_global_row = ri[i1]
                         if full_A_row == block_global_row
-                            block[i1,j1] = full_A_nzval[flat_i]
+                            block[rr[i1],j1] = full_A_nzval[flat_i]
                             i1 += 1
                             flat_i += 1
                         elseif full_A_row > block_global_row
-                            block[i1,j1] = 0.0
+                            block[rr[i1],j1] = 0.0
                             i1 += 1
                         else
                             flat_i += 1
                         end
-                        if flat_i > last_i
-                            block[i1:last_irow,j1] .= 0.0
+                        if flat_i > last_i && i1 ≤ nrow
+                            block[rr[i1]:last_irow,j1] .= 0.0
                             break
                         end
                     end
@@ -217,30 +221,34 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval_list = A_variable_block.rowval_list
                 full_A_nzval = A_variable_block.nzval
-                first_irow = first(rr)
+                if length(full_A_nzval) == 0
+                    block[rr,cr] .= 0.0
+                    continue
+                end
                 last_irow = last(rr)
                 first_row = first(ri)
+                nrow = length(ri)
                 for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     col_rv = full_A_rowval_list[j2]
                     last_row_i = length(col_rv)
                     row_i = max(searchsortedlast(col_rv, first_row)-1,1)
-                    i1 = first_irow
-                    while i1 ≤ last_irow
+                    i1 = 1
+                    while i1 ≤ nrow
                         full_A_row = col_rv[row_i]
                         block_global_row = ri[i1]
                         if full_A_row == block_global_row
-                            block[i1,j1] = full_A_nzval[row_i+first_i-1]
+                            block[rr[i1],j1] = full_A_nzval[row_i+first_i-1]
                             i1 += 1
                             row_i += 1
                         elseif full_A_row > block_global_row
-                            block[i1,j1] = 0.0
+                            block[rr[i1],j1] = 0.0
                             i1 += 1
                         else
                             row_i += 1
                         end
-                        if row_i > last_row_i
-                            block[i1:last_irow,j1] .= 0.0
+                        if row_i > last_row_i && i1 ≤ nrow
+                            block[rr[i1]:last_irow,j1] .= 0.0
                             break
                         end
                     end
@@ -270,31 +278,35 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
             full_A_colptr = A_variable_block.colptr
             full_A_rowval = A_variable_block.rowval
             full_A_nzval = A_variable_block.nzval
-            first_irow = first(rr)
+            if length(full_A_nzval) == 0
+                block[rr,cr] .= 0.0
+                continue
+            end
             last_irow = last(rr)
             first_row = first(ri)
+            nrow = length(ri)
             for j1 ∈ pcr
                 j2 = ci[j1]
                 first_i = full_A_colptr[j2]
                 last_i = full_A_colptr[j2+1] - 1
                 col_rv = @view full_A_rowval[first_i:last_i]
                 flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                i1 = first_irow
-                while i1 ≤ last_irow
+                i1 = 1
+                while i1 ≤ nrow
                     full_A_row = full_A_rowval[flat_i]
                     block_global_row = block_rowinds[i1]
                     if full_A_row == block_global_row
-                        block[i1,j1] = full_A_nzval[flat_i]
+                        block[rr[i1],j1] = full_A_nzval[flat_i]
                         i1 += 1
                         flat_i += 1
                     elseif full_A_row > block_global_row
-                        block[i1,j1] = 0.0
+                        block[rr[i1],j1] = 0.0
                         i1 += 1
                     else
                         flat_i += 1
                     end
-                    if flat_i > last_i
-                        block[i1:last_irow,j1] .= 0.0
+                    if flat_i > last_i && i1 ≤ nrow
+                        block[rr[i1]:last_irow,j1] .= 0.0
                         break
                     end
                 end
@@ -323,6 +335,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
             full_A_colptr = A_variable_block.colptr
             full_A_rowval_list = A_variable_block.rowval_list
             full_A_nzval = A_variable_block.nzval
+            if length(full_A_nzval) == 0
+                block[rr,cr] .= 0.0
+                continue
+            end
             last_irow = length(ri)
             first_row = first(ri)
             for j1 ∈ pcr
@@ -345,7 +361,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
                     else
                         row_i += 1
                     end
-                    if row_i > last_row_i
+                    if row_i > last_row_i && i1 ≤ last_irow
                         block[i1:last_irow,j1] .= 0.0
                         break
                     end

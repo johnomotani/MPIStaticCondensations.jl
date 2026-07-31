@@ -730,9 +730,9 @@ function assemble_and_scatter_global_multi_variable_matrix(
     else
         if rank == 0
             global_matrix_tuple = var_tuple_from_result(1)
-            global_matrix = BlockArray(reshape([global_matrix_tuple[flat_i%n_variables+1][flat_i÷n_variables+1]
-                                                for flat_i ∈ 0:n_variables^2-1],
-                                               n_variables, n_variables))
+            global_matrix = mortar(reshape([global_matrix_tuple[flat_i%n_variables+1][flat_i÷n_variables+1]
+                                            for flat_i ∈ 0:n_variables^2-1],
+                                           n_variables, n_variables))
         else
             global_matrix = nothing
         end
