@@ -152,14 +152,14 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
     else
         reduce_proc_count_with_blocks_list = (false,)
     end
-    @testset "nelement_list=$nelement_list, ngrid_list=$ngrid_list, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks" for
+    @testset "ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks" for
             sparse_stencils ∈ sparse_stencils_list,
             reduce_proc_count_with_blocks ∈ reduce_proc_count_with_blocks_list
         if rank == 0
-            println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks")
+            println("* n_sh=$n_shared, ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks")
         end
 
-        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, block_sizes_heuristic=$block_sizes_heuristic, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold" for
+        @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
@@ -169,7 +169,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ (1.0, 0.1)
             if rank == 0
-                println("  - n_shared=$n_shared, sparse_stencils=$sparse_stencils, this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, block_sizes_heuristic=$block_sizes_heuristic, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold")
+                println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
             end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
