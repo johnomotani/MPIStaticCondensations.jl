@@ -729,14 +729,14 @@ function assemble_and_scatter_global_multi_variable_matrix(
         return global_data, Tuple(var_tuple_from_result(i) for i ∈ 2:5)...
     else
         if rank == 0
-            global_matrix_tuple = var_tuple_from_result[1]
+            global_matrix_tuple = var_tuple_from_result(1)
             global_matrix = BlockArray(reshape([global_matrix_tuple[flat_i%n_variables+1][flat_i÷n_variables+1]
                                                 for flat_i ∈ 0:n_variables^2-1],
                                                n_variables, n_variables))
         else
             global_matrix = nothing
         end
-        local_matrix = var_tuple_from_result[2]
+        local_matrix = var_tuple_from_result(2)
         return global_matrix, local_matrix
     end
 end
@@ -822,6 +822,11 @@ function assemble_and_scatter_global_multi_variable_rhs(
              dimensions::Vector{<:Dimension}, variable_dimensions, comm::MPI.Comm,
              distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm,
              allocate_shared_float, rng)
+
+    nd = length(dimensions)
+    variable_dimensions = Tuple(vdims === nothing ? (1:nd) : vdims
+                                for vdims ∈ variable_dimensions)
+
     rhs_global, rhs_local =
         assemble_and_scatter_global_rhs(dimensions[variable_dimensions[1]], comm,
                                         distributed_comm, shared_comm,

@@ -29,12 +29,14 @@ function get_shared_sparse_buffer(buffer_info::Matrix{<:NamedTuple},
         flat_n = bi.nzval_length
         nzval = @view storage[offset+1:offset+flat_n]
 
-        buffer[i] = SharedSparseBuffer(bi.m, bi,n, bi.colptr, bi.rowval_list, nzval)
+        buffer[i] = SharedSparseBuffer(bi.m, bi.n, bi.colptr, bi.rowval_list, nzval)
 
         offset += flat_n
     end
 
-    return buffer
+    Nvar = size(buffer_info, 1)
+
+    return ntuple(ivar->ntuple(jvar->buffer[ivar,jvar], Nvar), Nvar)
 end
 
 function get_dim_indices!(dimensions, block_sizes, flat_i)

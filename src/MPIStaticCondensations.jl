@@ -612,6 +612,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     global_bottom_vector_size::Ti
     global_bottom_vector_offset::Ti
     top_vector_indices::Vector{Ti}
+    top_vector_offset_indices::Vector{Ti}
     local_top_vector_indices::Vector{Ti}
     iblock_list::Matrix{Ti}
     local_top_vector_a_block_indices::Vector{Vector{Ti}}
@@ -624,6 +625,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     subgroup_size::Ti
     block_comm::Tcomm
     bottom_vector_indices::Vector{Ti}
+    bottom_vector_offset_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     local_bottom_vector_no_overlap_indices::Vector{Ti}
     local_bottom_vector_no_overlap_sub_selection_indices::Vector{Ti}
@@ -637,10 +639,11 @@ end
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
 # for testing of the index generation.
 function get_level_info_for_variable(
-             dimensions::Vector{<:Dimension}, level_indices::Vector{Ti},
-             block_sizes::Vector{Ti}, nblock::Vector{Ti}, global_size::Ti,
-             global_offset::Ti, global_bottom_vector_offset::Ti, is_top_level::Bool,
-             is_bottom_level::Bool, distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
+             dimensions::Vector{<:Dimension}, variable_dimensions::AbstractVector{Ti},
+             level_indices::Vector{Ti}, block_sizes::Vector{Ti}, nblock::Vector{Ti},
+             global_size::Ti, global_offset::Ti, global_bottom_vector_offset::Ti,
+             is_top_level::Bool, is_bottom_level::Bool,
+             distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
              shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
         if length(dimensions) != length(block_sizes)
@@ -655,6 +658,7 @@ function get_level_info_for_variable(
             return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
                              global_offset=0, global_bottom_vector_size=0,
                              global_bottom_vector_offset=0, top_vector_indices=Ti[],
+                             top_vector_offset_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              local_top_vector_a_block_offset_indices=Vector{Ti}[],
@@ -664,6 +668,7 @@ function get_level_info_for_variable(
                              a_block_off_diagonal_bottom_vector_offset_indices=Vector{Ti}[],
                              n_subgroups=0, subgroup_i=-1, subgroup_size=0,
                              block_comm=shared_comm, bottom_vector_indices=Ti[],
+                             bottom_vector_offset_indices=Ti[],
                              local_bottom_vector_indices=Ti[],
                              local_bottom_vector_no_overlap_indices=Ti[],
                              local_bottom_vector_no_overlap_sub_selection_indices=Ti[],
@@ -1136,19 +1141,21 @@ function get_level_info_for_variable(
             end
         end
 
-        return LevelInfo(; has_periodic, block_sizes, nblock, global_size,
-                         global_bottom_vector_size,
+        return LevelInfo(; has_periodic, block_sizes, nblock, global_size, global_offset,
+                         global_bottom_vector_size, global_bottom_vector_offset,
                          top_vector_indices=global_top_vector_indices,
+                         top_vector_offset_indices=[x .+ global_offset for x ∈ global_top_vector_indices],
                          local_top_vector_indices=local_top_vector_indices,
                          iblock_list=iblock_list,
                          local_top_vector_a_block_indices=a_block_indices,
-                         local_top_vector_a_block_offset_indices=a_block_indices.+global_offset,
+                         local_top_vector_a_block_offset_indices=[x .+ global_offset for x ∈ a_block_indices],
                          a_block_off_diagonal_indices=a_block_off_diagonal_indices,
                          a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
-                         a_block_off_diagonal_bottom_vector_offset_indices=a_block_off_diagonal_bottom_vector_indices.+global_bottom_vector_offset,
+                         a_block_off_diagonal_bottom_vector_offset_indices=[x .+ global_bottom_vector_offset for x ∈ a_block_off_diagonal_bottom_vector_indices],
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
+                         bottom_vector_offset_indices=[x .+ global_offset for x ∈ global_bottom_vector_indices],
                          local_bottom_vector_indices=local_bottom_vector_indices,
                          local_bottom_vector_no_overlap_indices=local_bottom_vector_no_overlap_indices,
                          local_bottom_vector_no_overlap_sub_selection_indices=local_bottom_vector_no_overlap_sub_selection_indices,
@@ -1347,12 +1354,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_indices = Tuple(get_global_indices(dimensions_without_periodic[vdims],
                                              collect(1:prod(d.n_local for d ∈ dimensions[vdims])))
                           for vdims ∈ variable_dimensions)
-    level_global_size = prod(d.n for d ∈ dimensions)
+    level_global_size = [prod(d.n for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
     # When variable_dimensions has duplicate indices, we can re-use a single LevelInfo for
     # each of the duplicates.
-    duplicate_var_first_position = Tuple(findfirst(variable_dimensions .== vdim)
+    duplicate_var_first_position = Tuple(findfirst(variable_dimensions .== (vdim,))
                                          for vdim ∈ variable_dimensions)
     for (level, (block_sizes, nblock, total_local_nblock)) ∈
             enumerate(zip(block_sizes_list, nblock_list, total_local_nblock_list))
@@ -1377,27 +1384,29 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         # Keep selecting the subset of `1:prod(d.n_local for d ∈ dimensions)` that is
         # involved in each successive level.
-        this_level_info_list = LevelInfo{Ti,typeof(level_shared_comm)}(undef, Nvar)
+        this_level_info_list = Vector{LevelInfo{ind_type,typeof(level_shared_comm)}}(undef, Nvar)
         global_offset = 0
         global_bottom_vector_offset = 0
-        for (ivar, this_var_dims) ∈ enumerate(variable_dimensions)
+        for (ivar, (this_var_dims, this_var_level_indices, this_var_level_global_size)) ∈
+                enumerate(zip(variable_dimensions, level_indices, level_global_size))
             vfirst = duplicate_var_first_position[ivar]
             if vfirst < ivar
                 this_level_info = this_level_info_list[vfirst]
             else
                 this_level_info = get_level_info_for_variable(
-                                      dims, this_var_dims, level_indices, block_sizes,
-                                      global_offset, global_bottom_vector_offset, nblock,
-                                      level_global_size, level==1, level==n_levels,
+                                      dims, this_var_dims, this_var_level_indices,
+                                      block_sizes, nblock, this_var_level_global_size,
+                                      global_offset, global_bottom_vector_offset,
+                                      level==1, level==n_levels,
                                       distributed_comm, level_shared_comm)
             end
             this_level_info_list[ivar] = this_level_info
             global_offset += this_level_info.global_size
             global_bottom_vector_offset += this_level_info.global_bottom_vector_size
         end
-        level_info_list[level] = Tuple(this_level_info_list...)
+        level_info_list[level] = tuple(this_level_info_list...)
         level_indices = Tuple(li.bottom_vector_indices for li ∈ level_info_list[level])
-        level_global_size = this_level_info.global_bottom_vector_size
+        level_global_size = [li.global_bottom_vector_size for li ∈ this_level_info_list]
     end
 
     level_allocate_shared_float_list =
@@ -1453,7 +1462,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
         push!(schur_complement_buffer_info_list, sc_info)
 
-        if level < n_levels && sc_info.nzval_length / (sc_info.m * sc_info.n) > mumps_fill_in_threshold
+        if level < n_levels && sum(sci.nzval_length for sci ∈ sc_info) / (sum(sci.m for sci ∈ sc_info[:,1]) * sum(sci.n for sci ∈ sc_info[1,:])) > mumps_fill_in_threshold
             final_sc_solver_is_mumps = true
             final_level = level + 1
             break
@@ -1571,10 +1580,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         else
             last_A_block_solver = MPIStaticCondensationNull{data_type}()
         end
-        last_level_shared_comm = last_level_info.level_shared_comm
+        last_level_shared_comm = last_level_info[1].level_shared_comm
         level_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_shared_comm)
         level_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_shared_comm)
-        last_parallel_schur = last_level_info.global_bottom_vector_size ≥ 1024
+        last_parallel_schur = sum(li.global_bottom_vector_size for li ∈ last_level_info) ≥ 1024
         if reduce_proc_count_with_blocks || synchronize_shared === nothing
             level_synchronize_shared = () -> MPI.Barrier(last_level_shared_comm)
         else
@@ -1582,16 +1591,16 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_level_sc =
             mpi_schur_complement(last_A_block_solver, data_type, data_type, data_type,
-                                 last_level_info.top_vector_indices,
-                                 last_level_info.bottom_vector_indices; comm=comm,
-                                 shared_comm=last_level_shared_comm,
+                                 vcat((li.top_vector_offset_indices for li ∈ last_level_info)...),
+                                 vcat((li.bottom_vector_offset_indices for li ∈ last_level_info)...);
+                                 comm=comm, shared_comm=last_level_shared_comm,
                                  distributed_comm=distributed_comm,
                                  allocate_shared_float=level_allocate_shared_float,
                                  allocate_shared_int=level_allocate_shared_int,
                                  synchronize_shared=level_synchronize_shared,
                                  use_sparse=false, sparse_Ainv_B=false,
                                  parallel_schur=last_parallel_schur,
-                                 copy_input_to_dense_buffers=(n_levels == 1 && last_level_info.has_periodic),
+                                 copy_input_to_dense_buffers=(n_levels == 1 && last_level_info[1].has_periodic),
                                  skip_factorization=true, schur_tile_size=schur_tile_size,
                                  check_lu=check_lu, timer=timer)
     else
