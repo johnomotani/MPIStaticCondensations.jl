@@ -1,5 +1,5 @@
 using MPIStaticCondensations
-using MPIStaticCondensations: FakeComm, split_matrix, get_global_indices,
+using MPIStaticCondensations: FakeComm, get_level_info_for_variable, get_global_indices,
                               get_shared_sparse_matrix_csc_buffer
 using Test
 
@@ -12,11 +12,17 @@ using Test
 const ngrid = 3
 
 function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_list,
-                        remove_boundaries_list, nrank_list, irank_list, n_shared, irank)
+                        remove_boundaries_list, nrank_list, irank_list, n_shared, irank;
+                        variable_dimensions=nothing, global_offset=0,
+                        global_bottom_vector_offset=0)
     total_nrank = prod(nrank_list) * n_shared
 
     if !isa(ngrid_list, AbstractVector)
         ngrid_list = fill(ngrid_list, length(nelement_list))
+    end
+
+    if variable_dimensions === nothing
+        variable_dimensions = 1:length(nelement_list)
     end
 
     comm = FakeComm(irank, total_nrank)
@@ -54,8 +60,10 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
             dims = dimensions_without_periodic
         end
         nblock = @. (nelement_list + bs - 1) ÷ bs
-        li = split_matrix(dims, level_indices, bs, nblock, this_global_size, level==1,
-                          level==n_levels, distributed_comm, shared_comm)
+        li = get_level_info_for_variable(dims, variable_dimensions, level_indices, bs,
+                                         nblock, this_global_size, global_offset,
+                                         global_bottom_vector_offset, level==1,
+                                         level==n_levels, distributed_comm, shared_comm)
         push!(level_info, li)
         this_global_size = li.global_bottom_vector_size
         level_indices = li.bottom_vector_indices
