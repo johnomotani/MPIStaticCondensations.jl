@@ -692,6 +692,7 @@ function get_level_info_for_variable(
 
         other_dimensions = setdiff(1:length(dimensions), variable_dimensions)
         this_var_dims = dimensions[variable_dimensions]
+        this_var_block_sizes = block_sizes[variable_dimensions]
 
         # Divide the grid into blocks where the number of elements in a block in each
         # dimension is given by `block_sizes`.
@@ -724,7 +725,7 @@ function get_level_info_for_variable(
                 flat_i += d.irank * (n_local - 1)
 
                 if idim == this_dim
-                    bs = block_sizes[idim]
+                    bs = this_var_block_sizes[idim]
                     nelement_local = d.nelement ÷ d.nrank
                     ngrid = d.ngrid
 
@@ -775,7 +776,7 @@ function get_level_info_for_variable(
         end
 
         # Get interior indices of the blocks that should be inverted by this processor.
-        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ this_var_dims]
+        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
         nblocks_list = [(nelement + bs - 1) ÷ bs
                         for (nelement, bs) ∈ zip(nelement_local_list, block_sizes)]
         total_nblocks = prod(nblocks_list)
@@ -818,7 +819,7 @@ function get_level_info_for_variable(
         block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
         iblock_list = Matrix{Ti}(undef, length(nblocks_list), length(this_proc_blocks))
         function get_block_points!(bi, b)
-            iblock = zeros(Ti, length(this_var_dims))
+            iblock = zeros(Ti, length(dimensions))
             temp = b - 1
             for (idim, nb) ∈ enumerate(nblocks_list)
                 temp, iblock[idim] = divrem(temp, nb)
@@ -833,7 +834,11 @@ function get_level_info_for_variable(
                     return nothing
                 end
                 next_dim = this_dim - 1
-                d = this_var_dims[this_dim]
+                if this_dim ∈ other_dimensions
+                    # This variable does not depend on this_dim, so 'skip'.
+                    return get_block_interior_indices_from_dim!(next_dim, flat_i)
+                end
+                d = dimensions[this_dim]
                 n = d.n
                 ngrid = d.ngrid
                 nelement_local = d.nelement ÷ d.nrank
@@ -861,7 +866,11 @@ function get_level_info_for_variable(
                 end
                 return nothing
             end
-            get_block_interior_indices_from_dim!(length(this_var_dims), 0)
+            # When split_variable=false, this variable does not contribute to block
+            # interiors.
+            if split_variable
+                get_block_interior_indices_from_dim!(length(dimensions), 0)
+            end
 
             this_bbi = Ti[]
             block_boundary_indices[bi] = this_bbi
@@ -871,7 +880,15 @@ function get_level_info_for_variable(
                     return nothing
                 end
                 next_dim = this_dim - 1
-                d = this_var_dims[this_dim]
+                if this_dim ∈ other_dimensions
+                    # This variable does not depend on this_dim, so 'skip'.
+                    if split_variable && this_dim == boundary_dim
+                        return nothing
+                    end
+                    return get_block_boundary_indices_from_dim!(next_dim, flat_i,
+                                                                boundary_dim)
+                end
+                d = dimensions[this_dim]
                 n = d.n
                 ngrid = d.ngrid
                 nelement_local = d.nelement ÷ d.nrank
@@ -917,8 +934,8 @@ function get_level_info_for_variable(
                 end
                 return nothing
             end
-            for boundary_dim ∈ 1:length(this_var_dims)
-                get_block_boundary_indices_from_dim!(length(this_var_dims), 0, boundary_dim)
+            for boundary_dim ∈ 1:length(dimensions)
+                get_block_boundary_indices_from_dim!(length(dimensions), 0, boundary_dim)
             end
             return nothing
         end

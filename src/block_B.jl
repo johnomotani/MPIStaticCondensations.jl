@@ -167,7 +167,11 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                     continue
                 end
                 last_irow = last(rr)
-                first_row = first(ri)
+                if isempty(ri)
+                    first_row = 1
+                else
+                    first_row = first(ri)
+                end
                 nrow = length(ri)
                 for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]

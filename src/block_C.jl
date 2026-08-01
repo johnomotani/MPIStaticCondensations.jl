@@ -294,7 +294,7 @@ function copy_C_submatrix!(block_C::BlockCSerial,
                     full_A_colptr = A_variable_block.colptr
                     full_A_rowval = A_variable_block.rowval
                     full_A_nzval = A_variable_block.nzval
-                    if length(full_A_nzval) == 0
+                    if isempty(full_A_nzval) || isempty(ri)
                         continue
                     end
                     first_row = first(ri)
@@ -334,7 +334,7 @@ function copy_C_submatrix!(block_C::BlockCSerial,
                     full_A_colptr = A_variable_block.colptr
                     full_A_rowval = A_variable_block.rowval
                     full_A_nzval = A_variable_block.nzval
-                    if length(full_A_nzval) == 0
+                    if isempty(full_A_nzval) || isempty(ri)
                         continue
                     end
                     first_row = first(ri)
@@ -444,7 +444,7 @@ function copy_C_submatrix!(block_C::BlockCSerial,
                     full_A_colptr = A_variable_block.colptr
                     full_A_rowval_list = A_variable_block.rowval_list
                     full_A_nzval = A_variable_block.nzval
-                    if length(full_A_nzval) == 0
+                    if isempty(full_A_nzval) || isempty(ri)
                         continue
                     end
                     first_irow = first(rr)
@@ -504,7 +504,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval = A_variable_block.rowval
                 full_A_nzval = A_variable_block.nzval
-                if length(full_A_nzval) == 0
+                if isempty(full_A_nzval) || isempty(ri)
                     continue
                 end
                 first_irow = first(rr)
@@ -544,7 +544,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval = A_variable_block.rowval
                 full_A_nzval = A_variable_block.nzval
-                if length(full_A_nzval) == 0
+                if isempty(full_A_nzval) || isempty(ri)
                     continue
                 end
                 first_irow = first(rr)
@@ -601,7 +601,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval_list = A_variable_block.rowval_list
                 full_A_nzval = A_variable_block.nzval
-                if length(full_A_nzval) == 0
+                if isempty(full_A_nzval) || isempty(ri)
                     continue
                 end
                 first_row = first(ri)
@@ -640,7 +640,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval_list = A_variable_block.rowval_list
                 full_A_nzval = A_variable_block.nzval
-                if length(full_A_nzval) == 0
+                if isempty(full_A_nzval) || isempty(ri)
                     continue
                 end
                 first_row = first(ri)

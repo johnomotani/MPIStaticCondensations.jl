@@ -190,11 +190,15 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
                 for (vcol, colrange, colinds) ∈ zip(1:Nvar, ranges, inds),
                         (vrow, rowrange, rowinds) ∈ zip(1:Nvar, ranges, inds)
                     A_variable_block = full_A[vrow][vcol]
+                    if isempty(rowinds)
+                        first_row = 1
+                    else
+                        first_row = rowinds[1]
+                    end
                     if isa(A_variable_block, AbstractSparseMatrixCSC)
                         colptr = A_variable_block.colptr
                         rowval = A_variable_block.rowval
                         nzval = A_variable_block.nzval
-                        first_row = rowinds[1]
                         for (j1, j2) ∈ zip(colrange, colinds)
                             first_i = colptr[j2]
                             last_i = colptr[j2+1]-1
@@ -215,7 +219,6 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
                         colptr = A_variable_block.colptr
                         rowval_list = A_variable_block.rowval_list
                         nzval = A_variable_block.nzval
-                        first_row = rowinds[1]
                         for (j1, j2) ∈ zip(colrange, colinds)
                             first_i = colptr[j2]
                             col_rowval = rowval_list[j2]
