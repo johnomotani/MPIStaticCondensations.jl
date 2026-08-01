@@ -612,7 +612,6 @@ MPI.Barrier(comm::FakeComm) = nothing
     global_offset::Ti
     local_offset::Ti
     global_bottom_vector_size::Ti
-    global_bottom_vector_offset::Ti
     local_bottom_vector_offset::Ti
     top_vector_indices::Vector{Ti}
     top_vector_offset_indices::Vector{Ti}
@@ -651,8 +650,7 @@ function get_level_info_for_variable(
              dimensions::Vector{<:Dimension}, variable_dimensions::AbstractVector{Ti},
              level_indices::Vector{Ti}, block_sizes::Vector{Ti}, nblock::Vector{Ti},
              global_size::Ti, global_offset::Ti, local_offset::Ti,
-             global_bottom_vector_offset::Ti, local_bottom_vector_offset::Ti,
-             is_top_level::Bool, is_bottom_level::Bool,
+             local_bottom_vector_offset::Ti, is_top_level::Bool, is_bottom_level::Bool,
              distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
              shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
@@ -667,8 +665,8 @@ function get_level_info_for_variable(
             # values.
             return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
                              global_offset=0, local_offset=0, global_bottom_vector_size=0,
-                             global_bottom_vector_offset=0, local_bottom_vector_offset=0,
-                             top_vector_indices=Ti[], top_vector_offset_indices=Ti[],
+                             local_bottom_vector_offset=0, top_vector_indices=Ti[],
+                             top_vector_offset_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              local_top_vector_a_block_offset_indices=Vector{Ti}[],
@@ -1158,17 +1156,17 @@ function get_level_info_for_variable(
 
         return LevelInfo(; has_periodic, block_sizes, nblock, global_size, global_offset,
                          local_offset, global_bottom_vector_size,
-                         global_bottom_vector_offset, local_bottom_vector_offset,
+                         local_bottom_vector_offset,
                          top_vector_indices=global_top_vector_indices,
                          top_vector_offset_indices=global_top_vector_indices.+global_offset,
                          local_top_vector_indices=local_top_vector_indices,
                          local_top_vector_offset_indices=local_top_vector_indices.+local_offset,
                          iblock_list=iblock_list,
                          local_top_vector_a_block_indices=a_block_indices,
-                         local_top_vector_a_block_offset_indices=[x .+ global_offset for x ∈ a_block_indices],
+                         local_top_vector_a_block_offset_indices=[x .+ local_offset for x ∈ a_block_indices],
                          a_block_off_diagonal_indices=a_block_off_diagonal_indices,
                          a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
-                         a_block_off_diagonal_bottom_vector_offset_indices=[x .+ global_bottom_vector_offset for x ∈ a_block_off_diagonal_bottom_vector_indices],
+                         a_block_off_diagonal_bottom_vector_offset_indices=[x .+ local_bottom_vector_offset for x ∈ a_block_off_diagonal_bottom_vector_indices],
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
                          subgroup_size=subgroup_size, block_comm=block_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
@@ -1376,7 +1374,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_indices = Tuple(get_global_indices(dimensions_without_periodic[vdims],
                                              collect(1:prod(d.n_local for d ∈ dimensions[vdims])))
                           for vdims ∈ variable_dimensions)
-    level_global_size = [prod(d.n for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
+    total_global_size = [prod(d.n for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
+    level_global_size = total_global_size
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
     # When variable_dimensions has duplicate indices, we can re-use a single LevelInfo for
@@ -1408,7 +1407,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         # involved in each successive level.
         this_level_info_list = Vector{LevelInfo{ind_type,typeof(level_shared_comm)}}(undef, Nvar)
         global_offset = 0
-        global_bottom_vector_offset = 0
         local_offset = 0
         local_bottom_vector_offset = 0
         for (ivar, (this_var_dims, this_var_level_indices, this_var_level_global_size)) ∈
@@ -1421,17 +1419,17 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 this_level_info =
                     LevelInfo(; level_info_to_copy.has_periodic, level_info_to_copy.block_sizes, level_info_to_copy.nblock, level_info_to_copy.global_size,
                               global_offset, local_offset, level_info_to_copy.global_bottom_vector_size,
-                              global_bottom_vector_offset, local_bottom_vector_offset,
+                              local_bottom_vector_offset,
                               top_vector_indices=level_info_to_copy.top_vector_indices,
                               top_vector_offset_indices=level_info_to_copy.top_vector_indices.+global_offset,
                               local_top_vector_indices=level_info_to_copy.local_top_vector_indices,
                               local_top_vector_offset_indices=level_info_to_copy.local_top_vector_indices.+local_offset,
                               iblock_list=level_info_to_copy.iblock_list,
                               local_top_vector_a_block_indices=level_info_to_copy.local_top_vector_a_block_indices,
-                              local_top_vector_a_block_offset_indices=[x .+ global_offset for x ∈ level_info_to_copy.local_top_vector_a_block_indices],
+                              local_top_vector_a_block_offset_indices=[x .+ local_offset for x ∈ level_info_to_copy.local_top_vector_a_block_indices],
                               a_block_off_diagonal_indices=level_info_to_copy.a_block_off_diagonal_indices,
                               a_block_off_diagonal_bottom_vector_indices=level_info_to_copy.a_block_off_diagonal_bottom_vector_indices,
-                              a_block_off_diagonal_bottom_vector_offset_indices=[x .+ global_bottom_vector_offset for x ∈ level_info_to_copy.a_block_off_diagonal_bottom_vector_indices],
+                              a_block_off_diagonal_bottom_vector_offset_indices=[x .+ local_bottom_vector_offset for x ∈ level_info_to_copy.a_block_off_diagonal_bottom_vector_indices],
                               n_subgroups=level_info_to_copy.n_subgroups, subgroup_i=level_info_to_copy.subgroup_i,
                               subgroup_size=level_info_to_copy.subgroup_size, block_comm=level_info_to_copy.block_comm,
                               bottom_vector_indices=level_info_to_copy.bottom_vector_indices,
@@ -1452,14 +1450,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                       dims, this_var_dims, this_var_level_indices,
                                       block_sizes, nblock, this_var_level_global_size,
                                       global_offset, local_offset,
-                                      global_bottom_vector_offset,
                                       local_bottom_vector_offset, level==1,
                                       level==n_levels, distributed_comm,
                                       level_shared_comm)
             end
             this_level_info_list[ivar] = this_level_info
-            global_offset += this_level_info.global_size
-            global_bottom_vector_offset += this_level_info.global_bottom_vector_size
+            global_offset += total_global_size[ivar]
             local_offset += length(this_level_info.local_top_vector_indices) + length(this_level_info.local_bottom_vector_indices)
             local_bottom_vector_offset += length(this_level_info.local_bottom_vector_indices)
         end
