@@ -246,7 +246,7 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                     last_full_row = full_col_rv[end]
                     last_full_row_i = length(full_col_rv)
                     full_row_i = max(searchsortedlast(full_col_rv, first_row) - 1, 1)
-                    for (i, full_i) ∈ enumerate(rr, ri)
+                    for (i, full_i) ∈ zip(rr, ri)
                         while full_row_i < last_full_row_i && full_col_rv[full_row_i] < full_i
                             full_row_i += 1
                         end

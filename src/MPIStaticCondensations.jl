@@ -691,6 +691,7 @@ function get_level_info_for_variable(
         end
 
         other_dimensions = setdiff(1:length(dimensions), variable_dimensions)
+        this_var_dims = dimensions[variable_dimensions]
 
         # Divide the grid into blocks where the number of elements in a block in each
         # dimension is given by `block_sizes`.
@@ -714,7 +715,7 @@ function get_level_info_for_variable(
                 end
 
                 next_dim = this_dim - 1
-                d = dimensions[this_dim]
+                d = this_var_dims[this_dim]
                 n = d.n
                 n_local = d.n_local
                 flat_i *= n
@@ -761,8 +762,8 @@ function get_level_info_for_variable(
 
                 return nothing
             end
-            for idim ∈ 1:length(dimensions)
-                get_boundary_indices!(idim, length(dimensions), 0)
+            for idim ∈ 1:length(this_var_dims)
+                get_boundary_indices!(idim, length(this_var_dims), 0)
             end
             # There will be duplicated points in boundary_indices. Sort the list and remove
             # the duplicates.
@@ -774,7 +775,7 @@ function get_level_info_for_variable(
         end
 
         # Get interior indices of the blocks that should be inverted by this processor.
-        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ this_var_dims]
         nblocks_list = [(nelement + bs - 1) ÷ bs
                         for (nelement, bs) ∈ zip(nelement_local_list, block_sizes)]
         total_nblocks = prod(nblocks_list)
@@ -817,7 +818,7 @@ function get_level_info_for_variable(
         block_boundary_indices = Vector{Vector{Ti}}(undef, length(this_proc_blocks))
         iblock_list = Matrix{Ti}(undef, length(nblocks_list), length(this_proc_blocks))
         function get_block_points!(bi, b)
-            iblock = zeros(Ti, length(dimensions))
+            iblock = zeros(Ti, length(this_var_dims))
             temp = b - 1
             for (idim, nb) ∈ enumerate(nblocks_list)
                 temp, iblock[idim] = divrem(temp, nb)
@@ -832,7 +833,7 @@ function get_level_info_for_variable(
                     return nothing
                 end
                 next_dim = this_dim - 1
-                d = dimensions[this_dim]
+                d = this_var_dims[this_dim]
                 n = d.n
                 ngrid = d.ngrid
                 nelement_local = d.nelement ÷ d.nrank
@@ -860,7 +861,7 @@ function get_level_info_for_variable(
                 end
                 return nothing
             end
-            get_block_interior_indices_from_dim!(length(dimensions), 0)
+            get_block_interior_indices_from_dim!(length(this_var_dims), 0)
 
             this_bbi = Ti[]
             block_boundary_indices[bi] = this_bbi
@@ -870,7 +871,7 @@ function get_level_info_for_variable(
                     return nothing
                 end
                 next_dim = this_dim - 1
-                d = dimensions[this_dim]
+                d = this_var_dims[this_dim]
                 n = d.n
                 ngrid = d.ngrid
                 nelement_local = d.nelement ÷ d.nrank
@@ -916,8 +917,8 @@ function get_level_info_for_variable(
                 end
                 return nothing
             end
-            for boundary_dim ∈ 1:length(dimensions)
-                get_block_boundary_indices_from_dim!(length(dimensions), 0, boundary_dim)
+            for boundary_dim ∈ 1:length(this_var_dims)
+                get_block_boundary_indices_from_dim!(length(this_var_dims), 0, boundary_dim)
             end
             return nothing
         end
@@ -958,7 +959,7 @@ function get_level_info_for_variable(
         end
 
         if is_bottom_level && has_periodic
-            block_boundary_indices = [get_non_repeated_indices_and_repeats(dimensions, bbi)[1]
+            block_boundary_indices = [get_non_repeated_indices_and_repeats(this_var_dims, bbi)[1]
                                       for bbi ∈ block_boundary_indices]
         end
 
@@ -973,28 +974,28 @@ function get_level_info_for_variable(
         MPI.Bcast!(top_vector_size, shared_comm; root=0)
         global_bottom_vector_size = global_size - top_vector_size[]
 
-        #global_top_vector_indices, _, _ = apply_periodicity_to_indices(dimensions, interior_indices)
+        #global_top_vector_indices, _, _ = apply_periodicity_to_indices(this_var_dims, interior_indices)
         # Top vector indices can never be on periodic boundaries, so no need to apply
         # periodicity.
         global_top_vector_indices = interior_indices
         if is_top_level && is_bottom_level && has_periodic
             # need to handle periodicity
             global_bottom_vector_indices, _ =
-                apply_periodicity_to_indices(dimensions, boundary_indices)
+                apply_periodicity_to_indices(this_var_dims, boundary_indices)
             global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
-                get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+                get_non_repeated_indices_and_repeats(this_var_dims, boundary_indices)
             global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
         elseif is_bottom_level && has_periodic
             # need to handle periodicity
             global_bottom_vector_indices, global_bottom_vector_periodic_pairs =
-                apply_periodicity_to_indices(dimensions, boundary_indices)
+                apply_periodicity_to_indices(this_var_dims, boundary_indices)
             global_bottom_vector_no_overlap_indices, _ =
-                get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+                get_non_repeated_indices_and_repeats(this_var_dims, boundary_indices)
             global_bottom_vector_repeat_inds = Ti[]
         elseif is_top_level && has_periodic
             # need to handle periodicity
             global_bottom_vector_no_overlap_indices, global_bottom_vector_repeat_inds =
-                get_non_repeated_indices_and_repeats(dimensions, boundary_indices)
+                get_non_repeated_indices_and_repeats(this_var_dims, boundary_indices)
             global_bottom_vector_indices = boundary_indices
             global_bottom_vector_periodic_pairs = zeros(Ti, 2, 0)
         else
@@ -1113,12 +1114,13 @@ function get_level_info_for_variable(
             end
             count += 1
         end
-        if t_count != nt + 1 || b_count != nb + 1 || r_count != nr + 1 || p_count != np + 1
-            error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1). "
-                  * "t_count=$t_count while nt+1=$(nt+1), "
+        if t_count != nt + 1 || b_count != nb + 1 || bno_count != nbno + 1 || r_count != nr + 1 || p_count != np + 1 || count != n + 1
+            error("Did not find all indices in search. t_count=$t_count while nt+1=$(nt+1), "
                   * "b_count=$b_count while nb+1=$(nb+1), "
+                  * "bno_count=$bno_count while nbno+1=$(nbno+1), "
                   * "r_count=$r_count while nr+1=$(nr+1), "
-                  * "p_count=$p_count while np+1=$(np+1).")
+                  * "p_count=$p_count while np+1=$(np+1), "
+                  * "count=$count while n+1=$(n+1).")
         end
 
         # The second row of entries (the 'source' points of the repeated pairs) are not
@@ -1128,9 +1130,9 @@ function get_level_info_for_variable(
             local_bottom_vector_periodic_pairs[2,i] = searchsortedfirst(level_indices, local_bottom_vector_periodic_pairs[2,i])
         end
 
-        if is_bottom_level && any(d.periodic && d.nrank > 1 for d ∈ dimensions)
+        if is_bottom_level && any(d.periodic && d.nrank > 1 for d ∈ this_var_dims)
             println("Error: periodicity not properly supported for MPI-distributed "
-                    * "dimensions yet.")
+                    * "this_var_dims yet.")
             local_bottom_vector_periodic_pairs = fill(Ti(-1), 2, 1)
         end
 

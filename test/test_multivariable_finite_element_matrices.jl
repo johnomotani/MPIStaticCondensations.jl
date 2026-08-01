@@ -180,7 +180,7 @@ function test_multivariable_dimension_combinations(
                 dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),)),
                 block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
-                mumps_fill_in_threshold ∈ (1.0, 0.1)
+                mumps_fill_in_threshold ∈ 1.0 #(1.0, 0.1) # MPIStaticCondensationMUMPS does not support multiple variables yet.
             if rank == 0
                 println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
             end

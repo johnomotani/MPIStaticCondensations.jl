@@ -553,17 +553,16 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
                     rowval_list = sc_matrix_variable_block.rowval_list
                     nzval = sc_matrix_variable_block.nzval
                     first_row = first(rowinds)
-                    first_i = first(row_range)
-                    last_i = last(row_range)
+                    nrow = length(rowinds)
                     for (j, col) ∈ zip(col_range, colinds)
                         first_flat_i = colptr[col]
                         col_rv = rowval_list[col]
                         last_row_i = length(col_rv)
                         row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                        i = first_i
-                        while row_i ≤ last_row_i && i ≤ last_i
+                        i = 1
+                        while row_i ≤ last_row_i && i ≤ nrow
                             if col_rv[row_i] == rowinds[i]
-                                nzval[row_i+first_flat_i-1] += mb[i,j]
+                                nzval[row_i+first_flat_i-1] += mb[row_range[i],j]
                                 row_i += 1
                                 i += 1
                             else
