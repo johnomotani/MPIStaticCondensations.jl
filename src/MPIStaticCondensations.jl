@@ -98,64 +98,64 @@ abstract type MPIStaticCondensation{Tf<:AbstractFloat} <: Factorization{Tf} end
 
 struct MPIStaticCondensationNull{Tf<:AbstractFloat} <: MPIStaticCondensation{Tf} end
 
-function get_partial_FixedSparseCSC_buffer(row_range, col_range,
+function get_partial_FixedSparseCSC_buffer(row_indices, col_indices,
                                            existing_buffer::NTuple{Nvar,NTuple{Nvar,Tbuff}},
                                            float_type=Float64) where {Nvar,Tbuff}
     # Initialize buffer with the same non-zero pattern as existing_buffer, but only for a
-    # subset of rows given by row_range and columns given by col_range.
+    # subset of rows given by row_indices and columns given by col_indices.
     @inbounds begin
-        if Nvar > 1
-            error("get_partial_FixedSparseCSC_buffer() does not support multiple variables yet")
-        else
-            existing_buffer = existing_buffer[1][1]
-            row_range = row_range[1]
-            col_range = col_range[1]
-        end
-        nrow = length(row_range)
-        ncol = length(col_range)
-        ind_type = eltype(row_range)
+        nrow = sum(length(ri) for ri ∈ row_indices)
+        ncol = sum(length(ci) for ci ∈ col_indices)
+        ind_type = eltype(row_indices[1])
         if nrow == 0 || ncol == 0
             return FixedSparseCSC(nrow, ncol, ones(ind_type, ncol + 1), ind_type[],
-                                  zeros(eltype(existing_buffer), 0))
+                                  zeros(eltype(existing_buffer[1][1]), 0))
         end
 
         colptr = ind_type[1]
         rowval = ind_type[]
-        firstrow = first(row_range)
-        lastrow = last(row_range)
-        existing_colptr = existing_buffer.colptr
-        if isa(existing_buffer, SharedSparseBuffer)
-            existing_rowval_list = existing_buffer.rowval_list
-        else
-            existing_rowval = existing_buffer.rowval
-        end
-        for j ∈ col_range
-            existing_col_start = existing_colptr[j]
-            existing_col_end = existing_colptr[j+1]-1
-            if isa(existing_buffer, SharedSparseBuffer)
-                existing_col_rowval = existing_rowval_list[j]
-            else
-                existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
-            end
-            n_existing = existing_col_end - existing_col_start + 1
-            if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
-                # Definitely no overlapping entries in this column, so skip.
+        for (jvar, ci) ∈ enumerate(col_indices)
+            for j ∈ ci
+                row_offset = 0
+                for (ivar, ri) ∈ enumerate(row_indices)
+                    eb = existing_buffer[ivar][jvar]
+                    existing_colptr = eb.colptr
+                    if isa(eb, SharedSparseBuffer)
+                        existing_rowval_list = eb.rowval_list
+                    else
+                        existing_rowval = eb.rowval
+                    end
+                    firstrow = first(ri)
+                    lastrow = last(ri)
+                    existing_col_start = existing_colptr[j]
+                    existing_col_end = existing_colptr[j+1]-1
+                    if isa(eb, SharedSparseBuffer)
+                        existing_col_rowval = existing_rowval_list[j]
+                    else
+                        existing_col_rowval = @view existing_rowval[existing_col_start:existing_col_end]
+                    end
+                    n_existing = existing_col_end - existing_col_start + 1
+                    if n_existing == 0 || first(existing_col_rowval) > lastrow || last(existing_col_rowval) < firstrow
+                        # Definitely no overlapping entries in this variable block of the
+                        # column, so skip.
+                        continue
+                    end
+                    count = max(searchsortedlast(existing_col_rowval, firstrow) - 1, 1)
+                    for (i, i_global) ∈ enumerate(ri)
+                        while count ≤ n_existing && existing_col_rowval[count] < i_global
+                            count += 1
+                        end
+                        if count > n_existing
+                            break
+                        end
+                        if existing_col_rowval[count] == i_global
+                            push!(rowval, row_offset + i)
+                        end
+                    end
+                    row_offset += length(ri)
+                end
                 push!(colptr, length(rowval) + 1)
-                continue
             end
-            count = max(searchsortedlast(existing_col_rowval, firstrow) - 1, 1)
-            for (i, i_global) ∈ enumerate(row_range)
-                while count ≤ n_existing && existing_col_rowval[count] < i_global
-                    count += 1
-                end
-                if count > n_existing
-                    break
-                end
-                if existing_col_rowval[count] == i_global
-                    push!(rowval, i)
-                end
-            end
-            push!(colptr, length(rowval) + 1)
         end
         nzval = zeros(float_type, length(rowval))
 
