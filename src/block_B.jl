@@ -235,6 +235,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                 for (j1, j2) ∈ zip(cr, ci)
                     first_i = full_A_colptr[j2]
                     col_rv = full_A_rowval_list[j2]
+                    if isempty(col_rv)
+                        block[rr,j1] .= 0.0
+                        continue
+                    end
                     last_row_i = length(col_rv)
                     row_i = max(searchsortedlast(col_rv, first_row)-1,1)
                     i1 = 1

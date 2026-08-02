@@ -1497,7 +1497,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         first_sc_info =
             get_shared_sparse_matrix_info(dimensions, li[1].level_shared_comm, lai,
                                           li[1].block_sizes, li[1].bottom_vector_indices,
-                                          li[1].bottom_vector_indices; ind_type)
+                                          li[1].bottom_vector_indices,
+                                          variable_dimensions[1], variable_dimensions[1];
+                                          ind_type)
         sc_info = Matrix{typeof(first_sc_info)}(undef, Nvar, Nvar)
         sc_info[1,1] = first_sc_info
         for ivar ∈ 2:Nvar
@@ -1509,7 +1511,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                     get_shared_sparse_matrix_info(dimensions, li[1].level_shared_comm,
                                                   lai, li[1].block_sizes,
                                                   li[ivar].bottom_vector_indices,
-                                                  li[1].bottom_vector_indices; ind_type)
+                                                  li[1].bottom_vector_indices,
+                                                  variable_dimensions[ivar],
+                                                  variable_dimensions[1]; ind_type)
             end
         end
         for jvar ∈ 2:Nvar
@@ -1527,7 +1531,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                           li[1].level_shared_comm, lai,
                                                           li[1].block_sizes,
                                                           li[ivar].bottom_vector_indices,
-                                                          li[jvar].bottom_vector_indices;
+                                                          li[jvar].bottom_vector_indices,
+                                                          variable_dimensions[ivar],
+                                                          variable_dimensions[jvar];
                                                           ind_type)
                     end
                 end

@@ -163,7 +163,9 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                                        allocate_shared_int::F,
                                        block_sizes::Union{Vector{<:Integer},Nothing}=nothing,
                                        row_indices::Union{Vector{<:Integer},Nothing}=nothing,
-                                       column_indices::Union{Vector{<:Integer},Nothing}=nothing;
+                                       column_indices::Union{Vector{<:Integer},Nothing}=nothing,
+                                       row_dimensions::Union{UnitRange{<:Integer},Vector{<:Integer},Nothing}=nothing,
+                                       column_dimensions::Union{UnitRange{<:Integer},Vector{<:Integer},Nothing}=nothing;
                                        ind_type::Type=Int64) where F
     @inbounds begin
         n_local_list = [d.n_local for d ∈ dimensions]
@@ -177,6 +179,23 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
         if column_indices === nothing
             column_indices = 1:n_total
         end
+        if row_dimensions === nothing
+            row_dimensions = 1:length(dimensions)
+        end
+        if column_dimensions === nothing
+            column_dimensions = 1:length(dimensions)
+        end
+
+        # For any dimensions that are not shared between the row and column variables, all
+        # points are coupled by the matrix. We can enforce that effect here by setting the
+        # block size equal to the number of elements in those dimensions.
+        common_dimensions = intersect(row_dimensions, column_dimensions)
+        block_sizes = copy(block_sizes)
+        for other_dim ∈ setdiff(1:length(dimensions), common_dimensions)
+            d = dimensions[other_dim]
+            block_sizes[other_dim] = d.nelement ÷ d.nrank
+        end
+
         nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
         nblock_list = [(nel + bs - 1) ÷ bs for (nel, bs) ∈ zip(nelement_local_list,
                                                                block_sizes)]
@@ -202,10 +221,10 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
         if shared_comm_rank == 0
             # Columns can be 'equivalent' in the sense that they have exactly the same
             # non-empty row indices. In a single dimension, two points are equivalent if
-            # they are in the interior of the same element, or if they are the point (in
-            # case they are boundary points). Columns are equivalent if their positions in
-            # every dimension are equivalent.
-            cartinds_list = CartesianIndices(Tuple(d.n_local for d ∈ dimensions))
+            # they are in the interior of the same element, or if they are the same point
+            # (in case they are boundary points). Columns are equivalent if their
+            # positions in every dimension are equivalent.
+            column_cartinds_list = CartesianIndices(Tuple(d.n_local for d ∈ dimensions[column_dimensions]))
             function get_equivalents_lookup(d, nblock, block_size)
                 eq_list = zeros(ind_type, d.n_local)
                 eq = ind_type(1)
@@ -269,10 +288,12 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
             end
             equivalents_lookup_lists = [get_equivalents_lookup(d, nb, bs)
                                         for (d, nb, bs)
-                                        ∈ zip(dimensions, nblock_list, block_sizes)]
+                                        ∈ zip(dimensions[column_dimensions],
+                                              nblock_list[column_dimensions],
+                                              block_sizes[column_dimensions])]
             n_equivalents_list = [eq[end] for eq ∈ equivalents_lookup_lists]
             function equivalence_ind(flat_i)
-                cartind = Tuple(cartinds_list[flat_i])
+                cartind = Tuple(column_cartinds_list[flat_i])
                 eq_ind = ind_type(0)
                 for (i, neq, eq_lookup) ∈ zip(reverse(cartind),
                                               reverse(n_equivalents_list),
@@ -287,6 +308,11 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
 
             # We temporarily use colptr as a buffer to store the sizes of rowval vectors,
             # or the positions of the first occurence of repeated rowval vectors.
+            cdim = dimensions[column_dimensions]
+            cbs = block_sizes[column_dimensions]
+            rdim = dimensions[row_dimensions]
+            rbs = block_sizes[row_dimensions]
+            row_nblock_list = nblock_list[row_dimensions]
             cp = ind_type[]
             rv = ind_type[]
             row_count = Ref(1)
@@ -301,12 +327,32 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                     colptr[icol] = -origin_icol
                 else
                     col_rv = ind_type[]
-                    block_inds, inner_inds = get_dim_indices!(dimensions, block_sizes,
-                                                              col - 1)
+                    column_block_inds, column_inner_inds = get_dim_indices!(cdim, cbs, col - 1)
+                    row_block_inds = ind_type[]
+                    row_inner_inds = ind_type[]
+                    cdim_count = 1
+                    rdim_count = 1
+                    for d ∈ 1:length(dimensions)
+                        if column_dimensions[cdim_count] == d
+                            if row_dimensions[rdim_count] == d
+                                push!(row_block_inds, column_block_inds[cdim_count])
+                                push!(row_inner_inds, column_inner_inds[cdim_count])
+                                rdim_count += 1
+                            end
+                            cdim_count += 1
+                        elseif row_dimensions[rdim_count] == d
+                            # Column variable does not include this dimension, so we are
+                            # treating the whole dimension as a single block. The block
+                            # index is therefore 1, and the inner index does not matter.
+                            push!(row_block_inds, 1)
+                            push!(row_inner_inds, 1)
+                            rdim_count += 1
+                        end
+                    end
                     row_count[] = 1
-                    add_row_inds!(col_rv, length(dimensions), dimensions, block_sizes,
-                                  nblock_list, row_indices, block_inds, inner_inds, 0,
-                                  row_count)
+                    add_row_inds!(col_rv, length(row_dimensions), rdim, rbs,
+                                  row_nblock_list, row_indices, row_block_inds,
+                                  row_inner_inds, 0, row_count)
                     rv_lookup[col_eq] = (col_rv, icol)
                     push!(rv_list, col_rv)
                     colptr[icol] = length(col_rv)
