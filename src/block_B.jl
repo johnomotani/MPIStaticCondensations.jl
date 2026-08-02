@@ -162,7 +162,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval = A_variable_block.rowval
                 full_A_nzval = A_variable_block.nzval
-                if length(full_A_nzval) == 0
+                if isempty(ci) || isempty(ri)
+                    continue
+                end
+                if isempty(full_A_nzval)
                     block[rr,cr] .= 0.0
                     continue
                 end
@@ -225,7 +228,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
                 full_A_colptr = A_variable_block.colptr
                 full_A_rowval_list = A_variable_block.rowval_list
                 full_A_nzval = A_variable_block.nzval
-                if length(full_A_nzval) == 0
+                if isempty(ci) || isempty(ri)
+                    continue
+                end
+                if isempty(full_A_nzval)
                     block[rr,cr] .= 0.0
                     continue
                 end
@@ -286,7 +292,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
             full_A_colptr = A_variable_block.colptr
             full_A_rowval = A_variable_block.rowval
             full_A_nzval = A_variable_block.nzval
-            if length(full_A_nzval) == 0
+            if isempty(ci) || isempty(ri)
+                continue
+            end
+            if isempty(full_A_nzval)
                 block[rr,cr] .= 0.0
                 continue
             end
@@ -343,7 +352,10 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
             full_A_colptr = A_variable_block.colptr
             full_A_rowval_list = A_variable_block.rowval_list
             full_A_nzval = A_variable_block.nzval
-            if length(full_A_nzval) == 0
+            if isempty(ci) || isempty(ri)
+                continue
+            end
+            if isempty(full_A_nzval)
                 block[rr,cr] .= 0.0
                 continue
             end
