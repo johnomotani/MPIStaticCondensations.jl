@@ -409,16 +409,16 @@ function assemble_and_scatter_global_matrix(dimensions::Vector{<:Dimension},
     end
     common_dimension_inds = [r.name == c.name
                              for (r, c) ∈ zip(row_dimensions, column_dimensions)]
-    last_common_dimension = 0
-    for (r, c) ∈ zip(row_dimensions, column_dimensions)
-        last_common_dimension += 1
+    n_common_dimensions = 0
+    for (r, c) ∈ zip(reverse(row_dimensions), reverse(column_dimensions))
+        n_common_dimensions += 1
         if r.name != c.name
             break
         end
     end
-    common_dimensions = row_dimensions[1:last_common_dimension]
-    extra_row_dimensions = row_dimensions[last_common_dimension+1:end]
-    extra_column_dimensions = column_dimensions[last_common_dimension+1:end]
+    common_dimensions = row_dimensions[end-n_common_dimensions+1:end]
+    extra_row_dimensions = row_dimensions[1:end-n_common_dimensions]
+    extra_column_dimensions = column_dimensions[1:end-n_common_dimensions]
 
     local_m = prod(d.n_local for d ∈ row_dimensions)
     local_n = prod(d.n_local for d ∈ column_dimensions)
