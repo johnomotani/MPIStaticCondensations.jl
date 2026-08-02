@@ -706,6 +706,11 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
         vector_intermediate_buffer = C.vector_intermediate_buffer
         synchronize_shared = C.synchronize_shared
 
+        if !isempty(vector_range)
+            vector_intermediate_buffer[:,vector_range] .= 0.0
+        end
+        synchronize_shared()
+
         # The rows are labelled by block_hypercube_position, so there are no overlaps, and
         # we can directly set entries, instead of adding to them, and so do not need to
         # zero-initialise the intermediate buffer.
@@ -717,7 +722,7 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
                 vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
                 mul!(vec_buffer_out, block, Aiu_block)
                 for (i2, i1) ∈ enumerate(rowinds)
-                    vector_intermediate_buffer_local[i1] = -vec_buffer_out[i2]
+                    vector_intermediate_buffer_local[i1] -= vec_buffer_out[i2]
                 end
             end
         end
@@ -745,12 +750,17 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
         bottom_block_vector_rowinds = C.bottom_block_vector_rowinds
         synchronize_shared = C.synchronize_shared
 
+        if !isempty(vector_range)
+            vector_intermediate_buffer[:,vector_range] .= 0.0
+        end
+        synchronize_shared()
+
         # The rows are labelled by block_hypercube_position, so there are no overlaps, and
         # we can directly set entries, instead of adding to them, and so do not need to
         # zero-initialise the output buffer.
         mul!(vec_buffer_block_out, block, Ainv_dot_u)
         for (i2, i1) ∈ enumerate(bottom_block_vector_rowinds)
-            vector_intermediate_buffer_local[i1] = -vec_buffer_block_out[i2]
+            vector_intermediate_buffer_local[i1] -= vec_buffer_block_out[i2]
         end
 
         synchronize_shared()
