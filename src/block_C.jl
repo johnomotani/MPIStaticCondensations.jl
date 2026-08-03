@@ -1,4 +1,4 @@
-struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Function}
+struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
     blocks::Vector{Tb}
     block_rowinds::Vector{NTuple{Nvar,Trange}}
     block_row_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
@@ -6,30 +6,27 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
     bottom_block_vector_rowinds::Vector{Trange}
     block_colinds::Vector{NTuple{Nvar,Trange}}
     block_col_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
-    block_hypercube_positions::Vector{Ti}
-    n_hypercube_positions::Ti
+    bottom_block_output_indices::Array{Vector{Ti},3}
+    block_output_ranges::Array{UnitRange{Ti},3}
+    bottom_block_output_vector_indices::Matrix{Vector{Ti}}
+    block_output_vector_ranges::Matrix{UnitRange{Ti}}
     right_multiplication_buffer_blocks::Trmbb
     dense_buffer_storage::Tdbs
     vector_buffer_blocks_in::Vector{Vector{Tf}}
     vector_buffer_blocks_out::Vector{Vector{Tf}}
-    vector_intermediate_buffer::Tib
     vector_range::UnitRange{Ti}
-    block_synchronize_shared::Fsb
     synchronize_shared::Fs
 
     function BlockCSerial{Tf}(block_rowinds::Vector{NTuple{Nvar,Tind}},
                               bottom_block_rowinds::Vector{NTuple{Nvar,Tind}},
                               bottom_block_vector_rowinds::Vector{NTuple{Nvar,Tind}},
                               block_colinds::Vector{NTuple{Nvar,Tind}},
+                              bottom_block_size::Ti,
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractSparseMatrixCSC,SharedSparseBuffer}}},Nothing},
-                              block_hypercube_positions::Vector{Ti},
-                              n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
                               dense_buffer_storage::Vector{Tf},
-                              vector_intermediate_buffer::AbstractMatrix{Tf},
-                              vector_range::UnitRange{Ti},
-                              block_synchronize_shared::Fsb,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fsb<:Function,Fs<:Function}
+                              shared_comm_rank::Ti, shared_comm_size::Ti,
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fs<:Function}
         nblock_unfiltered = length(block_rowinds)
         non_empty_blocks = [!all(isempty(vbi) for vbi ∈ block_rowinds[ib]) &&
                             !all(isempty(vbi) for vbi ∈ block_colinds[ib])
@@ -94,21 +91,48 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Tib,Fsb<:Function,Fs<:Functi
             end
         end
 
+        # To avoid shared-memory errors, different processes must write to non-overlapping
+        # entries in the output vector. However, when using multiple variables as the
+        # off-diagonal variable blocks are dense in 'other' dimensions (not shared by both
+        # row and column variables) the output entries of all the blocks are likely to
+        # overlap. To deal with this we divide the output vector into non-overlapping
+        # segments (as many as there are processes), have each process write its output to
+        # one segment, then synchronize and have each process move on to a different
+        # segment, continuing until all output has been written.
+        n_per_proc = (bottom_block_size + shared_comm_size - 1) ÷ shared_comm_size
+        output_ranges = [(shared_comm_rank+segment)*n_per_proc+1:min((shared_comm_rank+segment+1)*n_per_proc,bottom_block_size)
+                         for segment ∈ 0:shared_comm_size-1]
+        block_output_vector_ranges = [searchsortedfirst(bi,first(or)):searchsortedlast(bi,last(or))
+                                      for bi ∈ bottom_block_vector_rowinds, or ∈ output_ranges]
+        bottom_block_output_vector_indices = [bi[block_output_vector_ranges[iblock,isegment]]
+                                              for (iblock, bi) ∈ enumerate(bottom_block_vector_rowinds),
+                                              isegment ∈ 1:shared_comm_size]
+        block_output_ranges = [searchsortedfirst(block_row_ranges[iblock,isegment][ivar],first(or)-block_row_range_offsets[iblock][ivar]):searchsortedlast(block_row_ranges[iblock,isegment][ivar],last(or)-block_row_range_offsets[iblock][ivar])
+                               for ivar ∈ 1:Nvar,
+                               (iblock, rr) ∈ enumerate(block_row_ranges),
+                               (isegment, or) ∈ enumerate(output_ranges)]
+        bottom_block_output_indices = [bottom_block_rowinds[ib][ivar][block_output_ranges[ivar,ib,isegment]]
+                                       for ivar ∈ 1:Nvar,
+                                       ib ∈ 1:length(block_rowinds),
+                                       isegment ∈ 1:shared_comm_size]
+
+        vector_range = output_ranges[1]
+
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{Nvar,Tf,Ti,eltype(blocks),Tind,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),typeof(vector_intermediate_buffer),Fsb,Fs}(
+        return new{Nvar,Tf,Ti,eltype(blocks),Tind,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),Fs}(
                    blocks, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_col_ranges,
-                   block_hypercube_positions, n_hypercube_positions,
+                   bottom_block_output_indices, block_output_ranges,
+                   bottom_block_output_vector_indices, block_output_vector_ranges,
                    right_multiplication_buffer_blocks, dense_buffer_storage,
-                   vector_buffer_blocks_in, vector_buffer_blocks_out,
-                   vector_intermediate_buffer, vector_range, block_synchronize_shared,
+                   vector_buffer_blocks_in, vector_buffer_blocks_out, vector_range,
                    synchronize_shared)
     end
 end
 
-struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fs<:Function}
     block::Tb
     block_rowinds::NTuple{Nvar,Tind}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
@@ -118,65 +142,27 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<
     bottom_block_vector_colinds::Tind
     block_colinds::NTuple{Nvar,Tind}
     block_col_ranges::NTuple{Nvar,UnitRange{Ti}}
-    block_hypercube_position::Ti
-    n_hypercube_positions::Ti
+    bottom_block_output_indices::Matrix{Vector{Ti}}
+    block_output_ranges::Matrix{UnitRange{Ti}}
+    bottom_block_output_vector_indices::Vector{Vector{Ti}}
+    block_output_vector_ranges::Vector{UnitRange{Ti}}
     right_multiplication_buffer_block::Trmbb
     dense_buffer::Tdb
     vector_buffer_block_in::Tbi
     vector_buffer_block_out::Vector{Tf}
-    vector_intermediate_buffer_local::Tbuff
-    vector_intermediate_buffer::Tib
     vector_range::UnitRange{Ti}
-    block_synchronize_shared::Fbs
     synchronize_shared::Fs
 
-    # When multiplying a vector or a BlockAinvDotBShared matrix by a BlockCShared
-    # block-structured C matrix, the output from each block can overlap as the outputs are
-    # on the 'boundary points' of the grid, not the decoupled 'interior points'. To deal
-    # with this, we first write the results from each block into an intermediate buffer
-    # (`vector_intermediate_buffer`, or a buffer provided by MPISchurComplements), which
-    # has several columns that collect different contributions to the result (where the
-    # blocks written to a single column do not have overlapping results, unless they come
-    # from the same process and therefore cannot conflict). The columns are summed to give
-    # the final result.
-    # To minimise memory bandwidth and computational time, we would like to minimise the
-    # number of columns in the intermediate buffer.
-    # When the number of processes is less than 2^d, where d is the number of dimensions,
-    # we use one column per process.
-    # When the number of processes is ≥2^d, we restrict the buffer to 2^d columns by
-    # choosing the output column for each block in such a way that the blocks in a single
-    # column never overlap. At any level of the solver, the grid is divided into blocks.
-    # Blocks that are adjacent in any dimension share a face/edge/corner/etc. and
-    # therefore have an overlap in 'C'. We group the blocks into 2x2x...
-    # squares/cubes/hypercubes. Use 3d language for simplicity in the rest of this note,
-    # but the same argument applies in any number of dimensions. A block in a certain
-    # position within a cube cannot overlap with the blocks in the same position in
-    # adjacent cubes, because they are fully separated by another block (cannot share even
-    # an edge or a corner). Therefore if we put the outputs from all blocks in one
-    # position in the cubes in one column, there are no overlaps (and so no conflicts
-    # between outputs from different processes). The number of positions in a cube is 2^3
-    # (or 2^d in d dimensions), so we need 2^d columns. We also need to keep track for
-    # each block of which position it has in its cube, which translates to the column its
-    # output should be written to in the intermediate buffer.
-    # To find the block's position within its cube, get the block index in un-flattened
-    # form. Transforming the index in each dimension to 0 for even values and 1 for odd
-    # values, the binary number formed by the string of 0s and 1s (ordered in the same way
-    # as the dimensions) is translated back to an integer to give the intermediate buffer
-    # column.
     function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,Tind},
                               bottom_block_rowinds_full::NTuple{Nvar,Tind},
                               bottom_block_vector_rowinds_full::NTuple{Nvar,Tind},
                               block_colinds::NTuple{Nvar,Tind},
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}},<:NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}},Nothing},
-                              block_hypercube_position::Ti, n_hypercube_positions::Ti,
                               right_multiplication_buffer_storage::Vector{Tf},
-                              dense_buffer_storage::Vector{Tf},
-                              vector_intermediate_buffer::AbstractMatrix{Tf},
-                              vector_range::UnitRange{Ti}, subgroup_i::Ti,
-                              block_allocate_shared_float::Fa,
-                              block_synchronize_shared::Fbs, block_comm_rank::Integer,
-                              block_comm_size::Integer,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa<:Function,Fbs<:Function,Fs<:Function}
+                              dense_buffer_storage::Vector{Tf}, subgroup_i::Ti,
+                              subgroup_size::Ti, block_allocate_shared_float::Fa,
+                              block_comm_rank::Integer, block_comm_size::Integer,
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa<:Function,Fs<:Function}
         rows_per_proc = Tuple((length(ri) + block_comm_size - 1) ÷ block_comm_size
                               for ri ∈ block_rowinds_full)
         partial_row_ranges = Tuple(block_comm_rank*rpp+1:min((block_comm_rank+1)*rpp,length(ri))
@@ -224,20 +210,43 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Tbuff,Tib,Fbs<:Function,Fs<
                     nrow, nrow_full)
         vector_buffer_block_in = block_allocate_shared_float(ncol)
         vector_buffer_block_out = zeros(Tf, nrow)
-        if subgroup_i < 0
-            vector_intermediate_buffer_local = zeros(Tf, 0)
-        else
-            vector_intermediate_buffer_local = @view vector_intermediate_buffer[block_hypercube_position,:]
-        end
-        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_intermediate_buffer_local),typeof(vector_intermediate_buffer),Fbs,Fs}(
+
+        # To avoid shared-memory errors, different subgroups must write to non-overlapping
+        # entries in the output vector. However, when using multiple variables as the
+        # off-diagonal variable blocks are dense in 'other' dimensions (not shared by both
+        # row and column variables) the output entries of all the blocks are likely to
+        # overlap. To deal with this we divide the output vector into non-overlapping
+        # segments (as many as there are subgroups), have each subgroup write its output
+        # to one segment, then synchronize and have each subgroup move on to a different
+        # segment, continuing until all output has been written.
+        n_per_subgroup = (bottom_block_size + subgroup_size - 1) ÷ subgroup_size
+        output_ranges = [(shared_comm_rank+segment)*n_per_subgroup+1:min((shared_comm_rank+segment+1)*n_per_subgroup,bottom_block_size)
+                         for segment ∈ 0:shared_comm_size-1]
+        block_output_vector_ranges = [searchsortedfirst(bottom_block_vector_rowinds,first(or)):searchsortedlast(bottom_block_vector_rowinds,last(or))
+                                      or ∈ output_ranges]
+        bottom_block_output_vector_indices = [bottom_block_vector_rowinds[or]
+                                              or ∈ eachcol(block_output_vector_ranges)]
+        block_output_ranges = [searchsortedfirst(vrr,first(or)-voffset):searchsortedlast(bi,last(or)-voffset)
+                               for (vrr, voffset) ∈ zip(block_row_ranges, block_row_range_offsets),
+                               or ∈ output_ranges]
+        bottom_block_output_indices = [block_rowinds[ivar][block_output_ranges[ivar,isegment]]
+                                       for ivar ∈ 1:Nvar,
+                                       isegment ∈ 1:shared_comm_size]
+
+        noutput = length(output_ranges[1])
+        n_per_proc = (noutput + block_size - 1) ÷ block_size
+        partial_output_range = block_rank*n_per_proc+1:min((block_rank+1)*n_per_proc,noutput)
+        vector_range = output_ranges[1][partial_output_range]
+
+        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_colinds, bottom_block_vector_rowinds,
                    bottom_block_vector_colinds, block_colinds, block_col_ranges,
-                   block_hypercube_position, n_hypercube_positions,
+                   bottom_block_output_indices, block_output_ranges,
+                   bottom_block_output_vector_indices, block_output_vector_ranges,
                    right_multiplication_buffer_block, dense_buffer,
                    vector_buffer_block_in, vector_buffer_block_out,
-                   vector_intermediate_buffer_local, vector_intermediate_buffer,
-                   vector_range, block_synchronize_shared, synchronize_shared)
+                   vector_range, synchronize_shared)
     end
 end
 
@@ -708,37 +717,26 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
 
     @inbounds begin
         blocks = C.blocks
-        vector_range = C.vector_range
-        vector_intermediate_buffer = C.vector_intermediate_buffer
+        bottom_block_output_vector_indices = C.bottom_block_output_vector_indices
+        block_output_vector_ranges = C.block_output_vector_ranges
+        vector_buffer_blocks_out = C.vector_buffer_blocks_out
         synchronize_shared = C.synchronize_shared
 
-        if !isempty(vector_range)
-            vector_intermediate_buffer[:,vector_range] .= 0.0
-        end
-        synchronize_shared()
-
-        # The rows are labelled by block_hypercube_position, so there are no overlaps, and
-        # we can directly set entries, instead of adding to them, and so do not need to
-        # zero-initialise the intermediate buffer.
-        block_hypercube_positions = C.block_hypercube_positions
         if length(blocks) > 0
-            for (vec_buffer_out, rowinds, block, bhp, Aiu_block) ∈
-                    zip(C.vector_buffer_blocks_out, C.bottom_block_vector_rowinds, blocks,
-                        block_hypercube_positions, Ainv_dot_u)
-                vector_intermediate_buffer_local = @view vector_intermediate_buffer[bhp,:]
+            for (vec_buffer_out, block, Aiu_block) ∈
+                    zip(vector_buffer_blocks_out, blocks, Ainv_dot_u)
                 mul!(vec_buffer_out, block, Aiu_block)
-                for (i2, i1) ∈ enumerate(rowinds)
-                    vector_intermediate_buffer_local[i1] -= vec_buffer_out[i2]
-                end
             end
         end
 
-        synchronize_shared()
-
-        # Sum contributions from all processes into the output.
-        if !isempty(vector_range)
-            @views sum!(C_dot_Ainv_dot_u[vector_range]',
-                        vector_intermediate_buffer[:,vector_range])
+        # Add contributions from all blocks to the output.
+        for isegment ∈ 1:size(bottom_block_output_vector_indices, 2)
+            boi = @view bottom_block_output_vector_indices[:,isegment]
+            bor = @view block_output_vector_ranges[:,isegment]
+            for (oi, or, vec_buffer_out) ∈ zip(boi, bor, vector_buffer_blocks_out)
+                @views C_dot_Ainv_dot_u[oi] .-= vec_buffer_out[or]
+            end
+            synchronize_shared()
         end
 
         return nothing
@@ -749,32 +747,17 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
 
     @inbounds begin
         block = C.block
-        vector_range = C.vector_range
-        vector_intermediate_buffer = C.vector_intermediate_buffer
-        vector_intermediate_buffer_local = C.vector_intermediate_buffer_local
-        vec_buffer_block_out = C.vector_buffer_block_out
-        bottom_block_vector_rowinds = C.bottom_block_vector_rowinds
+        vector_buffer_block_out = C.vector_buffer_block_out
+        bottom_block_output_vector_indices = C.bottom_block_output_vector_indices
+        block_output_range = C.block_output_range
         synchronize_shared = C.synchronize_shared
 
-        if !isempty(vector_range)
-            vector_intermediate_buffer[:,vector_range] .= 0.0
-        end
-        synchronize_shared()
+        mul!(vector_buffer_block_out, block, Ainv_dot_u)
 
-        # The rows are labelled by block_hypercube_position, so there are no overlaps, and
-        # we can directly set entries, instead of adding to them, and so do not need to
-        # zero-initialise the output buffer.
-        mul!(vec_buffer_block_out, block, Ainv_dot_u)
-        for (i2, i1) ∈ enumerate(bottom_block_vector_rowinds)
-            vector_intermediate_buffer_local[i1] -= vec_buffer_block_out[i2]
-        end
-
-        synchronize_shared()
-
-        # Sum contributions from all processes into the output.
-        if !isempty(vector_range)
-            @views sum!(C_dot_Ainv_dot_u[vector_range]',
-                        vector_intermediate_buffer[:,vector_range])
+        # Add contributions from all blocks to the output.
+        for (oi, or) ∈ zip(bottom_block_output_vector_indices, block_output_range)
+            @views C_dot_Ainv_dot_u[oi] .-= vector_buffer_block_out[or]
+            synchronize_shared()
         end
 
         return nothing

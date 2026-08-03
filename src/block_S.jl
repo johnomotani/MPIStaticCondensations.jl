@@ -2,7 +2,6 @@ struct BlockS{Nvar,Ti,Tm,Trange}
     matrix::NTuple{Nvar,NTuple{Nvar,Tm}}
     indices::NTuple{Nvar,Trange}
     column_ranges_partial::NTuple{Nvar,UnitRange{Ti}}
-    flat_ranges_partial::NTuple{Nvar,NTuple{Nvar,UnitRange{Ti}}}
 
     function BlockS(matrix::NTuple{Nvar,NTuple{Nvar,Tm}},
                     local_bottom_vector_indices::NTuple{Nvar,Tind}, shared_comm,
@@ -21,16 +20,10 @@ struct BlockS{Nvar,Ti,Tm,Trange}
             entries_per_proc = Tuple(Tuple((n + shared_comm_size - 1) ÷ shared_comm_size
                                            for n ∈ nrow)
                                      for nrow ∈ n_flat)
-            flat_ranges_partial = Tuple(Tuple(shared_comm_rank*entries_per_proc[ivar][jvar]+1:min((shared_comm_rank+1)*entries_per_proc[ivar][jvar],n_flat[ivar][jvar])
-                                              for jvar ∈ 1:Nvar)
-                                        for ivar ∈ 1:Nvar)
-        else
-            flat_ranges_partial = ntuple(i->column_ranges_partial, Nvar)
         end
 
         return new{Nvar,Ti,Tm,Tind}(
-                   matrix, local_bottom_vector_indices, column_ranges_partial,
-                   flat_ranges_partial)
+                   matrix, local_bottom_vector_indices, column_ranges_partial)
     end
 end
 
@@ -40,7 +33,6 @@ struct BlockDenseS{Nvar,Ti,Tm,Tind}
     ranges::NTuple{Nvar,UnitRange{Ti}}
     partial_indices::NTuple{Nvar,Tind}
     partial_ranges::NTuple{Nvar,UnitRange{Ti}}
-    column_range_partial::UnitRange{Ti}
 
     function BlockDenseS(matrix::Tm, local_bottom_vector_indices::NTuple{Nvar,Tind},
                          shared_comm,
@@ -48,10 +40,6 @@ struct BlockDenseS{Nvar,Ti,Tm,Tind}
         Ti = eltype(local_bottom_vector_indices[1])
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
-
-        ncol = size(matrix, 2)
-        cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
-        column_range_partial = shared_comm_rank*cols_per_proc+1:min((shared_comm_rank+1)*cols_per_proc,ncol)
 
         block_n = Tuple(length(bvi) for bvi ∈ local_bottom_vector_indices)
         block_n_per_proc = Tuple((nc + shared_comm_size - 1) ÷ shared_comm_size for nc ∈ block_n)
@@ -67,7 +55,7 @@ struct BlockDenseS{Nvar,Ti,Tm,Tind}
 
         return new{Nvar,Ti,Tm,Tind}(
                    matrix, local_bottom_vector_indices, ranges, partial_indices,
-                   partial_ranges, column_range_partial)
+                   partial_ranges)
     end
 end
 
@@ -113,17 +101,22 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         first_row = sc_col_rv[1]
                         last_row_i = length(sc_col_rv)
                         full_flat_i = max(searchsortedlast(@view(full_A_rowval[full_first_i:full_last_i]), first_row) - 1, 1) + full_first_i - 1
-                        while row_i ≤ last_row_i && full_flat_i ≤ full_last_i
+                        while row_i ≤ last_row_i
                             row = ri[sc_col_rv[row_i]]
                             full_row = full_A_rowval[full_flat_i]
                             if row == full_row
-                                sc_nzval[row_i+first_i-1] += full_A_nzval[full_flat_i]
+                                sc_nzval[row_i+first_i-1] = full_A_nzval[full_flat_i]
                                 row_i += 1
                                 full_flat_i += 1
                             elseif row < full_row
+                                sc_nzval[row_i+first_i-1] = 0.0
                                 row_i += 1
                             else
                                 full_flat_i += 1
+                            end
+                            if full_flat_i > full_last_i
+                                sc_nzval[row_i+first_i-1:last_row_i+first_i-1] .= 0.0
+                                break
                             end
                         end
                     end
@@ -160,17 +153,22 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         full_col_rv = full_A_rowval_list[full_j]
                         full_last_row_i = length(full_col_rv)
                         full_row_i = max(searchsortedlast(full_col_rv, first_row) - 1, 1)
-                        while row_i ≤ last_row_i && full_row_i ≤ full_last_row_i
+                        while row_i ≤ last_row_i
                             row = ri[sc_col_rv[row_i]]
                             full_row = full_col_rv[full_row_i]
                             if row == full_row
-                                sc_nzval[row_i+first_i-1] += full_A_nzval[full_row_i+full_first_i-1]
+                                sc_nzval[row_i+first_i-1] = full_A_nzval[full_row_i+full_first_i-1]
                                 row_i += 1
                                 full_row_i += 1
                             elseif row < full_row
+                                sc_nzval[row_i+first_i-1] = 0.0
                                 row_i += 1
                             else
                                 full_row_i += 1
+                            end
+                            if full_row_i > full_last_row_i
+                                sc_nzval[row_i+first_i-1:last_row_i+first_i-1] .= 0.0
+                                break
                             end
                         end
                     end
@@ -219,13 +217,17 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                             full_flat_i += 1
                         end
                         if full_i == full_A_rowval[full_flat_i]
-                            sc_matrix[i,j] += full_A_nzval[full_flat_i]
+                            sc_matrix[i,j] = full_A_nzval[full_flat_i]
                             full_flat_i += 1
                             if full_flat_i > full_last_i
+                                sc_matrix[i+1:end,j] .= 0.0
                                 break
                             end
+                        else
+                            sc_matrix[i,j] = 0.0
                         end
                         if full_i > last_full_row
+                            sc_matrix[i+1:end,j] .= 0.0
                             break
                         end
                     end
@@ -251,13 +253,17 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                             full_row_i += 1
                         end
                         if full_i == full_col_rv[full_row_i]
-                            sc_matrix[i,j] += full_A_nzval[full_row_i+full_first_i-1]
+                            sc_matrix[i,j] = full_A_nzval[full_row_i+full_first_i-1]
                             full_row_i += 1
                             if full_row_i > last_full_row_i
+                                sc_matrix[i+1:end,j] .= 0.0
                                 break
                             end
+                        else
+                            sc_matrix[i,j] = 0.0
                         end
                         if full_i > last_full_row
+                            sc_matrix[i+1:end,j] .= 0.0
                             break
                         end
                     end

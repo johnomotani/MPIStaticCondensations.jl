@@ -66,8 +66,6 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             block_comm_size = MPI.Comm_size(block_comm)
         end
 
-        n_hypercube_positions = 2^sum(level_info[1].nblock .> 1)
-
         if level ≤ length(schur_complement_buffer_list)
             this_sc_buffer = schur_complement_buffer_list[level]
             schur_complement = BlockS(this_sc_buffer,
@@ -108,30 +106,18 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                         Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
                         block_comm_rank, block_comm_size, block_allocate_shared_float,
                         block_synchronize_shared)
-                C_vector_intermediate_buffer =
-                    allocate_shared_float(n_hypercube_positions, nbottom)
-                if shared_comm_rank == 0
-                    C_vector_intermediate_buffer .= 0.0
-                end
-                C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
-                C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
-
-                block_hypercube_position =
-                    get_hypercube_position(level_info[1].iblock_list[:,1], level_info[1].nblock)
-
                 C = BlockCShared{data_type}(Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
                                             Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
                                             Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
                                             Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
-                                            matrix_template, block_hypercube_position,
-                                            n_hypercube_positions,
+                                            matrix_template,
                                             right_multiplication_buffer_storage,
                                             C_dense_buffer_storage,
-                                            C_vector_intermediate_buffer, C_vector_range,
                                             level_info[1].subgroup_i,
+                                            level_info[1].subgroup_size,
                                             block_allocate_shared_float,
-                                            block_synchronize_shared, block_comm_rank,
-                                            block_comm_size, synchronize_shared)
+                                            block_comm_rank, block_comm_size,
+                                            synchronize_shared)
             end
         else
             A_factorization = get_block_diagonal_solver(level_info, data_type, false,
@@ -141,28 +127,15 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                     extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_offset_indices),
                     extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
                     extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_offset_indices))
-            C_vector_intermediate_buffer =
-                allocate_shared_float(n_hypercube_positions, nbottom)
-            if shared_comm_rank == 0
-                C_vector_intermediate_buffer .= 0.0
-            end
-            C_vector_points_per_proc = (nbottom + shared_comm_size - 1) ÷ shared_comm_size
-            C_vector_range = shared_comm_rank*C_vector_points_per_proc+1:min((shared_comm_rank+1)*C_vector_points_per_proc,nbottom)
-
-            block_hypercube_positions =
-                [get_hypercube_position(iblock, level_info[1].nblock)
-                 for (iblock, bi) ∈ zip(eachcol(level_info[1].iblock_list), level_info[1].local_top_vector_a_block_indices)
-                 if !isempty(bi)]
-
             C = BlockCSerial{data_type}(
                     extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_indices),
                     extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_indices),
                     extract_block_field_from_Tuple(level_info, :a_block_off_diagonal_bottom_vector_offset_indices),
                     extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
-                    matrix_template, block_hypercube_positions, n_hypercube_positions,
-                    right_multiplication_buffer_storage, C_dense_buffer_storage,
-                    C_vector_intermediate_buffer, C_vector_range,
-                    block_synchronize_shared, synchronize_shared)
+                    sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
+                    matrix_template, right_multiplication_buffer_storage,
+                    C_dense_buffer_storage, shared_comm_rank, shared_comm_size,
+                    synchronize_shared)
         end
 
         if use_shared_blocks
@@ -210,10 +183,9 @@ function lu!(sc::BlockedSchurComplementSolver, full_A)
         @sc_timeit timer "schur_complement" begin
             synchronize_shared()
 
-            mul_C_Ainv_dot_B!(schur_complement, C, B)
-            synchronize_shared()
             add_D_to_schur_complement!(schur_complement, full_A)
             synchronize_shared()
+            mul_C_Ainv_dot_B!(schur_complement, C, B)
 
             lu!(schur_complement_solver, schur_complement.matrix)
         end
@@ -242,12 +214,11 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             end
 
             @sc_timeit timer "v-C.Ainv.u" begin
-                mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
-
                 for i ∈ bottom_sub_range
-                    y[i] += v[i]
+                    y[i] = v[i]
                 end
-                synchronize_shared()
+
+                mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
             end
 
             @sc_timeit timer "Sinv.(v-C.Ainv.u)" begin

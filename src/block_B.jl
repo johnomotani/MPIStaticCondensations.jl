@@ -403,200 +403,116 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
         C_blocks = C.blocks
         sc_matrix = schur_complement.matrix
         synchronize_shared = C.synchronize_shared
-        n_hypercube_positions = C.n_hypercube_positions
         dense_buffer_storage = C.dense_buffer_storage
 
         mul_blocks = C.right_multiplication_buffer_blocks
         Ainv_dot_B_blocks = Ainv_dot_B.blocks
-        block_output_inds = C.bottom_block_rowinds
-        block_output_ranges = C.block_row_ranges
+        block_output_rowinds = C.bottom_block_rowinds
+        block_output_row_ranges = C.block_row_ranges
+        block_output_colinds = C.bottom_block_output_indices
+        block_output_col_ranges = C.block_output_ranges
+
+        if dense_buffer_storage === nothing
+            for (mb, Cb, AiBb) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks)
+                mul!(mb, Cb, AiBb)
+            end
+        else
+            for (mb, Cb, AiBb) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks)
+                nrow, ncol = size(Cb)
+                dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
+                                       ncol)
+                C_colptr = Cb.colptr
+                C_rowval = Cb.rowval
+                C_nzval = Cb.nzval
+                dense_buffer .= 0.0
+                for j ∈ 1:ncol
+                    col_start = C_colptr[j]
+                    col_end = C_colptr[j+1]-1
+                    for flat_i ∈ col_start:col_end
+                        i = C_rowval[flat_i]
+                        dense_buffer[i,j] = C_nzval[flat_i]
+                    end
+                end
+                mul!(mb, dense_buffer, AiBb)
+            end
+        end
 
         if isa(sc_matrix[1][1], FixedSparseCSC)
-            flat_ranges_partial = schur_complement.flat_ranges_partial
-            for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
-                for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
-                    nzval = matrix_block.nzval
-                    if !isempty(fr)
-                        # Need to zero this buffer as other levels might put non-zeros in places that
-                        # will not be filled (by any process) in the following loop.
-                        nzval[fr] .= 0.0
-                    end
-                end
-            end
-
-            # The rows are labelled by block_hypercube_position, so there are no overlaps,
-            # and we can directly set entries, instead of adding to them, and so do not
-            # need to zero-initialise the output buffer.
-            block_hypercube_positions = C.block_hypercube_positions
-            if dense_buffer_storage === nothing
-                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                              block_hypercube_positions)
-                    mul!(mb, Cb, AiBb, -1.0, 0.0)
-                end
-            else
-                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                              block_output_inds,
-                                              block_hypercube_positions)
-                    nrow, ncol = size(Cb)
-                    dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
-                                           ncol)
-                    C_colptr = Cb.colptr
-                    C_rowval = Cb.rowval
-                    C_nzval = Cb.nzval
-                    dense_buffer .= 0.0
-                    for j ∈ 1:ncol
-                        col_start = C_colptr[j]
-                        col_end = C_colptr[j+1]-1
-                        for flat_i ∈ col_start:col_end
-                            i = C_rowval[flat_i]
-                            dense_buffer[i,j] = C_nzval[flat_i]
-                        end
-                    end
-                    mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
-                end
-            end
-
-            synchronize_shared()
-
-            current_hypercube_position = 1
-            for (mb, output_ranges, output_inds, bhp) ∈
-                    zip(mul_blocks, block_output_ranges, block_output_inds,
-                        block_hypercube_positions)
-                for _ ∈ current_hypercube_position:bhp-1
-                    # Synchronize in between copying different 'hypercube positions',
-                    # as blocks in different hypercube positions can overlap.
-                    # Note that the blocks are sorted by hypercube position, so this loop
-                    # will include every block owned by this process.
-                    synchronize_shared()
-                end
-                current_hypercube_position = bhp
-
-                # Add result from mb into schur_complement.
-                for (jvar, col_range, colinds) ∈ zip(1:Nvar, output_ranges, output_inds),
-                        (ivar, row_range, rowinds) ∈ zip(1:Nvar, output_ranges, output_inds)
-                    sc_matrix_variable_block = sc_matrix[ivar][jvar]
-                    colptr = sc_matrix_variable_block.colptr
-                    rowval = sc_matrix_variable_block.rowval
-                    nzval = sc_matrix_variable_block.nzval
-                    first_row = first(rowinds)
-                    first_i = first(row_range)
-                    last_i = last(row_range)
-                    for (j, col) ∈ zip(col_range, colinds)
-                        first_flat_i = colptr[col]
-                        last_flat_i = colptr[col+1] - 1
-                        col_rv = @view rowval[first_flat_i:last_flat_i]
-                        flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_flat_i - 1
-                        i = first_i
-                        while flat_i ≤ last_flat_i && i ≤ last_i
-                            if rowval[flat_i] == ri[i]
-                                nzval[flat_i] += mb[i,j]
-                                flat_i += 1
-                                i += 1
-                            else
-                                # rowval[flat_i] must be less than ri[i]
-                                flat_i += 1
+            for (segment_col_ranges, segment_colinds) ∈
+                    zip(eachslice(block_output_col_ranges; dims=3),
+                        eachslice(block_output_colinds; dims=3))
+                for (mb, output_row_ranges, output_rowinds, output_col_ranges, output_colinds) ∈
+                        zip(mul_blocks, block_output_row_ranges, block_output_rowinds,
+                            eachcol(segment_col_ranges), eachcol(segment_colinds))
+                    # Add result from mb into schur_complement.
+                    for (jvar, col_range, colinds) ∈ zip(1:Nvar, output_col_ranges, output_colinds),
+                            (ivar, row_range, rowinds) ∈ zip(1:Nvar, output_row_ranges, output_rowinds)
+                        sc_matrix_variable_block = sc_matrix[ivar][jvar]
+                        colptr = sc_matrix_variable_block.colptr
+                        rowval = sc_matrix_variable_block.rowval
+                        nzval = sc_matrix_variable_block.nzval
+                        first_row = first(rowinds)
+                        first_i = first(row_range)
+                        last_i = last(row_range)
+                        for (j, col) ∈ zip(col_range, colinds)
+                            first_flat_i = colptr[col]
+                            last_flat_i = colptr[col+1] - 1
+                            col_rv = @view rowval[first_flat_i:last_flat_i]
+                            flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_flat_i - 1
+                            i = first_i
+                            while flat_i ≤ last_flat_i && i ≤ last_i
+                                if rowval[flat_i] == ri[i]
+                                    nzval[flat_i] -= mb[i,j]
+                                    flat_i += 1
+                                    i += 1
+                                else
+                                    # rowval[flat_i] must be less than ri[i]
+                                    flat_i += 1
+                                end
                             end
                         end
                     end
                 end
-            end
 
-            for _ ∈ current_hypercube_position:n_hypercube_positions-1
-                # Synchronize in between copying different 'hypercube positions',
-                # as blocks in different hypercube positions can overlap.
                 synchronize_shared()
             end
         elseif isa(sc_matrix[1][1], SharedSparseBuffer)
-            flat_ranges_partial = schur_complement.flat_ranges_partial
-            for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
-                for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
-                    nzval = matrix_block.nzval
-                    if !isempty(fr)
-                        # Need to zero this buffer as other levels might put non-zeros in places that
-                        # will not be filled (by any process) in the following loop.
-                        nzval[fr] .= 0.0
-                    end
-                end
-            end
+            for (segment_col_ranges, segment_colinds) ∈
+                    zip(eachslice(block_output_col_ranges; dims=3),
+                        eachslice(block_output_colinds; dims=3))
+                for (mb, output_row_ranges, output_rowinds, output_col_ranges, output_colinds) ∈
+                        zip(mul_blocks, block_output_row_ranges, block_output_rowinds,
+                            eachcol(segment_col_ranges), eachcol(segment_colinds))
 
-            # The rows are labelled by block_hypercube_position, so there are no overlaps,
-            # and we can directly set entries, instead of adding to them, and so do not
-            # need to zero-initialise the output buffer.
-            block_hypercube_positions = C.block_hypercube_positions
-            if dense_buffer_storage === nothing
-                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                              block_hypercube_positions)
-                    mul!(mb, Cb, AiBb, -1.0, 0.0)
-                end
-            else
-                for (mb, Cb, AiBb, bhp) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks,
-                                              block_hypercube_positions)
-                    nrow, ncol = size(Cb)
-                    dense_buffer = reshape(@view(dense_buffer_storage[1:nrow*ncol]), nrow,
-                                           ncol)
-                    C_colptr = Cb.colptr
-                    C_rowval = Cb.rowval
-                    C_nzval = Cb.nzval
-                    dense_buffer .= 0.0
-                    for j ∈ 1:ncol
-                        col_start = C_colptr[j]
-                        col_end = C_colptr[j+1]-1
-                        for flat_i ∈ col_start:col_end
-                            i = C_rowval[flat_i]
-                            dense_buffer[i,j] = C_nzval[flat_i]
-                        end
-                    end
-                    mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
-                end
-            end
-
-            synchronize_shared()
-
-            current_hypercube_position = 1
-            for (mb, output_ranges, output_inds, bhp) ∈
-                    zip(mul_blocks, block_output_ranges, block_output_inds,
-                        block_hypercube_positions)
-                for _ ∈ current_hypercube_position:bhp-1
-                    # Synchronize in between copying different 'hypercube positions',
-                    # as blocks in different hypercube positions can overlap.
-                    # Note that the blocks are sorted by hypercube position, so this loop
-                    # will include every block owned by this process.
-                    synchronize_shared()
-                end
-                current_hypercube_position = bhp
-
-                # Add result from mb into schur_complement.
-                for (jvar, col_range, colinds) ∈ zip(1:Nvar, output_ranges, output_inds),
-                        (ivar, row_range, rowinds) ∈ zip(1:Nvar, output_ranges, output_inds)
-                    sc_matrix_variable_block = sc_matrix[ivar][jvar]
-                    colptr = sc_matrix_variable_block.colptr
-                    rowval_list = sc_matrix_variable_block.rowval_list
-                    nzval = sc_matrix_variable_block.nzval
-                    first_row = first(rowinds)
-                    nrow = length(rowinds)
-                    for (j, col) ∈ zip(col_range, colinds)
-                        first_flat_i = colptr[col]
-                        col_rv = rowval_list[col]
-                        last_row_i = length(col_rv)
-                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                        i = 1
-                        while row_i ≤ last_row_i && i ≤ nrow
-                            if col_rv[row_i] == rowinds[i]
-                                nzval[row_i+first_flat_i-1] += mb[row_range[i],j]
-                                row_i += 1
-                                i += 1
-                            else
-                                # col_rv[row_i] must be less than rowinds[i]
-                                row_i += 1
+                    # Add result from mb into schur_complement.
+                    for (jvar, col_range, colinds) ∈ zip(1:Nvar, output_col_ranges, output_colinds),
+                            (ivar, row_range, rowinds) ∈ zip(1:Nvar, output_row_ranges, output_rowinds)
+                        sc_matrix_variable_block = sc_matrix[ivar][jvar]
+                        colptr = sc_matrix_variable_block.colptr
+                        rowval_list = sc_matrix_variable_block.rowval_list
+                        nzval = sc_matrix_variable_block.nzval
+                        first_row = first(rowinds)
+                        nrow = length(rowinds)
+                        for (j, col) ∈ zip(col_range, colinds)
+                            first_flat_i = colptr[col]
+                            col_rv = rowval_list[col]
+                            last_row_i = length(col_rv)
+                            row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                            i = 1
+                            while row_i ≤ last_row_i && i ≤ nrow
+                                if col_rv[row_i] == rowinds[i]
+                                    nzval[row_i+first_flat_i-1] -= mb[row_range[i],j]
+                                    row_i += 1
+                                    i += 1
+                                else
+                                    # col_rv[row_i] must be less than rowinds[i]
+                                    row_i += 1
+                                end
                             end
                         end
                     end
                 end
-            end
 
-            for _ ∈ current_hypercube_position:n_hypercube_positions-1
-                # Synchronize in between copying different 'hypercube positions',
-                # as blocks in different hypercube positions can overlap.
                 synchronize_shared()
             end
         else
@@ -620,141 +536,96 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCShared{Nvar}
         dense_C = C.dense_buffer
         block_output_rowinds = C.bottom_block_rowinds
         block_output_colinds = C.bottom_block_colinds
-        block_hypercube_position = C.block_hypercube_position
-        n_hypercube_positions = C.n_hypercube_positions
+        block_output_col_ranges = C.block_output_col_ranges
+        block_output_colinds = C.block_output_colinds
         Ainv_dot_B_block = Ainv_dot_B.block
 
+        if length(mul_block) != 0
+            if dense_C === nothing
+                mul!(mul_block, C_block, Ainv_dot_B_block)
+            else
+                ncol = size(C_block, 2)
+                C_colptr = C_block.colptr
+                C_rowval = C_block.rowval
+                C_nzval = C_block.nzval
+                dense_C .= 0.0
+                for j ∈ 1:ncol
+                    col_start = C_colptr[j]
+                    col_end = C_colptr[j+1]-1
+                    for flat_i ∈ col_start:col_end
+                        i = C_rowval[flat_i]
+                        dense_C[i,j] = C_nzval[flat_i]
+                    end
+                end
+                mul!(mul_block, dense_C, Ainv_dot_B_block)
+            end
+        end
+
         if isa(sc_matrix[1][1], FixedSparseCSC)
-            flat_ranges_partial = schur_complement.flat_ranges_partial
-            for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
-                for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
-                    nzval = matrix_block.nzval
-                    if !isempty(fr)
-                        # Need to zero this buffer as other levels might put non-zeros in places that
-                        # will not be filled (by any process) in the following loop.
-                        nzval[fr] .= 0.0
-                    end
-                end
-            end
-
-            if length(mul_block) != 0
-                if dense_C === nothing
-                    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
-                else
-                    ncol = size(C_block, 2)
-                    C_colptr = C_block.colptr
-                    C_rowval = C_block.rowval
-                    C_nzval = C_block.nzval
-                    dense_C .= 0.0
-                    for j ∈ 1:ncol
-                        col_start = C_colptr[j]
-                        col_end = C_colptr[j+1]-1
-                        for flat_i ∈ col_start:col_end
-                            i = C_rowval[flat_i]
-                            dense_C[i,j] = C_nzval[flat_i]
-                        end
-                    end
-                    mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
-                end
-            end
-
-            for hp ∈ 1:n_hypercube_positions
-                synchronize_shared()
-                if hp == block_hypercube_position && length(mul_block) != 0
-                    # Add result from mul_block into schur_complement matrix.
-                    for (jvar, colinds) ∈ zip(1:Nvar, block_output_colinds),
-                            (ivar, rowinds) ∈ zip(1:Nvar, block_output_rowinds)
-                        sc_matrix_variable_block = sc_matrix[ivar][jvar]
-                        colptr = sc_matrix_variable_block.colptr
-                        rowval = sc_matrix_variable_block.rowval
-                        nzval = sc_matrix_variable_block.nzval
-                        first_row = first(rowinds)
-                        nrow = length(rowinds)
-                        for (j, col) ∈ enumerate(colinds)
-                            first_flat_i = colptr[col]
-                            last_flat_i = colptr[col+1] - 1
-                            col_rv = @view rowval[first_flat_i:last_flat_i]
-                            flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_flat_i - 1
-                            i = first_i
-                            while flat_i ≤ last_flat_i && i ≤ nrow
-                                if rowval[flat_i] == rowinds[i]
-                                    nzval[flat_i] += mul_block[i,j]
-                                    flat_i += 1
-                                    i += 1
-                                else
-                                    # rowval[flat_i] must be less than rowinds[i].
-                                    flat_i += 1
-                                end
+            for (segment_col_ranges, segment_colinds) ∈
+                    zip(eachcol(block_output_col_ranges), eachcol(block_output_colinds))
+                # Add result from mul_block into schur_complement matrix.
+                for (jvar, col_range, colinds) ∈ zip(1:Nvar, segment_col_ranges, segment_colinds),
+                        (ivar, rowinds) ∈ zip(1:Nvar, block_output_rowinds)
+                    sc_matrix_variable_block = sc_matrix[ivar][jvar]
+                    colptr = sc_matrix_variable_block.colptr
+                    rowval = sc_matrix_variable_block.rowval
+                    nzval = sc_matrix_variable_block.nzval
+                    first_row = first(rowinds)
+                    nrow = length(rowinds)
+                    for (j, col) ∈ zip(col_range, colinds)
+                        first_flat_i = colptr[col]
+                        last_flat_i = colptr[col+1] - 1
+                        col_rv = @view rowval[first_flat_i:last_flat_i]
+                        flat_i = max(searchsortedlast(col_rv, first_row) - 1, 1) + first_flat_i - 1
+                        i = first_i
+                        while flat_i ≤ last_flat_i && i ≤ nrow
+                            if rowval[flat_i] == rowinds[i]
+                                nzval[flat_i] -= mul_block[i,j]
+                                flat_i += 1
+                                i += 1
+                            else
+                                # rowval[flat_i] must be less than rowinds[i].
+                                flat_i += 1
                             end
                         end
                     end
                 end
+
+                synchronize_shared()
             end
         elseif isa(sc_matrix[1][1], SharedSparseBuffer)
-            flat_ranges_partial = schur_complement.flat_ranges_partial
-            for (flat_ranges_row, matrix_row) ∈ zip(flat_ranges_partial, sc_matrix)
-                for (fr, matrix_block) ∈ zip(flat_ranges_row, matrix_row)
-                    nzval = matrix_block.nzval
-                    if !isempty(fr)
-                        # Need to zero this buffer as other levels might put non-zeros in places that
-                        # will not be filled (by any process) in the following loop.
-                        nzval[fr] .= 0.0
-                    end
-                end
-            end
-
-            if length(mul_block) != 0
-                if dense_C === nothing
-                    mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
-                else
-                    ncol = size(C_block, 2)
-                    C_colptr = C_block.colptr
-                    C_rowval = C_block.rowval
-                    C_nzval = C_block.nzval
-                    dense_C .= 0.0
-                    for j ∈ 1:ncol
-                        col_start = C_colptr[j]
-                        col_end = C_colptr[j+1]-1
-                        for flat_i ∈ col_start:col_end
-                            i = C_rowval[flat_i]
-                            dense_C[i,j] = C_nzval[flat_i]
-                        end
-                    end
-                    mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
-                end
-            end
-
-            for hp ∈ 1:n_hypercube_positions
-                synchronize_shared()
-                if hp == block_hypercube_position && length(mul_block) != 0
-                    # Add result from mul_block into schur_complement matrix.
-                    for (jvar, colinds) ∈ zip(1:Nvar, block_output_colinds),
-                            (ivar, rowinds) ∈ zip(1:Nvar, block_output_rowinds)
-                        sc_matrix_variable_block = sc_matrix[ivar][jvar]
-                        colptr = sc_matrix_variable_block.colptr
-                        rowval_list = sc_matrix_variable_block.rowval_list
-                        nzval = sc_matrix_variable_block.nzval
-                        first_row = first(rowinds)
-                        nrow = length(rowinds)
-                        for (j, col) ∈ enumerate(colinds)
-                            first_flat_i = colptr[col]
-                            col_rv = rowval_list[col]
-                            last_row_i = length(col_rv)
-                            row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                            i = 1
-                            while row_i ≤ last_row_i && i ≤ nrow
-                                if col_rv[row_i] == rowinds[i]
-                                    nzval[row_i+first_flat_i-1] += mul_block[i,j]
-                                    row_i += 1
-                                    i += 1
-                                else
-                                    # col_rv[row_i] must be less than rowinds[i].
-                                    row_i += 1
-                                end
+            for (segment_col_ranges, segment_colinds) ∈
+                    zip(eachcol(block_output_col_ranges), eachcol(block_output_colinds))
+                # Add result from mul_block into schur_complement matrix.
+                for (jvar, col_range, colinds) ∈ zip(1:Nvar, segment_col_ranges, segment_colinds),
+                        (ivar, rowinds) ∈ zip(1:Nvar, block_output_rowinds)
+                    sc_matrix_variable_block = sc_matrix[ivar][jvar]
+                    colptr = sc_matrix_variable_block.colptr
+                    rowval_list = sc_matrix_variable_block.rowval_list
+                    nzval = sc_matrix_variable_block.nzval
+                    first_row = first(rowinds)
+                    nrow = length(rowinds)
+                    for (j, col) ∈ zip(col_range, colinds)
+                        first_flat_i = colptr[col]
+                        col_rv = rowval_list[col]
+                        last_row_i = length(col_rv)
+                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                        i = 1
+                        while row_i ≤ last_row_i && i ≤ nrow
+                            if col_rv[row_i] == rowinds[i]
+                                nzval[row_i+first_flat_i-1] -= mul_block[i,j]
+                                row_i += 1
+                                i += 1
+                            else
+                                # col_rv[row_i] must be less than rowinds[i].
+                                row_i += 1
                             end
                         end
                     end
                 end
+
+                synchronize_shared()
             end
         else
             error("Unexpected type for sc_matrix[1][1] ($(typeof(sc_matrix[1][1]))).")
@@ -773,23 +644,17 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS{Nvar}, C::BlockCSerial{
         C_blocks = C.blocks
         sc_matrix = schur_complement.matrix
         synchronize_shared = C.synchronize_shared
-        n_hypercube_positions = C.n_hypercube_positions
         dense_buffer_storage = C.dense_buffer_storage
 
         mul_blocks = C.right_multiplication_buffer_blocks
         Ainv_dot_B_blocks = Ainv_dot_B.blocks
-        block_output_inds = C.bottom_block_vector_rowinds
+        block_output_rowinds = C.bottom_block_vector_rowinds
+        block_output_colinds = C.bottom_block_output_vector_indices
+        block_output_col_ranges = C.block_output_vector_ranges
 
-        column_range_partial = schur_complement.column_range_partial
-        sc_matrix[:,column_range_partial] .= 0.0
-
-        # The rows are labelled by block_hypercube_position, so there are no overlaps,
-        # and we can directly set entries, instead of adding to them, and so do not
-        # need to zero-initialise the output buffer.
-        block_hypercube_positions = C.block_hypercube_positions
         if dense_buffer_storage === nothing
             for (mb, Cb, AiBb) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks)
-                mul!(mb, Cb, AiBb, -1.0, 0.0)
+                mul!(mb, Cb, AiBb)
             end
         else
             for (mb, Cb, AiBb) ∈ zip(mul_blocks, C_blocks, Ainv_dot_B_blocks)
@@ -808,33 +673,21 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS{Nvar}, C::BlockCSerial{
                         dense_buffer[i,j] = C_nzval[flat_i]
                     end
                 end
-                mul!(mb, dense_buffer, AiBb, -1.0, 0.0)
+                mul!(mb, dense_buffer, AiBb)
             end
         end
 
-        synchronize_shared()
-
-        current_hypercube_position = 1
-        for (mb, output_inds, bhp) ∈ zip(mul_blocks, block_output_inds,
-                                         block_hypercube_positions)
-            for _ ∈ current_hypercube_position:bhp-1
-                # Synchronize in between copying different 'hypercube positions',
-                # as blocks in different hypercube positions can overlap.
-                # Note that the blocks are sorted by hypercube position, so this loop
-                # will include every block owned by this process.
-                synchronize_shared()
+        for (segment_col_ranges, segment_colinds) ∈ zip(eachcol(block_output_col_ranges),
+                                                        eachcol(block_output_colinds))
+            for (mb, output_rowinds, output_col_range, output_colinds) ∈
+                    zip(mul_blocks, block_output_rowinds, segment_col_ranges,
+                        segment_colinds)
+                # Add result from mb into schur_complement.
+                for (j1, j2) ∈ zip(output_col_range, output_colinds), (i1, i2) ∈ enumerate(output_rowinds)
+                    sc_matrix[i2,j2] -= mb[i1,j1]
+                end
             end
-            current_hypercube_position = bhp
 
-            # Add result from mb into schur_complement.
-            for (j1, j2) ∈ enumerate(output_inds), (i1, i2) ∈ enumerate(output_inds)
-                sc_matrix[i2,j2] += mb[i1,j1]
-            end
-        end
-
-        for _ ∈ current_hypercube_position:n_hypercube_positions-1
-            # Synchronize in between copying different 'hypercube positions',
-            # as blocks in different hypercube positions can overlap.
             synchronize_shared()
         end
 
@@ -854,13 +707,9 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
         mul_block = C.right_multiplication_buffer_block
         dense_C = C.dense_buffer
         block_output_rowinds = C.bottom_block_vector_rowinds
-        block_output_colinds = C.bottom_block_vector_colinds
-        block_hypercube_position = C.block_hypercube_position
-        n_hypercube_positions = C.n_hypercube_positions
+        block_output_colinds = C.bottom_block_output_indices
+        block_output_col_ranges = C.bottom_block_output_ranges
         Ainv_dot_B_block = Ainv_dot_B.block
-
-        column_range_partial = schur_complement.column_range_partial
-        sc_matrix[:,column_range_partial] .= 0.0
 
         if length(mul_block) != 0
             if dense_C === nothing
@@ -879,18 +728,18 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
                         dense_C[i,j] = C_nzval[flat_i]
                     end
                 end
-                mul!(mul_block, dense_C, Ainv_dot_B_block, -1.0, 0.0)
+                mul!(mul_block, dense_C, Ainv_dot_B_block)
             end
         end
 
-        for hp ∈ 1:n_hypercube_positions
-            synchronize_shared()
-            if hp == block_hypercube_position && length(mul_block) != 0
-                # Add result from mul_block into schur_complement matrix.
-                for (j1, j2) ∈ enumerate(block_output_colinds), (i1, i2) ∈ enumerate(block_output_rowinds)
-                    sc_matrix[i2,j2] += mul_block[i1,j1]
-                end
+        for (segment_col_range, segment_colinds) ∈ zip(block_output_col_ranges,
+                                                        block_output_colinds)
+            # Add result from mul_block into schur_complement matrix.
+            for (j1, j2) ∈ zip(segment_col_range, segment_colinds),
+                    (i1, i2) ∈ enumerate(block_output_rowinds)
+                sc_matrix[i2,j2] -= mul_block[i1,j1]
             end
+            synchronize_shared()
         end
 
         return nothing
