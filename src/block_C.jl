@@ -6,7 +6,7 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
     bottom_block_vector_rowinds::Vector{Trange}
     block_colinds::Vector{NTuple{Nvar,Trange}}
     block_col_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
-    bottom_block_output_indices::Array{Vector{Ti},3}
+    bottom_block_output_colinds::Array{Vector{Ti},3}
     block_output_ranges::Array{UnitRange{Ti},3}
     bottom_block_output_vector_indices::Matrix{Vector{Ti}}
     block_output_vector_ranges::Matrix{UnitRange{Ti}}
@@ -100,20 +100,20 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
         # one segment, then synchronize and have each process move on to a different
         # segment, continuing until all output has been written.
         n_per_proc = (bottom_block_size + shared_comm_size - 1) ÷ shared_comm_size
-        output_ranges = [(shared_comm_rank+segment)*n_per_proc+1:min((shared_comm_rank+segment+1)*n_per_proc,bottom_block_size)
+        output_ranges = [((shared_comm_rank+segment)%shared_comm_size)*n_per_proc+1:min(((shared_comm_rank+segment)%shared_comm_size+1)*n_per_proc,bottom_block_size)
                          for segment ∈ 0:shared_comm_size-1]
         block_output_vector_ranges = [searchsortedfirst(bi,first(or)):searchsortedlast(bi,last(or))
                                       for bi ∈ bottom_block_vector_rowinds, or ∈ output_ranges]
         bottom_block_output_vector_indices = [bi[block_output_vector_ranges[iblock,isegment]]
                                               for (iblock, bi) ∈ enumerate(bottom_block_vector_rowinds),
                                               isegment ∈ 1:shared_comm_size]
-        block_output_ranges = [searchsortedfirst(block_row_ranges[iblock,isegment][ivar],first(or)-block_row_range_offsets[iblock][ivar]):searchsortedlast(block_row_ranges[iblock,isegment][ivar],last(or)-block_row_range_offsets[iblock][ivar])
+        block_output_ranges = [searchsortedfirst(ri[ivar],first(or)-block_row_range_offsets[iblock][ivar]):searchsortedlast(ri[ivar],last(or)-block_row_range_offsets[iblock][ivar])
                                for ivar ∈ 1:Nvar,
-                               (iblock, rr) ∈ enumerate(block_row_ranges),
+                               (iblock, ri) ∈ enumerate(bottom_block_rowinds),
                                (isegment, or) ∈ enumerate(output_ranges)]
-        bottom_block_output_indices = [bottom_block_rowinds[ib][ivar][block_output_ranges[ivar,ib,isegment]]
+        bottom_block_output_colinds = [bottom_block_rowinds[ib][ivar][block_output_ranges[ivar,ib,isegment]]
                                        for ivar ∈ 1:Nvar,
-                                       ib ∈ 1:length(block_rowinds),
+                                       ib ∈ 1:length(bottom_block_rowinds),
                                        isegment ∈ 1:shared_comm_size]
 
         vector_range = output_ranges[1]
@@ -124,7 +124,7 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
         return new{Nvar,Tf,Ti,eltype(blocks),Tind,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),Fs}(
                    blocks, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_col_ranges,
-                   bottom_block_output_indices, block_output_ranges,
+                   bottom_block_output_colinds, block_output_ranges,
                    bottom_block_output_vector_indices, block_output_vector_ranges,
                    right_multiplication_buffer_blocks, dense_buffer_storage,
                    vector_buffer_blocks_in, vector_buffer_blocks_out, vector_range,
@@ -132,7 +132,7 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
     end
 end
 
-struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fs<:Function}
+struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fbs<:Function,Fs<:Function}
     block::Tb
     block_rowinds::NTuple{Nvar,Tind}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
@@ -142,7 +142,7 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fs<:Function}
     bottom_block_vector_colinds::Tind
     block_colinds::NTuple{Nvar,Tind}
     block_col_ranges::NTuple{Nvar,UnitRange{Ti}}
-    bottom_block_output_indices::Matrix{Vector{Ti}}
+    bottom_block_output_colinds::Matrix{Vector{Ti}}
     block_output_ranges::Matrix{UnitRange{Ti}}
     bottom_block_output_vector_indices::Vector{Vector{Ti}}
     block_output_vector_ranges::Vector{UnitRange{Ti}}
@@ -151,18 +151,21 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fs<:Function}
     vector_buffer_block_in::Tbi
     vector_buffer_block_out::Vector{Tf}
     vector_range::UnitRange{Ti}
+    block_synchronize_shared::Fbs
     synchronize_shared::Fs
 
     function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,Tind},
                               bottom_block_rowinds_full::NTuple{Nvar,Tind},
                               bottom_block_vector_rowinds_full::NTuple{Nvar,Tind},
                               block_colinds::NTuple{Nvar,Tind},
+                              bottom_block_size::Ti,
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}},<:NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}},Nothing},
                               right_multiplication_buffer_storage::Vector{Tf},
                               dense_buffer_storage::Vector{Tf}, subgroup_i::Ti,
-                              subgroup_size::Ti, block_allocate_shared_float::Fa,
+                              n_subgroups::Ti, block_allocate_shared_float::Fa,
                               block_comm_rank::Integer, block_comm_size::Integer,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa<:Function,Fs<:Function}
+                              block_synchronize_shared::Fbs,
+                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa<:Function,Fbs<:Function,Fs<:Function}
         rows_per_proc = Tuple((length(ri) + block_comm_size - 1) ÷ block_comm_size
                               for ri ∈ block_rowinds_full)
         partial_row_ranges = Tuple(block_comm_rank*rpp+1:min((block_comm_rank+1)*rpp,length(ri))
@@ -219,34 +222,34 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fs<:Function}
         # segments (as many as there are subgroups), have each subgroup write its output
         # to one segment, then synchronize and have each subgroup move on to a different
         # segment, continuing until all output has been written.
-        n_per_subgroup = (bottom_block_size + subgroup_size - 1) ÷ subgroup_size
-        output_ranges = [(shared_comm_rank+segment)*n_per_subgroup+1:min((shared_comm_rank+segment+1)*n_per_subgroup,bottom_block_size)
-                         for segment ∈ 0:shared_comm_size-1]
+        n_per_subgroup = (bottom_block_size + n_subgroups - 1) ÷ n_subgroups
+        output_ranges = [((subgroup_i+segment)%n_subgroups)*n_per_subgroup+1:min(((subgroup_i+segment)%n_subgroups+1)*n_per_subgroup,bottom_block_size)
+                         for segment ∈ 0:n_subgroups-1]
         block_output_vector_ranges = [searchsortedfirst(bottom_block_vector_rowinds,first(or)):searchsortedlast(bottom_block_vector_rowinds,last(or))
-                                      or ∈ output_ranges]
+                                      for or ∈ output_ranges]
         bottom_block_output_vector_indices = [bottom_block_vector_rowinds[or]
-                                              or ∈ eachcol(block_output_vector_ranges)]
-        block_output_ranges = [searchsortedfirst(vrr,first(or)-voffset):searchsortedlast(bi,last(or)-voffset)
-                               for (vrr, voffset) ∈ zip(block_row_ranges, block_row_range_offsets),
+                                              for or ∈ block_output_vector_ranges]
+        block_output_ranges = [searchsortedfirst(vri,first(or)-voffset):searchsortedlast(vri,last(or)-voffset)
+                               for (vri, voffset) ∈ zip(bottom_block_rowinds_full, block_row_range_offsets),
                                or ∈ output_ranges]
-        bottom_block_output_indices = [block_rowinds[ivar][block_output_ranges[ivar,isegment]]
+        bottom_block_output_colinds = [bottom_block_rowinds_full[ivar][block_output_ranges[ivar,isegment]]
                                        for ivar ∈ 1:Nvar,
-                                       isegment ∈ 1:shared_comm_size]
+                                       isegment ∈ 1:n_subgroups]
 
         noutput = length(output_ranges[1])
-        n_per_proc = (noutput + block_size - 1) ÷ block_size
-        partial_output_range = block_rank*n_per_proc+1:min((block_rank+1)*n_per_proc,noutput)
+        n_per_proc = (noutput + block_comm_size - 1) ÷ block_comm_size
+        partial_output_range = block_comm_rank*n_per_proc+1:min((block_comm_rank+1)*n_per_proc,noutput)
         vector_range = output_ranges[1][partial_output_range]
 
-        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),Fs}(
+        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),Fbs,Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_colinds, bottom_block_vector_rowinds,
                    bottom_block_vector_colinds, block_colinds, block_col_ranges,
-                   bottom_block_output_indices, block_output_ranges,
+                   bottom_block_output_colinds, block_output_ranges,
                    bottom_block_output_vector_indices, block_output_vector_ranges,
                    right_multiplication_buffer_block, dense_buffer,
                    vector_buffer_block_in, vector_buffer_block_out,
-                   vector_range, synchronize_shared)
+                   vector_range, block_synchronize_shared, synchronize_shared)
     end
 end
 
@@ -749,13 +752,31 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
         block = C.block
         vector_buffer_block_out = C.vector_buffer_block_out
         bottom_block_output_vector_indices = C.bottom_block_output_vector_indices
-        block_output_range = C.block_output_range
+        block_output_vector_ranges = C.block_output_vector_ranges
+        block_synchronize_shared = C.block_synchronize_shared
         synchronize_shared = C.synchronize_shared
 
+        # Just before this function is called, C_dot_Ainv_dot_u is filled with 'v'. It is
+        # better performance-wise to do this filling with UnitRange index ranges, but this
+        # means that `vector_range`, which was used for that operation, does not
+        # correspond to bottom_block_output_vector_indices[1] - both are selected from
+        # within the first element of `output_ranges` in the constructor, but the first
+        # element of output ranges is handled by the whole 'subgroup' of processes.
+        # `vector_range` is defined by dividing `output_ranges[1]` evenly among the
+        # processes in the subgroup, while bottom_block_output_vector_indices[1] is given
+        # by dividing the output indices of the first block evenly among processes in the
+        # subgroup, then selecting the part of each of those ranges that is within
+        # `output_ranges[1]`. To ensure no overlap between
+        # `bottom_block_output_vector_indices[1]` on any other process in the subgroup
+        # with `vector_range` on this subgroup, `vector_range` would have to be a
+        # `Vector{Ti}`, which is less efficient to use than a `UnitRange{Ti}`, and
+        # trickier to construct, so it seems better to just have a
+        # `block_synchronize_shared()` call here to prevent race conditions.
+        block_synchronize_shared()
         mul!(vector_buffer_block_out, block, Ainv_dot_u)
 
         # Add contributions from all blocks to the output.
-        for (oi, or) ∈ zip(bottom_block_output_vector_indices, block_output_range)
+        for (oi, or) ∈ zip(bottom_block_output_vector_indices, block_output_vector_ranges)
             @views C_dot_Ainv_dot_u[oi] .-= vector_buffer_block_out[or]
             synchronize_shared()
         end

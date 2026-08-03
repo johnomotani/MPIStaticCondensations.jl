@@ -668,6 +668,7 @@ function get_level_info_for_variable(
                              local_bottom_vector_offset=0, top_vector_indices=Ti[],
                              top_vector_offset_indices=Ti[],
                              local_top_vector_indices=Ti[],
+                             local_top_vector_offset_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
                              local_top_vector_a_block_offset_indices=Vector{Ti}[],
                              iblock_list=zeros(Ti, 2, 0),

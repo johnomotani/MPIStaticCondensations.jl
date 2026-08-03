@@ -110,14 +110,15 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
                                             Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
                                             Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
+                                            sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
                                             matrix_template,
                                             right_multiplication_buffer_storage,
                                             C_dense_buffer_storage,
                                             level_info[1].subgroup_i,
-                                            level_info[1].subgroup_size,
+                                            level_info[1].n_subgroups,
                                             block_allocate_shared_float,
                                             block_comm_rank, block_comm_size,
-                                            synchronize_shared)
+                                            block_synchronize_shared, synchronize_shared)
             end
         else
             A_factorization = get_block_diagonal_solver(level_info, data_type, false,

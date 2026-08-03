@@ -409,7 +409,7 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar}
         Ainv_dot_B_blocks = Ainv_dot_B.blocks
         block_output_rowinds = C.bottom_block_rowinds
         block_output_row_ranges = C.block_row_ranges
-        block_output_colinds = C.bottom_block_output_indices
+        block_output_colinds = C.bottom_block_output_colinds
         block_output_col_ranges = C.block_output_ranges
 
         if dense_buffer_storage === nothing
@@ -536,8 +536,8 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCShared{Nvar}
         dense_C = C.dense_buffer
         block_output_rowinds = C.bottom_block_rowinds
         block_output_colinds = C.bottom_block_colinds
-        block_output_col_ranges = C.block_output_col_ranges
-        block_output_colinds = C.block_output_colinds
+        block_output_col_ranges = C.block_output_ranges
+        block_output_colinds = C.bottom_block_output_colinds
         Ainv_dot_B_block = Ainv_dot_B.block
 
         if length(mul_block) != 0
@@ -707,13 +707,13 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
         mul_block = C.right_multiplication_buffer_block
         dense_C = C.dense_buffer
         block_output_rowinds = C.bottom_block_vector_rowinds
-        block_output_colinds = C.bottom_block_output_indices
-        block_output_col_ranges = C.bottom_block_output_ranges
+        block_output_colinds = C.bottom_block_output_colinds
+        block_output_col_ranges = C.block_output_ranges
         Ainv_dot_B_block = Ainv_dot_B.block
 
         if length(mul_block) != 0
             if dense_C === nothing
-                mul!(mul_block, C_block, Ainv_dot_B_block, -1.0, 0.0)
+                mul!(mul_block, C_block, Ainv_dot_B_block)
             else
                 ncol = size(C_block, 2)
                 C_colptr = C_block.colptr
