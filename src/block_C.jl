@@ -460,6 +460,9 @@ function copy_C_submatrix!(block_C::BlockCSerial,
                             first_block_i = block_colptr[j1]
                             last_block_i = block_colptr[j1+1] - 1
                             block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_irow) - 1, 1) + first_block_i - 1
+                            if block_i > last_block_i
+                                continue
+                            end
                             variable_block_i = searchsortedfirst(rr, block_rowval[block_i])
                             while block_i ≤ last_block_i
                                 full_A_row = col_rv[row_i]
@@ -569,6 +572,9 @@ function copy_C_submatrix!(block_C::BlockCShared,
                         first_block_i = block_colptr[j1]
                         last_block_i = block_colptr[j1+1] - 1
                         block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_irow) - 1, 1) + first_block_i - 1
+                        if block_i > last_block_i
+                            continue
+                        end
                         variable_block_i = searchsortedfirst(rr, block_rowval[block_i])
                         while block_i ≤ last_block_i
                             full_A_row = col_rv[row_i]
