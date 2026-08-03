@@ -847,6 +847,9 @@ end
 function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
                        variable_dimensions, comm::Union{MPI.Comm},
                        distributed_comm::Union{MPI.Comm,Nothing}, shared_comm::MPI.Comm)
+    if MPI.Comm_rank(shared_comm) > 0
+        return nothing
+    end
     nd = length(dimensions)
     variable_dimensions = Tuple(vdim === nothing ? (1:nd) : vdim
                                 for vdim ∈ variable_dimensions)
@@ -856,10 +859,16 @@ function gather_vector(x_local::AbstractVector, dimensions::Vector{<:Dimension},
         this_dimensions = dimensions[vdims]
         var_length_local = prod(d.n_local for d ∈ this_dimensions)
         this_x_local = @view x_local[offset+1:offset+var_length_local]
-        push!(x_global_list,
-              gather_single_variable_vector(this_x_local, this_dimensions, comm,
-                                            distributed_comm, shared_comm))
+        this_x_global = gather_single_variable_vector(this_x_local, this_dimensions, comm,
+                                                      distributed_comm, shared_comm)
+        if MPI.Comm_rank(distributed_comm) == 0
+            push!(x_global_list, this_x_global)
+        end
         offset += var_length_local
+    end
+
+    if MPI.Comm_rank(distributed_comm) > 0
+        return nothing
     end
 
     x_global = vcat(x_global_list...)
