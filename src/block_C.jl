@@ -287,11 +287,18 @@ function copy_C_submatrix!(block_C::BlockCSerial,
         for (rowinds, row_ranges, colinds, col_ranges, block) ∈
                 zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
                     blocks)
-            for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
-                    (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
-                A_variable_block = full_A[vrow][vcol]
-                for (j1, j2) ∈ zip(cr, ci), (i1, i2) ∈ zip(rr, ri)
-                    block[i1,j1] = A_variable_block[i2,j2]
+            for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges)
+                if isempty(ci)
+                    continue
+                end
+                for (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                    if isempty(ri)
+                        continue
+                    end
+                    A_variable_block = full_A[vrow][vcol]
+                    for (j1, j2) ∈ zip(cr, ci), (i1, i2) ∈ zip(rr, ri)
+                        block[i1,j1] = A_variable_block[i2,j2]
+                    end
                 end
             end
         end
@@ -315,37 +322,44 @@ function copy_C_submatrix!(block_C::BlockCSerial,
             for (rowinds, row_ranges, colinds, col_ranges, block) ∈
                     zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
                         blocks)
-                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
-                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
-                    A_variable_block = full_A[vrow][vcol]
-                    full_A_colptr = A_variable_block.colptr
-                    full_A_rowval = A_variable_block.rowval
-                    full_A_nzval = A_variable_block.nzval
-                    if isempty(full_A_nzval) || isempty(ri)
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges)
+                    if isempty(ci)
                         continue
                     end
-                    first_row = first(ri)
-                    nrow = length(ri)
-                    for (j1, j2) ∈ zip(cr, ci)
-                        first_i = full_A_colptr[j2]
-                        last_i = full_A_colptr[j2+1] - 1
-                        col_rv = @view full_A_rowval[first_i:last_i]
-                        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                        i1 = 1
-                        while i1 ≤ nrow
-                            full_A_row = full_A_rowval[flat_i]
-                            block_global_row = ri[i1]
-                            if full_A_row == block_global_row
-                                block[rr[i1],j1] = full_A_nzval[flat_i]
-                                i1 += 1
-                                flat_i += 1
-                            elseif full_A_row > block_global_row
-                                i1 += 1
-                            else
-                                flat_i += 1
-                            end
-                            if flat_i > last_i
-                                break
+                    for (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                        if isempty(ri)
+                            continue
+                        end
+                        A_variable_block = full_A[vrow][vcol]
+                        full_A_colptr = A_variable_block.colptr
+                        full_A_rowval = A_variable_block.rowval
+                        full_A_nzval = A_variable_block.nzval
+                        if isempty(full_A_nzval)
+                            continue
+                        end
+                        first_row = first(ri)
+                        nrow = length(ri)
+                        for (j1, j2) ∈ zip(cr, ci)
+                            first_i = full_A_colptr[j2]
+                            last_i = full_A_colptr[j2+1] - 1
+                            col_rv = @view full_A_rowval[first_i:last_i]
+                            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                            i1 = 1
+                            while i1 ≤ nrow
+                                full_A_row = full_A_rowval[flat_i]
+                                block_global_row = ri[i1]
+                                if full_A_row == block_global_row
+                                    block[rr[i1],j1] = full_A_nzval[flat_i]
+                                    i1 += 1
+                                    flat_i += 1
+                                elseif full_A_row > block_global_row
+                                    i1 += 1
+                                else
+                                    flat_i += 1
+                                end
+                                if flat_i > last_i
+                                    break
+                                end
                             end
                         end
                     end
@@ -355,46 +369,53 @@ function copy_C_submatrix!(block_C::BlockCSerial,
             for (rowinds, row_ranges, colinds, col_ranges, block) ∈
                     zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
                         blocks)
-                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
-                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
-                    A_variable_block = full_A[vrow][vcol]
-                    full_A_colptr = A_variable_block.colptr
-                    full_A_rowval = A_variable_block.rowval
-                    full_A_nzval = A_variable_block.nzval
-                    if isempty(full_A_nzval) || isempty(ri)
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges)
+                    if isempty(ci)
                         continue
                     end
-                    first_row = first(ri)
-                    block_colptr = block.colptr
-                    block_rowval = block.rowval
-                    block_nzval = block.nzval
-                    first_row_i = first(rr)
-                    last_row_i = last(rr)
-                    for (j1, j2) ∈ zip(cr, ci)
-                        first_i = full_A_colptr[j2]
-                        last_i = full_A_colptr[j2+1] - 1
-                        col_rv = @view full_A_rowval[first_i:last_i]
-                        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                        first_block_i = block_colptr[j1]
-                        last_block_i = block_colptr[j1+1] - 1
-                        block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_row_i) - 1, 1) + first_block_i - 1
-                        while block_i ≤ last_block_i
-                            full_A_row = full_A_rowval[flat_i]
-                            block_global_row = ri[block_rowval[block_i]]
-                            if block_global_row > last_row_i
-                                break
-                            end
-                            if full_A_row == block_global_row
-                                block_nzval[block_i] = full_A_nzval[flat_i]
-                                block_i += 1
-                                flat_i += 1
-                            elseif full_A_row > block_global_row
-                                block_i += 1
-                            else
-                                flat_i += 1
-                            end
-                            if flat_i > last_i
-                                break
+                    for (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                        if isempty(ri)
+                            continue
+                        end
+                        A_variable_block = full_A[vrow][vcol]
+                        full_A_colptr = A_variable_block.colptr
+                        full_A_rowval = A_variable_block.rowval
+                        full_A_nzval = A_variable_block.nzval
+                        if isempty(full_A_nzval)
+                            continue
+                        end
+                        first_row = first(ri)
+                        block_colptr = block.colptr
+                        block_rowval = block.rowval
+                        block_nzval = block.nzval
+                        first_row_i = first(rr)
+                        last_row_i = last(rr)
+                        for (j1, j2) ∈ zip(cr, ci)
+                            first_i = full_A_colptr[j2]
+                            last_i = full_A_colptr[j2+1] - 1
+                            col_rv = @view full_A_rowval[first_i:last_i]
+                            flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                            first_block_i = block_colptr[j1]
+                            last_block_i = block_colptr[j1+1] - 1
+                            block_i = max(searchsortedlast(@view(block_rowval[first_block_i:last_block_i]), first_row_i) - 1, 1) + first_block_i - 1
+                            while block_i ≤ last_block_i
+                                full_A_row = full_A_rowval[flat_i]
+                                block_global_row = ri[block_rowval[block_i]]
+                                if block_global_row > last_row_i
+                                    break
+                                end
+                                if full_A_row == block_global_row
+                                    block_nzval[block_i] = full_A_nzval[flat_i]
+                                    block_i += 1
+                                    flat_i += 1
+                                elseif full_A_row > block_global_row
+                                    block_i += 1
+                                else
+                                    flat_i += 1
+                                end
+                                if flat_i > last_i
+                                    break
+                                end
                             end
                         end
                     end
@@ -421,38 +442,45 @@ function copy_C_submatrix!(block_C::BlockCSerial,
             for (rowinds, row_ranges, colinds, col_ranges, block) ∈
                     zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
                         blocks)
-                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
-                        (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
-                    A_variable_block = full_A[vrow][vcol]
-                    full_A_colptr = A_variable_block.colptr
-                    full_A_rowval_list = A_variable_block.rowval_list
-                    full_A_nzval = A_variable_block.nzval
-                    if length(full_A_nzval) == 0
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges)
+                    if isempty(ci)
                         continue
                     end
-                    first_row = first(ri)
-                    nrow = length(ri)
-                    for (j1, j2) ∈ zip(cr, ci)
-                        first_i = full_A_colptr[j2]
-                        last_i = full_A_colptr[j2+1] - 1
-                        col_rv = full_A_rowval_list[j2]
-                        last_row_i = length(col_rv)
-                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                        i1 = 1
-                        while i1 ≤ nrow
-                            full_A_row = col_rv[row_i]
-                            block_global_row = ri[i1]
-                            if full_A_row == block_global_row
-                                block[rr[i1],j1] = full_A_nzval[row_i+first_i-1]
-                                i1 += 1
-                                row_i += 1
-                            elseif full_A_row > block_global_row
-                                i1 += 1
-                            else
-                                row_i += 1
-                            end
-                            if row_i > last_row_i
-                                break
+                    for (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                        if isempty(ri)
+                            continue
+                        end
+                        A_variable_block = full_A[vrow][vcol]
+                        full_A_colptr = A_variable_block.colptr
+                        full_A_rowval_list = A_variable_block.rowval_list
+                        full_A_nzval = A_variable_block.nzval
+                        if length(full_A_nzval) == 0
+                            continue
+                        end
+                        first_row = first(ri)
+                        nrow = length(ri)
+                        for (j1, j2) ∈ zip(cr, ci)
+                            first_i = full_A_colptr[j2]
+                            last_i = full_A_colptr[j2+1] - 1
+                            col_rv = full_A_rowval_list[j2]
+                            last_row_i = length(col_rv)
+                            row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                            i1 = 1
+                            while i1 ≤ nrow
+                                full_A_row = col_rv[row_i]
+                                block_global_row = ri[i1]
+                                if full_A_row == block_global_row
+                                    block[rr[i1],j1] = full_A_nzval[row_i+first_i-1]
+                                    i1 += 1
+                                    row_i += 1
+                                elseif full_A_row > block_global_row
+                                    i1 += 1
+                                else
+                                    row_i += 1
+                                end
+                                if row_i > last_row_i
+                                    break
+                                end
                             end
                         end
                     end
@@ -465,14 +493,20 @@ function copy_C_submatrix!(block_C::BlockCSerial,
                 block_colptr = block.colptr
                 block_rowval = block.rowval
                 block_nzval = block.nzval
-                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges),
+                for (vcol, ci, cr) ∈ zip(1:Nvar, colinds, col_ranges)
+                    if isempty(ci)
+                        continue
+                    end
                     row_offset = 0
                     for (vrow, ri, rr) ∈ zip(1:Nvar, rowinds, row_ranges)
+                        if isempty(ri)
+                            continue
+                        end
                         A_variable_block = full_A[vrow][vcol]
                         full_A_colptr = A_variable_block.colptr
                         full_A_rowval_list = A_variable_block.rowval_list
                         full_A_nzval = A_variable_block.nzval
-                        if isempty(full_A_nzval) || isempty(ri)
+                        if isempty(full_A_nzval)
                             continue
                         end
                         first_irow = first(rr)
@@ -537,38 +571,45 @@ function copy_C_submatrix!(block_C::BlockCShared,
         block_col_ranges = block_C.block_col_ranges
 
         if isa(block, Matrix)
-            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
-                    (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
-                A_variable_block = full_A[vrow][vcol]
-                full_A_colptr = A_variable_block.colptr
-                full_A_rowval = A_variable_block.rowval
-                full_A_nzval = A_variable_block.nzval
-                if isempty(full_A_nzval) || isempty(ri)
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges)
+                if isempty(ci)
                     continue
                 end
-                first_irow = first(rr)
-                last_irow = last(rr)
-                first_row = first(ri)
-                for (j1, j2) ∈ zip(cr, ci)
-                    first_i = full_A_colptr[j2]
-                    last_i = full_A_colptr[j2+1] - 1
-                    col_rv = @view full_A_rowval[first_i:last_i]
-                    flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                    i1 = first_irow
-                    while i1 ≤ last_irow
-                        full_A_row = full_A_rowval[flat_i]
-                        block_global_row = block_rowinds[i1]
-                        if full_A_row == block_global_row
-                            block[i1,j1] = full_A_nzval[flat_i]
-                            i1 += 1
-                            flat_i += 1
-                        elseif full_A_row > block_global_row
-                            i1 += 1
-                        else
-                            flat_i += 1
-                        end
-                        if flat_i > last_i
-                            break
+                for (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                    if isempty(ri)
+                        continue
+                    end
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval = A_variable_block.rowval
+                    full_A_nzval = A_variable_block.nzval
+                    if isempty(full_A_nzval)
+                        continue
+                    end
+                    first_irow = first(rr)
+                    last_irow = last(rr)
+                    first_row = first(ri)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        last_i = full_A_colptr[j2+1] - 1
+                        col_rv = @view full_A_rowval[first_i:last_i]
+                        flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
+                        i1 = first_irow
+                        while i1 ≤ last_irow
+                            full_A_row = full_A_rowval[flat_i]
+                            block_global_row = block_rowinds[i1]
+                            if full_A_row == block_global_row
+                                block[i1,j1] = full_A_nzval[flat_i]
+                                i1 += 1
+                                flat_i += 1
+                            elseif full_A_row > block_global_row
+                                i1 += 1
+                            else
+                                flat_i += 1
+                            end
+                            if flat_i > last_i
+                                break
+                            end
                         end
                     end
                 end
@@ -577,14 +618,20 @@ function copy_C_submatrix!(block_C::BlockCShared,
             block_colptr = block.colptr
             block_rowval = block.rowval
             block_nzval = block.nzval
-            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges)
+                if isempty(ci)
+                    continue
+                end
                 row_offset = 0
                 for (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
+                    if isempty(ri)
+                        continue
+                    end
                     A_variable_block = full_A[vrow][vcol]
                     full_A_colptr = A_variable_block.colptr
                     full_A_rowval = A_variable_block.rowval
                     full_A_nzval = A_variable_block.nzval
-                    if isempty(full_A_nzval) || isempty(ri)
+                    if isempty(full_A_nzval)
                         continue
                     end
                     first_irow = first(rr)
@@ -646,37 +693,44 @@ function copy_C_submatrix!(block_C::BlockCShared,
         block_colinds = block_C.block_colinds
         block_col_ranges = block_C.block_col_ranges
         if isa(block, Matrix)
-            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
-                    (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
-                A_variable_block = full_A[vrow][vcol]
-                full_A_colptr = A_variable_block.colptr
-                full_A_rowval_list = A_variable_block.rowval_list
-                full_A_nzval = A_variable_block.nzval
-                if isempty(full_A_nzval) || isempty(ri)
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges)
+                if isempty(ci)
                     continue
                 end
-                first_row = first(ri)
-                nrow = length(ri)
-                for (j1, j2) ∈ zip(cr, ci)
-                    first_i = full_A_colptr[j2]
-                    col_rv = full_A_rowval_list[j2]
-                    last_row = length(col_rv)
-                    row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                    i1 = 1
-                    while i1 ≤ nrow
-                        full_A_row = col_rv[row_i]
-                        block_global_row = ri[i1]
-                        if full_A_row == block_global_row
-                            block[i1,j1] = full_A_nzval[row_i+first_i-1]
-                            i1 += 1
-                            row_i += 1
-                        elseif full_A_row > block_global_row
-                            i1 += 1
-                        else
-                            row_i += 1
-                        end
-                        if row_i > last_row
-                            break
+                for (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
+                    if isempty(ri)
+                        continue
+                    end
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval_list = A_variable_block.rowval_list
+                    full_A_nzval = A_variable_block.nzval
+                    if isempty(full_A_nzval)
+                        continue
+                    end
+                    first_row = first(ri)
+                    nrow = length(ri)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        col_rv = full_A_rowval_list[j2]
+                        last_row = length(col_rv)
+                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                        i1 = 1
+                        while i1 ≤ nrow
+                            full_A_row = col_rv[row_i]
+                            block_global_row = ri[i1]
+                            if full_A_row == block_global_row
+                                block[i1,j1] = full_A_nzval[row_i+first_i-1]
+                                i1 += 1
+                                row_i += 1
+                            elseif full_A_row > block_global_row
+                                i1 += 1
+                            else
+                                row_i += 1
+                            end
+                            if row_i > last_row
+                                break
+                            end
                         end
                     end
                 end
@@ -685,42 +739,49 @@ function copy_C_submatrix!(block_C::BlockCShared,
             block_colptr = block.colptr
             block_rowval = block.rowval
             block_nzval = block.nzval
-            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges),
-                    (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
-                A_variable_block = full_A[vrow][vcol]
-                full_A_colptr = A_variable_block.colptr
-                full_A_rowval_list = A_variable_block.rowval_list
-                full_A_nzval = A_variable_block.nzval
-                if isempty(full_A_nzval) || isempty(ri)
+            for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges)
+                if isempty(ci)
                     continue
                 end
-                first_row = first(ri)
-                last_row = last(ri)
-                for (j1, j2) ∈ zip(cr, ci)
-                    first_i = full_A_colptr[j2]
-                    col_rv = full_A_rowval_list[j2]
-                    last_row_i = length(col_rv)
-                    row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
-                    first_block_i = block_colptr[j1]
-                    last_block_i = block_colptr[j1+1] - 1
-                    block_i = first_block_i
-                    while block_i ≤ last_block_i
-                        full_A_row = col_rv[row_i]
-                        block_global_row = ri[block_rowval[block_i]]
-                        if block_global_row > last_row
-                            break
-                        end
-                        if full_A_row == block_global_row
-                            block_nzval[block_i] = full_A_nzval[row_i+first_i-1]
-                            block_i += 1
-                            row_i += 1
-                        elseif full_A_row > block_global_row
-                            block_i += 1
-                        else
-                            row_i += 1
-                        end
-                        if row_i > last_row_i
-                            break
+                for (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
+                    if isempty(ri)
+                        continue
+                    end
+                    A_variable_block = full_A[vrow][vcol]
+                    full_A_colptr = A_variable_block.colptr
+                    full_A_rowval_list = A_variable_block.rowval_list
+                    full_A_nzval = A_variable_block.nzval
+                    if isempty(full_A_nzval)
+                        continue
+                    end
+                    first_row = first(ri)
+                    last_row = last(ri)
+                    for (j1, j2) ∈ zip(cr, ci)
+                        first_i = full_A_colptr[j2]
+                        col_rv = full_A_rowval_list[j2]
+                        last_row_i = length(col_rv)
+                        row_i = max(searchsortedlast(col_rv, first_row) - 1, 1)
+                        first_block_i = block_colptr[j1]
+                        last_block_i = block_colptr[j1+1] - 1
+                        block_i = first_block_i
+                        while block_i ≤ last_block_i
+                            full_A_row = col_rv[row_i]
+                            block_global_row = ri[block_rowval[block_i]]
+                            if block_global_row > last_row
+                                break
+                            end
+                            if full_A_row == block_global_row
+                                block_nzval[block_i] = full_A_nzval[row_i+first_i-1]
+                                block_i += 1
+                                row_i += 1
+                            elseif full_A_row > block_global_row
+                                block_i += 1
+                            else
+                                row_i += 1
+                            end
+                            if row_i > last_row_i
+                                break
+                            end
                         end
                     end
                 end
