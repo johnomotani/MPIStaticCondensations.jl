@@ -1715,8 +1715,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 block_comm_rank = MPI.Comm_rank(this_level_info[1].block_comm)
                 block_comm_size = MPI.Comm_size(this_level_info[1].block_comm)
             end
-            use_shared_blocks = (level > 1 && length(this_level_info[1].local_top_vector_a_block_indices) == 1
-                                 && block_comm_size > 1)
+            use_shared_blocks = this_level_info[1].subgroup_size > 1
             if block_comm_size == 1
                 # No shared-memory parallelism.
                 block_allocate_shared_float = (args...) -> Vector{data_type}(undef, args...)

@@ -253,6 +253,21 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fbs<:Function,Fs<:Function}
     end
 end
 
+# A Null type that needs to exist explicitly because when using BlockBShared and
+# BlockCShared, the `mul_C_Ainv_dot_B!()` and `mul_C_dot_Ainv_dot_u!()` operations need to
+# call `synchronize_shared()` `n_subgroups` times, and it would be inconvenient to create
+# a separate MPI communicator including only the processes that are part of the subgroup
+# for some block with a corresponding `synchronize_shared()` function.
+struct NullBlockShared{Ti,Tsync<:Function}
+    n_subgroups::Ti
+    vector_range::UnitRange{Ti}
+    synchronize_shared::Tsync
+
+    function NullBlockShared(n_subgroups::Ti, synchronize_shared::Tsync) where {Ti,Tsync}
+        return new{Ti,Tsync}(n_subgroups, 1:0, synchronize_shared)
+    end
+end
+
 # copy_C_submatrix!() is identical to copy_B_submatrix!(), but keep as a separate function
 # instead of having a single implementation for both in case we want to experiment with
 # using a transposed representation of the C blocks at some point.
@@ -714,6 +729,9 @@ function copy_C_submatrix!(block_C::BlockCShared,
         return nothing
     end
 end
+function copy_C_submatrix!(block_C::NullBlockShared, full_A)
+    return nothing
+end
 
 function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial,
                                Ainv_dot_u)
@@ -783,4 +801,12 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
 
         return nothing
     end
+end
+function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u, C::NullBlockShared, Ainv_dot_u)
+    n_subgroups = C.n_subgroups
+    synchronize_shared = C.synchronize_shared
+    for _ ∈ 1:n_subgroups
+        synchronize_shared()
+    end
+    return nothing
 end

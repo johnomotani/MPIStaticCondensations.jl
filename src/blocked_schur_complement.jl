@@ -90,8 +90,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
         if use_shared_blocks
             if block_comm == MPI.COMM_NULL
                 A_factorization = MPIStaticCondensationNull{data_type}()
-                B = nothing
-                C = nothing
+                B = NullBlockShared(level_info[1].n_subgroups, synchronize_shared)
+                C = NullBlockShared(level_info[1].n_subgroups, synchronize_shared)
             else
                 A_factorization = get_block_diagonal_solver(level_info, data_type,
                                                             use_shared_blocks, timer,
@@ -141,8 +141,12 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
         if use_shared_blocks
             # Only one block per process.
-            Ainv_dot_u = block_allocate_shared_float(sum(length(li.local_top_vector_a_block_indices[1])
-                                                         for li ∈ level_info))
+            if length(level_info[1].local_top_vector_a_block_indices) == 0
+                Ainv_dot_u = zeros(data_type, 0)
+            else
+                Ainv_dot_u = block_allocate_shared_float(sum(length(li.local_top_vector_a_block_indices[1])
+                                                             for li ∈ level_info))
+            end
         else
             unfiltered_nblock = length(level_info[1].local_top_vector_a_block_indices)
             Nvar = length(level_info)

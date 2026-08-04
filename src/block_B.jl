@@ -392,6 +392,9 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
         return nothing
     end
 end
+function copy_B_submatrix!(Ainv_dot_B::NullBlockShared, full_A)
+    return nothing
+end
 
 function mul_C_Ainv_dot_B!(schur_complement::BlockS{Nvar}, C::BlockCSerial{Nvar},
                            Ainv_dot_B::BlockAinvDotBSerial) where Nvar
@@ -745,6 +748,15 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
         return nothing
     end
 end
+function mul_C_Ainv_dot_B!(schur_complement, C::NullBlockShared,
+                           Ainv_dot_B::NullBlockShared)
+    n_subgroups = C.n_subgroups
+    synchronize_shared = C.synchronize_shared
+    for _ ∈ 1:n_subgroups
+        synchronize_shared()
+    end
+    return nothing
+end
 
 function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
                                             Ainv_dot_B::BlockAinvDotBSerial,
@@ -795,4 +807,7 @@ function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x::AbstractVector, Ainv_dot_u,
         end
         return nothing
     end
+end
+function Ainv_dot_u_minus_Ainv_dot_B_dot_y!(x, Ainv_dot_u, Ainv_dot_B::NullBlockShared, y)
+    return nothing
 end
