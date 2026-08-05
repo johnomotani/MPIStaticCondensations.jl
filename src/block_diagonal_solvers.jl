@@ -8,7 +8,6 @@ struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
     block_indices::Tinds
     block_vector_indices::Tvecinds
     block_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
-    x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     B_column_indices::Tinds
     B_column_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
@@ -48,13 +47,12 @@ struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
         else
             local_block_solver = [nothing]
         end
-        x_buffer = fill(NaN, block_size)
         u_buffer = fill(NaN, block_size)
         B_buffers_out = [zeros(sum(length(vbi) for vbi ∈ bi), sum(length(vBc) for vBc ∈ Bc))
                          for (bi, Bc) ∈ zip(block_indices, B_column_indices)]
         return new{Nvar,Tf,Ti,eltype(local_block_solver),typeof(block_indices),typeof(block_vector_indices)}(
                    n, local_block_solver, block_indices, block_vector_indices,
-                   block_ranges, x_buffer, u_buffer, B_column_indices, B_column_ranges,
+                   block_ranges, u_buffer, B_column_indices, B_column_ranges,
                    B_buffers_out, check_lu)
     end
 end
@@ -73,7 +71,6 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
     block_ranges::NTuple{Nvar,UnitRange{Ti}}
     partial_block_indices::NTuple{Nvar,Tinds}
     partial_col_ranges::NTuple{Nvar,UnitRange{Ti}}
-    x_buffer::Vector{Tf}
     u_buffer::Vector{Tf}
     B_column_indices::NTuple{Nvar,Tinds}
     block_comm_rank::Ti
@@ -98,7 +95,6 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
             local_block_solver = nothing
             local_block_serial_solver = nothing
             factors = nothing
-            x_buffer = fill(NaN, block_size)
             u_buffer = fill(NaN, block_size)
         elseif block_comm_size > 1 && block_size > 1024
             # Have multiple processes working on this block, and the block size is
@@ -117,10 +113,8 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
             local_block_serial_solver = LU(factors,
                                            local_block_solver.factorization_shared_lu.ipiv,
                                            block_size)
-            x_buffer = allocate_shared_float(block_size)
             u_buffer = allocate_shared_float(block_size)
             if block_comm_rank == 0
-                x_buffer .= NaN
                 u_buffer .= NaN
             end
         else
@@ -135,7 +129,6 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
                 local_block_solver = missing
                 local_block_serial_solver = LU(factors, ipiv, block_size)
             end
-            x_buffer = fill(NaN, block_size)
             u_buffer = fill(NaN, block_size)
         end
 
@@ -147,8 +140,8 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
         return new{length(block_indices),Tf,Ti,typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),eltype(block_indices),F}(
                    n, local_block_solver, local_block_serial_solver, factors,
                    block_indices, block_vector_indices, block_ranges,
-                   partial_block_indices, partial_col_ranges, x_buffer, u_buffer,
-                   B_column_indices, block_comm_rank, synchronize_shared, check_lu)
+                   partial_block_indices, partial_col_ranges, u_buffer, B_column_indices,
+                   block_comm_rank, synchronize_shared, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
@@ -335,8 +328,7 @@ function ldiv!(buffers::AbstractVector,
                u::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         solvers = block_diagonal_solver.local_block_solver
-        if !(eltype(solvers) <: Nothing)
-            x_buffer = block_diagonal_solver.x_buffer
+        if (eltype(solvers) <: SparseArrays.UMFPACK.UmfpackLU)
             u_buffer = block_diagonal_solver.u_buffer
             for (bi, s, buff) ∈ zip(block_diagonal_solver.block_vector_indices, solvers, buffers)
                 n = length(bi)
@@ -345,6 +337,13 @@ function ldiv!(buffers::AbstractVector,
                     this_u_buffer[i1] = u[i2]
                 end
                 ldiv!(buff, s, this_u_buffer)
+            end
+        elseif !(eltype(solvers) <: Nothing)
+            for (bi, s, buff) ∈ zip(block_diagonal_solver.block_vector_indices, solvers, buffers)
+                for (i1, i2) ∈ enumerate(bi)
+                    buff[i1] = u[i2]
+                end
+                ldiv!(s, buff)
             end
         end
         return nothing
