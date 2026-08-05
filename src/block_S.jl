@@ -94,6 +94,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         full_first_i = full_A_colptr[full_j]
                         full_last_i = full_A_colptr[full_j+1]-1
                         if full_last_i < full_first_i
+                            sc_nzval[first_i:last_i] .= 0.0
                             continue
                         end
 
@@ -143,6 +144,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                         full_first_i = full_A_colptr[full_j]
                         full_last_i = full_A_colptr[full_j+1]-1
                         if full_last_i < full_first_i
+                            sc_nzval[first_i:last_i] .= 0.0
                             continue
                         end
 
@@ -207,6 +209,7 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                     full_first_i = full_A_colptr[full_j]
                     full_last_i = full_A_colptr[full_j+1]-1
                     if full_last_i < full_first_i
+                        sc_matrix[rr,j] .= 0.0
                         continue
                     end
 
@@ -241,6 +244,7 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                     full_first_i = full_A_colptr[full_j]
                     full_last_i = full_A_colptr[full_j+1]-1
                     if full_last_i < full_first_i
+                        sc_matrix[rr,j] .= 0.0
                         continue
                     end
 
