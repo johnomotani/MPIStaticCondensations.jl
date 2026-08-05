@@ -107,14 +107,14 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
         bottom_block_output_vector_indices = [bi[block_output_vector_ranges[iblock,isegment]]
                                               for (iblock, bi) ∈ enumerate(bottom_block_vector_rowinds),
                                               isegment ∈ 1:shared_comm_size]
-        block_output_ranges = [searchsortedfirst(ri[ivar],first(or)-block_row_range_offsets[iblock][ivar]):searchsortedlast(ri[ivar],last(or)-block_row_range_offsets[iblock][ivar])
+        block_output_ranges = [searchsortedfirst(ri[ivar],first(or)-block_row_range_offsets[iblock][ivar])+block_row_range_offsets[iblock][ivar]:searchsortedlast(ri[ivar],last(or)-block_row_range_offsets[iblock][ivar])+block_row_range_offsets[iblock][ivar]
                                for ivar ∈ 1:Nvar,
                                (iblock, ri) ∈ enumerate(bottom_block_rowinds),
                                (isegment, or) ∈ enumerate(output_ranges)]
-        bottom_block_output_colinds = [bottom_block_rowinds[ib][ivar][block_output_ranges[ivar,ib,isegment]]
+        bottom_block_output_colinds = [ri[ivar][searchsortedfirst(ri[ivar],first(or)-block_row_range_offsets[iblock][ivar]):searchsortedlast(ri[ivar],last(or)-block_row_range_offsets[iblock][ivar])]
                                        for ivar ∈ 1:Nvar,
-                                       ib ∈ 1:length(bottom_block_rowinds),
-                                       isegment ∈ 1:shared_comm_size]
+                                       (iblock, ri) ∈ enumerate(bottom_block_rowinds),
+                                       (isegment, or) ∈ enumerate(output_ranges)]
 
         vector_range = output_ranges[1]
 
