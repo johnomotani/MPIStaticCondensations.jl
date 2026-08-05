@@ -334,7 +334,7 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                     rdim_count = 1
                     for d ∈ 1:length(dimensions)
                         if cdim_count ≤ length(column_dimensions) && column_dimensions[cdim_count] == d
-                            if row_dimensions[rdim_count] == d
+                            if rdim_count ≤ length(row_dimensions) && row_dimensions[rdim_count] == d
                                 push!(row_block_inds, column_block_inds[cdim_count])
                                 push!(row_inner_inds, column_inner_inds[cdim_count])
                                 rdim_count += 1
