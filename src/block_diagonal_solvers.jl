@@ -241,7 +241,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial{Nvar,T},
     end
 end
 function lu!(block_diagonal_solver::BlockDiagonalSolverShared{Nvar,T},
-             full_A::NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractMatrix{T},SharedSparseBuffer{T}}}}) where {Nvar, T}
+             full_A::NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractMatrix{T},AbstractSparseMatrixCSC{T},SharedSparseBuffer{T}}}}) where {Nvar, T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         factors = block_diagonal_solver.factors
