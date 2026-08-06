@@ -208,7 +208,7 @@ function lu!(block_diagonal_solver::BlockDiagonalSolverSerial,
     end
 end
 function lu!(block_diagonal_solver::BlockDiagonalSolverShared,
-             full_A::Union{AbstractMatrix,SharedSparseBuffer})
+             full_A::Union{AbstractMatrix,AbstractSparseMatrixCSC{T},SharedSparseBuffer})
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
         factors = block_diagonal_solver.factors

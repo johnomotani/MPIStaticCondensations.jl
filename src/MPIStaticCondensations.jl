@@ -730,14 +730,7 @@ function split_matrix(dimensions::Vector{<:Dimension}, level_indices::Vector{Ti}
         total_nblocks = prod(nblocks_list)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
         shared_comm_size = MPI.Comm_size(shared_comm)
-        if is_top_level
-            # At the top level we might use sparse blocks, which are not supported by
-            # shared-memory parallelised blocks. Usually the top level should have more blocks
-            # than processes, so lack of parallelisation should not matter.
-            subgroup_size = 1
-        else
-            subgroup_size = max(shared_comm_size ÷ total_nblocks, 1)
-        end
+        subgroup_size = max(shared_comm_size ÷ total_nblocks, 1)
         if shared_comm_rank ≥ total_nblocks * subgroup_size
             subgroup_i = -1
         else
