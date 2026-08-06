@@ -782,7 +782,7 @@ end
 function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::MPI.Comm,
                                          distributed_comm::Union{MPI.Comm,Nothing},
                                          shared_comm::MPI.Comm, allocate_shared_float,
-                                         rng)
+                                         rng; rhs_global=nothing, rhs_local=nothing)
     rank = MPI.Comm_rank(comm)
     comm_size = MPI.Comm_size(comm)
     shared_comm_size = MPI.Comm_size(shared_comm)
@@ -791,12 +791,22 @@ function assemble_and_scatter_global_rhs(dimensions::Vector{<:Dimension}, comm::
     n_total = prod(d.n for d ∈ dimensions)
     n_local = prod(d.n_local for d ∈ dimensions)
 
-    rhs_global = nothing
-    rhs_local = allocate_shared_float(n_local)
+    if rhs_local === nothing
+        rhs_local = allocate_shared_float(n_local)
+    elseif size(rhs_local) != (n_local,)
+        error("rhs_local has wrong size. Should be ($n_local,), got $(size(rhs_local))")
+    end
+    if rhs_global !== nothing && size(rhs_global) != (n_total,)
+        error("rhs_global has wrong size. Should be ($n_total,), got $(size(rhs_global))")
+    end
 
     if rank == 0
         rhs_global_with_dups = rand(rng, n_total)
-        rhs_global = remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
+        if rhs_global === nothing
+            rhs_global = remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
+        else
+            rhs_global .= remove_duplicates_from_global_vector(rhs_global_with_dups, dimensions)
+        end
 
         local_block_irank_lists = [get_irank_list(irank, dimensions)
                                    for irank ∈ 0:distributed_comm_size-1]
@@ -827,18 +837,34 @@ function assemble_and_scatter_global_multi_variable_rhs(
     variable_dimensions = Tuple(vdims === nothing ? (1:nd) : vdims
                                 for vdims ∈ variable_dimensions)
 
-    rhs_global, rhs_local =
-        assemble_and_scatter_global_rhs(dimensions[variable_dimensions[1]], comm,
-                                        distributed_comm, shared_comm,
-                                        allocate_shared_float, rng)
-    for vdims ∈ variable_dimensions[2:end]
-        new_rhs_global, new_rhs_local =
-            assemble_and_scatter_global_rhs(dimensions[vdims], comm, distributed_comm,
-                                            shared_comm, allocate_shared_float, rng)
-        if rhs_global !== nothing
-            rhs_global = vcat(rhs_global, new_rhs_global)
+    global_rhs_variable_sizes = [prod(d.n for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
+    global_rhs_size = sum(global_rhs_variable_sizes)
+    global_rhs_variable_offsets = vcat(0, cumsum(global_rhs_variable_sizes[1:end-1])...)
+    local_rhs_variable_sizes = [prod(d.n_local for d ∈ dimensions[vdims]) for vdims ∈ variable_dimensions]
+    local_rhs_size = sum(local_rhs_variable_sizes)
+    local_rhs_variable_offsets = vcat(0, cumsum(local_rhs_variable_sizes[1:end-1])...)
+
+    if MPI.Comm_rank(comm) == 0
+        rhs_global = zeros(global_rhs_size)
+    else
+        rhs_global = nothing
+    end
+    rhs_local = allocate_shared_float(local_rhs_size)
+
+    for (vdims, n_global, global_offset, n_local, local_offset) ∈
+            zip(variable_dimensions, global_rhs_variable_sizes,
+                global_rhs_variable_offsets, local_rhs_variable_sizes,
+                local_rhs_variable_offsets)
+        if MPI.Comm_rank(comm) == 0
+            var_rhs_global = @view rhs_global[global_offset+1:global_offset+n_global]
+        else
+            var_rhs_global = nothing
         end
-        rhs_local = vcat(rhs_local, new_rhs_local)
+        var_rhs_local = @view rhs_local[local_offset+1:local_offset+n_local]
+        assemble_and_scatter_global_rhs(dimensions[vdims], comm, distributed_comm,
+                                        shared_comm, allocate_shared_float, rng;
+                                        rhs_global=var_rhs_global,
+                                        rhs_local=var_rhs_local)
     end
 
     return rhs_global, rhs_local
