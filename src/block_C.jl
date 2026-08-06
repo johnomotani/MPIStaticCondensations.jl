@@ -179,7 +179,7 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Trmbb,Tdb,Tbi,Fbs<:Function,Fs<:Function}
 
         all_bottom_block_vector_rowinds_full = vcat((ri for ri ∈ bottom_block_vector_rowinds_full)...)
         vector_rows_per_proc = (length(all_bottom_block_vector_rowinds_full) + block_comm_size - 1) ÷ block_comm_size
-        vector_partial_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,length(all_bottom_block_vector_rowinds_full))
+        vector_partial_row_range = vcat((pr .+ offset for (pr, offset) ∈ zip(partial_row_ranges, block_row_range_offsets))...)
         bottom_block_vector_rowinds = all_bottom_block_vector_rowinds_full[vector_partial_row_range]
         bottom_block_vector_colinds = all_bottom_block_vector_rowinds_full
 
@@ -586,20 +586,19 @@ function copy_C_submatrix!(block_C::BlockCShared,
                     if isempty(full_A_nzval)
                         continue
                     end
-                    first_irow = first(rr)
-                    last_irow = last(rr)
                     first_row = first(ri)
+                    nrow = length(ri)
                     for (j1, j2) ∈ zip(cr, ci)
                         first_i = full_A_colptr[j2]
                         last_i = full_A_colptr[j2+1] - 1
                         col_rv = @view full_A_rowval[first_i:last_i]
                         flat_i = max(searchsortedlast(col_rv, first_row)-1,1) + first_i - 1
-                        i1 = first_irow
-                        while i1 ≤ last_irow
+                        i1 = 1
+                        while i1 ≤ nrow
                             full_A_row = full_A_rowval[flat_i]
-                            block_global_row = block_rowinds[i1]
+                            block_global_row = ri[i1]
                             if full_A_row == block_global_row
-                                block[i1,j1] = full_A_nzval[flat_i]
+                                block[rr[i1],j1] = full_A_nzval[flat_i]
                                 i1 += 1
                                 flat_i += 1
                             elseif full_A_row > block_global_row
@@ -693,11 +692,12 @@ function copy_C_submatrix!(block_C::BlockCShared,
         block_colinds = block_C.block_colinds
         block_col_ranges = block_C.block_col_ranges
         if isa(block, Matrix)
+            block_row_ranges = block_C.block_row_ranges
             for (vcol, ci, cr) ∈ zip(1:Nvar, block_colinds, block_col_ranges)
                 if isempty(ci)
                     continue
                 end
-                for (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
+                for (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
                     if isempty(ri)
                         continue
                     end
@@ -720,7 +720,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
                             full_A_row = col_rv[row_i]
                             block_global_row = ri[i1]
                             if full_A_row == block_global_row
-                                block[i1,j1] = full_A_nzval[row_i+first_i-1]
+                                block[rr[i1],j1] = full_A_nzval[row_i+first_i-1]
                                 i1 += 1
                                 row_i += 1
                             elseif full_A_row > block_global_row

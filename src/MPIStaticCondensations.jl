@@ -631,8 +631,8 @@ MPI.Barrier(comm::FakeComm) = nothing
     bottom_vector_offset_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
     local_bottom_vector_offset_indices::Vector{Ti}
-    local_bottom_vector_no_overlap_offset_indices::Vector{Ti}
     local_bottom_vector_no_overlap_indices::Vector{Ti}
+    local_bottom_vector_no_overlap_offset_indices::Vector{Ti}
     local_bottom_vector_no_overlap_sub_selection_indices::Vector{Ti}
     local_bottom_vector_no_overlap_sub_selection_offset_indices::Vector{Ti}
     local_bottom_vector_repeat_indices::Vector{Ti}
@@ -1430,8 +1430,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 # this variable.
                 level_info_to_copy = this_level_info_list[vfirst]
                 this_level_info =
-                    LevelInfo(; level_info_to_copy.has_periodic, level_info_to_copy.block_sizes, level_info_to_copy.nblock, level_info_to_copy.global_size,
-                              global_offset, local_offset, level_info_to_copy.global_bottom_vector_size,
+                    LevelInfo(; has_periodic=level_info_to_copy.has_periodic,
+                              block_sizes=level_info_to_copy.block_sizes,
+                              nblock=level_info_to_copy.nblock,
+                              global_size=level_info_to_copy.global_size, global_offset,
+                              local_offset,
+                              global_bottom_vector_size=level_info_to_copy.global_bottom_vector_size,
                               local_bottom_vector_offset,
                               top_vector_indices=level_info_to_copy.top_vector_indices,
                               top_vector_offset_indices=level_info_to_copy.top_vector_indices.+global_offset,
@@ -1439,10 +1443,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                               local_top_vector_offset_indices=level_info_to_copy.local_top_vector_indices.+local_offset,
                               iblock_list=level_info_to_copy.iblock_list,
                               local_top_vector_a_block_indices=level_info_to_copy.local_top_vector_a_block_indices,
-                              local_top_vector_a_block_offset_indices=[x .+ local_offset for x ∈ level_info_to_copy.local_top_vector_a_block_indices],
+                              local_top_vector_a_block_offset_indices=Vector{ind_type}[x .+ local_offset for x ∈ level_info_to_copy.local_top_vector_a_block_indices],
                               a_block_off_diagonal_indices=level_info_to_copy.a_block_off_diagonal_indices,
                               a_block_off_diagonal_bottom_vector_indices=level_info_to_copy.a_block_off_diagonal_bottom_vector_indices,
-                              a_block_off_diagonal_bottom_vector_offset_indices=[x .+ local_bottom_vector_offset for x ∈ level_info_to_copy.a_block_off_diagonal_bottom_vector_indices],
+                              a_block_off_diagonal_bottom_vector_offset_indices=Vector{ind_type}[x .+ local_bottom_vector_offset for x ∈ level_info_to_copy.a_block_off_diagonal_bottom_vector_indices],
                               n_subgroups=level_info_to_copy.n_subgroups, subgroup_i=level_info_to_copy.subgroup_i,
                               subgroup_size=level_info_to_copy.subgroup_size, block_comm=level_info_to_copy.block_comm,
                               bottom_vector_indices=level_info_to_copy.bottom_vector_indices,
@@ -1604,9 +1608,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                              level_synchronize_shared, timer)
     elseif level_info_list[end][1].level_shared_comm != MPI.COMM_NULL
         last_level_info = level_info_list[end]
-        last_use_shared_blocks = (length(level_info_list) > 1
-                                  && length(last_level_info[1].local_top_vector_a_block_indices) == 1
-                                  && MPI.Comm_size(last_level_info[1].block_comm) > 1)
         # Always use 'shared memory' solver on last level
         if last_level_info[1].block_comm != MPI.COMM_NULL
             block_comm_rank = MPI.Comm_rank(last_level_info[1].block_comm)

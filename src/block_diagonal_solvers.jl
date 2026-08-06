@@ -133,9 +133,14 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
         end
 
         cols_per_proc = Tuple((length(bi) + block_comm_size - 1) ÷ block_comm_size for bi ∈ block_indices)
-        partial_col_ranges = Tuple(block_comm_rank*nc+1:min((block_comm_rank+1)*nc,length(bi))
-                                   for (nc, bi) ∈ zip(cols_per_proc, block_indices))
-        partial_block_indices = Tuple(bi[pcr] for (bi, pcr) ∈ zip(block_indices, partial_col_ranges))
+        partial_col_block_ranges = Tuple(block_comm_rank*nc+1:min((block_comm_rank+1)*nc,length(bi))
+                                         for (nc, bi) ∈ zip(cols_per_proc, block_indices))
+        block_col_offsets = vcat(Ti(0), cumsum(length(ci) for ci ∈ block_indices[1:end-1]))
+        partial_col_ranges = Tuple(offset .+ pcr
+                                   for (offset, pcr) ∈ zip(block_col_offsets,
+                                                           partial_col_block_ranges))
+        partial_block_indices = Tuple(bi[pcr] for (bi, pcr) ∈ zip(block_indices,
+                                                                  partial_col_block_ranges))
 
         return new{length(block_indices),Tf,Ti,typeof(local_block_solver),typeof(local_block_serial_solver),typeof(factors),eltype(block_indices),F}(
                    n, local_block_solver, local_block_serial_solver, factors,

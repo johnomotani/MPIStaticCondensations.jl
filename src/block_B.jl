@@ -55,6 +55,7 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Tind,Tsync}
     partial_block::Matrix{Tf}
     block_rowinds::NTuple{Nvar,Tind}
     block_partial_vector_rowinds::Vector{Ti}
+    block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
     block_colinds::NTuple{Nvar,Tind}
     block_partial_colinds::NTuple{Nvar,Vector{Ti}}
     bottom_block_vector_colinds::Tind
@@ -85,10 +86,21 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Tind,Tsync}
         nrow = sum(length(bi) for bi ∈ block_rowinds)
         ncol = sum(length(bi) for bi ∈ block_colinds)
         block = allocate_shared_float(nrow, ncol)
+
+        block_row_offsets = vcat(0, cumsum(length(ri) for ri ∈ block_rowinds[1:end-1]))
+        block_row_ranges = Tuple(offset .+ (1:length(ri))
+                                 for (offset, ri) ∈ zip(block_row_offsets, block_rowinds))
+
         cols_per_proc = Tuple((length(ci) + block_comm_size - 1) ÷ block_comm_size for ci ∈ block_colinds)
-        partial_col_ranges = Tuple(block_comm_rank*cpp+1:min((block_comm_rank+1)*cpp,length(ci))
-                                   for (cpp, ci) ∈ zip(cols_per_proc, block_colinds))
-        block_partial_colinds = Tuple(ci[pcr] for (pcr, ci) ∈ zip(partial_col_ranges, block_colinds))
+        partial_col_block_ranges = Tuple(block_comm_rank*cpp+1:min((block_comm_rank+1)*cpp,length(ci))
+                                         for (cpp, ci) ∈ zip(cols_per_proc, block_colinds))
+        block_partial_colinds = Tuple(ci[pcr]
+                                      for (pcr, ci) ∈ zip(partial_col_block_ranges,
+                                                          block_colinds))
+        block_col_offsets = vcat(0, cumsum(length(bi) for bi ∈ block_colinds))
+        partial_col_ranges = Tuple(cr .+ offset
+                                   for (cr, offset) ∈ zip(partial_col_block_ranges,
+                                                          block_col_offsets))
         bottom_block_vector_colinds = vcat(bottom_block_vector_colinds...)
         vector_cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
         partial_vector_col_range = block_comm_rank*vector_cols_per_proc+1:min((block_comm_rank+1)*vector_cols_per_proc,ncol)
@@ -108,9 +120,9 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Tind,Tsync}
 
         return new{Nvar,Tf,Ti,typeof(block),Tind,Fs}(
                    block, partial_block, block_rowinds, block_partial_vector_rowinds,
-                   block_colinds, block_partial_colinds, bottom_block_vector_colinds,
-                   bottom_block_partial_vector_colinds, partial_col_ranges,
-                   partial_vector_col_range, partial_vector_row_range,
+                   block_row_ranges, block_colinds, block_partial_colinds,
+                   bottom_block_vector_colinds, bottom_block_partial_vector_colinds,
+                   partial_col_ranges, partial_vector_col_range, partial_vector_row_range,
                    vector_buffer_block_in, vector_buffer_block_out, synchronize_shared)
     end
 end
@@ -295,7 +307,6 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
         block_row_ranges = Ainv_dot_B.block_row_ranges
         block_colinds = Ainv_dot_B.block_colinds
         partial_col_ranges = Ainv_dot_B.partial_col_ranges
-        partial_col_ranges = Ainv_dot_B.partial_col_ranges
 
         for (vcol, ci, pcr) ∈ zip(1:Nvar, block_colinds, partial_col_ranges)
             if isempty(ci)
@@ -316,8 +327,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
                 last_irow = last(rr)
                 first_row = first(ri)
                 nrow = length(ri)
-                for j1 ∈ pcr
-                    j2 = ci[j1]
+                for (j1, j2) ∈ zip(pcr, ci)
                     first_i = full_A_colptr[j2]
                     last_i = full_A_colptr[j2+1] - 1
                     col_rv = @view full_A_rowval[first_i:last_i]
@@ -337,7 +347,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
                             flat_i += 1
                         end
                         if flat_i > last_i && i1 ≤ nrow
-                            block[rr[i1]:last_irow,j1] .= 0.0
+                            block[rr[i1]:rr[end],j1] .= 0.0
                             break
                         end
                     end
@@ -357,15 +367,15 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
             return nothing
         end
         block_rowinds = Ainv_dot_B.block_rowinds
+        block_row_ranges = Ainv_dot_B.block_row_ranges
         block_colinds = Ainv_dot_B.block_colinds
-        partial_col_ranges = Ainv_dot_B.partial_col_ranges
         partial_col_ranges = Ainv_dot_B.partial_col_ranges
 
         for (vcol, ci, pcr) ∈ zip(1:Nvar, block_colinds, partial_col_ranges)
             if isempty(ci)
                 continue
             end
-            for (vrow, ri) ∈ zip(1:Nvar, block_rowinds)
+            for (vrow, ri, rr) ∈ zip(1:Nvar, block_rowinds, block_row_ranges)
                 if isempty(ri)
                     continue
                 end
@@ -379,8 +389,7 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
                 end
                 last_irow = length(ri)
                 first_row = first(ri)
-                for j1 ∈ pcr
-                    j2 = ci[j1]
+                for (j1, j2) ∈ zip(pcr, ci)
                     first_i = full_A_colptr[j2]
                     col_rv = full_A_rowval_list[j2]
                     last_row_i = length(col_rv)
@@ -390,17 +399,17 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBShared,
                         full_A_row = col_rv[row_i]
                         block_global_row = ri[i1]
                         if full_A_row == block_global_row
-                            block[i1,j1] = full_A_nzval[row_i+first_i-1]
+                            block[rr[i1],j1] = full_A_nzval[row_i+first_i-1]
                             i1 += 1
                             row_i += 1
                         elseif full_A_row > block_global_row
-                            block[i1,j1] = 0.0
+                            block[rr[i1],j1] = 0.0
                             i1 += 1
                         else
                             row_i += 1
                         end
                         if row_i > last_row_i && i1 ≤ last_irow
-                            block[i1:last_irow,j1] .= 0.0
+                            block[rr[i1]:rr[end],j1] .= 0.0
                             break
                         end
                     end
@@ -757,8 +766,8 @@ function mul_C_Ainv_dot_B!(schur_complement::BlockDenseS, C::BlockCShared,
         mul_block = C.right_multiplication_buffer_block
         dense_C = C.dense_buffer
         block_output_rowinds = C.bottom_block_vector_rowinds
-        block_output_colinds = C.bottom_block_output_colinds
-        block_output_col_ranges = C.block_output_ranges
+        block_output_colinds = C.bottom_block_output_vector_indices
+        block_output_col_ranges = C.block_output_vector_ranges
         Ainv_dot_B_block = Ainv_dot_B.block
 
         if length(mul_block) != 0

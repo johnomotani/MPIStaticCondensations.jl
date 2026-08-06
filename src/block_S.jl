@@ -223,14 +223,14 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                             sc_matrix[i,j] = full_A_nzval[full_flat_i]
                             full_flat_i += 1
                             if full_flat_i > full_last_i
-                                sc_matrix[i+1:end,j] .= 0.0
+                                sc_matrix[i+1:rr[end],j] .= 0.0
                                 break
                             end
                         else
                             sc_matrix[i,j] = 0.0
                         end
                         if full_i > last_full_row
-                            sc_matrix[i+1:end,j] .= 0.0
+                            sc_matrix[i+1:rr[end],j] .= 0.0
                             break
                         end
                     end
@@ -260,14 +260,14 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                             sc_matrix[i,j] = full_A_nzval[full_row_i+full_first_i-1]
                             full_row_i += 1
                             if full_row_i > last_full_row_i
-                                sc_matrix[i+1:end,j] .= 0.0
+                                sc_matrix[i+1:rr[end],j] .= 0.0
                                 break
                             end
                         else
                             sc_matrix[i,j] = 0.0
                         end
                         if full_i > last_full_row
-                            sc_matrix[i+1:end,j] .= 0.0
+                                sc_matrix[i+1:rr[end],j] .= 0.0
                             break
                         end
                     end
