@@ -3,7 +3,7 @@ using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
 using LinearAlgebra
 using MPI
-using MUMPS
+#using MUMPS
 using Primes
 using StableRNGs
 using Test
