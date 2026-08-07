@@ -73,7 +73,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         x_global = gather_vector(solution, dimensions, (nothing,), comm, distributed_comm,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
-            check_solution = global_matrix \ rhs_global
+            check_solution = sparse(global_matrix) \ rhs_global
             @test isapprox(x_global, check_solution;
                            norm=(x)->NaN, rtol=tol, atol=tol)
             @test isapprox(global_matrix * x_global, rhs_global;
