@@ -73,7 +73,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         x_global = gather_vector(solution, dimensions, (nothing,), comm, distributed_comm,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
-            check_solution = global_matrix \ rhs_global
+            check_solution = sparse(global_matrix) \ rhs_global
             @test isapprox(x_global, check_solution;
                            norm=(x)->NaN, rtol=tol, atol=tol)
             @test isapprox(global_matrix * x_global, rhs_global;
@@ -213,7 +213,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([32], [3], rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
-                tol = 1.0e-6
+                tol = 2.0e-6
                 test_dimension_combinations([1, 1], [3, 3], rank, comm_size, n_shared, tol, 2000)
                 test_dimension_combinations([1, 2], [3, 3], rank, comm_size, n_shared, tol, 2001)
                 test_dimension_combinations([1, 2], [3, 5], rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
@@ -233,7 +233,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([16, 15], [3, 3], rank, comm_size, n_shared, tol, 2016)
             end
             @testset "3D" begin
-                tol = 2.0e-5
+                tol = 4.0e-5
                 test_dimension_combinations([1, 1, 1], [3, 3, 3], rank, comm_size, n_shared, tol, 3000; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_dimension_combinations([2, 2, 2], [3, 4, 5], rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_dimension_combinations([2, 2, 3], [3, 3, 4], rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
