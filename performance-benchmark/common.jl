@@ -21,10 +21,10 @@ const stencil_matrix = ["element" "empty"   "point"   "element";
 
 const results_directory = "results-benchmark"
 
-struct BenchmarkParams
+struct BenchmarkParams{Tvdims<:Tuple}
     nelement_list::Vector{Int64}
     ngrid_list::Vector{Int64}
-    variable_dimensions::Union{Vector{Vector{Int64}},Nothing}
+    variable_dimensions::Tvdims
     stencil_matrix::Union{Matrix{String},Nothing}
     sparse_stencils::Bool
     periodic_list::Vector{Bool}
@@ -34,7 +34,7 @@ struct BenchmarkParams
     block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}}}
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
-                             variable_dimensions=nothing, stencil_matrix=nothing,
+                             variable_dimensions=(nothing,), stencil_matrix=nothing,
                              periodic_list=nothing, remove_boundaries_list=nothing,
                              sparse_C_blocks=false, mumps_fill_in_threshold=1.0,
                              block_sizes_heuristic=MPIStaticCondensations.FastSlow())
@@ -50,13 +50,8 @@ struct BenchmarkParams
             error("length of all parameter lists must be the same")
         end
 
-        if variable_dimensions !== nothing
-            nd = length(nelement_list)
-            variable_dimensions = [vdims === nothing ? (1:nd) : vdims
-                                   for vdims ∈ variable_dimensions]
-        end
-
-        return new(nelement_list, ngrid_list, variable_dimensions, stencil_matrix,
+        return new{typeof(variable_dimensions)}(
+                   nelement_list, ngrid_list, variable_dimensions, stencil_matrix,
                    sparse_stencils, periodic_list, remove_boundaries_list,
                    sparse_C_blocks, mumps_fill_in_threshold, block_sizes_heuristic)
     end
@@ -113,12 +108,15 @@ function get_matrix(dimensions, variable_dimensions, stencil_matrix, sparse_sten
                     comm, distributed_comm, shared_comm, allocate_shared_float,
                     allocate_shared_int, matrix_return_separate, matrix_combine_blocks)
 
-    if variable_dimensions === nothing
+    if variable_dimensions === (nothing,)
         return assemble_and_scatter_global_matrix(
                    dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
                    allocate_shared_int, rng, sparse_stencils;
                    return_separate=matrix_return_separate)
     else
+        nd = length(nelement_list)
+        variable_dimensions = [vdims === nothing ? (1:nd) : vdims
+                               for vdims ∈ variable_dimensions]
         return assemble_and_scatter_global_multi_variable_matrix(
                    dimensions, variable_dimensions, comm, distributed_comm, shared_comm,
                    allocate_shared_float, allocate_shared_int, rng, sparse_stencils;
@@ -129,12 +127,15 @@ end
 
 function get_rhs(dimensions, variable_dimensions, rng, comm, distributed_comm,
                  shared_comm, allocate_shared_float)
-    if variable_dimensions === nothing
+    if variable_dimensions === (nothing,)
         rhs_global, rhs =
             assemble_and_scatter_global_rhs(
                 dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
                 rng)
     else
+        nd = length(nelement_list)
+        variable_dimensions = [vdims === nothing ? (1:nd) : vdims
+                               for vdims ∈ variable_dimensions]
         rhs_global, rhs =
             assemble_and_scatter_global_multi_variable_rhs(
                 dimensions, variable_dimensions, comm, distributed_comm, shared_comm,
