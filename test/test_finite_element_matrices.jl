@@ -168,9 +168,9 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
                 block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ (1.0, 0.1)
-            if rank == 0
-                println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
-            end
+            #if rank == 0
+            #    println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
+            #end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
             dimensions = [create_dimension(; name="d$i", nelement, ngrid, nrank, irank, periodic, dense_boundaries)
