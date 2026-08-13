@@ -39,7 +39,7 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - run: |
           julia --project -O3 -e 'import Pkg; Pkg.add(["MPI", "MPIPreferences"]); using MPIPreferences; MPIPreferences.use_jll_binary("OpenMPI_jll")'
-          julia --project -O3 -e 'using MPI; MPI.install_mpiexecjl(; destdir="."); import Pkg; Pkg.add(["Combinatorics", "StableRNGs", "Test"]); Pkg.precompile()'
+          julia --project -O3 -e 'using MPI; MPI.install_mpiexecjl(; destdir="."); import Pkg; Pkg.add(["Combinatorics", "MUMPS", "StableRNGs", "Test"]); Pkg.precompile()'
           # Need to use openmpi so that we can use `--oversubscribe` to allow using more MPI ranks than physical cores
           ./mpiexecjl -np 1 --oversubscribe julia --project -O3 test/runtests.jl
           ./mpiexecjl -np 2 --oversubscribe julia --project -O3 test/runtests.jl
