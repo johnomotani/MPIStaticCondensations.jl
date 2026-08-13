@@ -806,7 +806,9 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
             boi = @view bottom_block_output_vector_indices[:,isegment]
             bor = @view block_output_vector_ranges[:,isegment]
             for (oi, or, vec_buffer_out) ∈ zip(boi, bor, vector_buffer_blocks_out)
-                @views C_dot_Ainv_dot_u[oi] .-= vec_buffer_out[or]
+                for (i1, i2) ∈ zip(oi, or)
+                    C_dot_Ainv_dot_u[i1] -= vec_buffer_out[i2]
+                end
             end
             synchronize_shared()
         end
@@ -846,7 +848,9 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
 
         # Add contributions from all blocks to the output.
         for (oi, or) ∈ zip(bottom_block_output_vector_indices, block_output_vector_ranges)
-            @views C_dot_Ainv_dot_u[oi] .-= vector_buffer_block_out[or]
+            for (i1, i2) ∈ zip(oi, or)
+                C_dot_Ainv_dot_u[i1] -= vector_buffer_block_out[i2]
+            end
             synchronize_shared()
         end
 
