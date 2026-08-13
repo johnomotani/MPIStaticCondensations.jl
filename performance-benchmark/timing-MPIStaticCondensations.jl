@@ -3,6 +3,7 @@ using TimerOutputComparisons
 
 include("common.jl")
 include("benchmark-MPIStaticCondensations.jl")
+include("print_git_info.jl")
 
 timing_params = BenchmarkParams([32, 32], [5, 5], true)
 
@@ -14,6 +15,10 @@ function timing_run()
     end
 
     BLAS.set_num_threads(1)
+
+    if MPI.Comm_rank(MPI.COMM_WORLD) == 0
+        print_git_info()
+    end
 
     comm_size = MPI.Comm_size(MPI.COMM_WORLD)
     comm_rank = MPI.Comm_rank(MPI.COMM_WORLD)

@@ -4,10 +4,14 @@ using MPIStaticCondensations
 using Primes
 using TimerOutputs
 
+include("print_git_info.jl")
+
 const nmat = 1
 const nrhs = 1
 const matrix_repeats = 4
 const rhs_repeats = 100
+
+const results_directory = "results-benchmark"
 
 struct BenchmarkParams
     nelement_list::Vector{Int64}
@@ -15,9 +19,14 @@ struct BenchmarkParams
     sparse_stencils::Bool
     periodic_list::Vector{Bool}
     remove_boundaries_list::Vector{Bool}
+    sparse_C_blocks::Bool
+    mumps_fill_in_threshold::Float64
+    block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}}}
 
-    function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils,
-                             periodic_list=nothing, remove_boundaries_list=nothing)
+    function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
+                             periodic_list=nothing, remove_boundaries_list=nothing,
+                             sparse_C_blocks=false, mumps_fill_in_threshold=1.0,
+                             block_sizes_heuristic=MPIStaticCondensations.FastSlow())
         n = length(nelement_list)
         if periodic_list === nothing
             periodic_list = fill(false, n)
@@ -31,7 +40,8 @@ struct BenchmarkParams
         end
 
         return new(nelement_list, ngrid_list, sparse_stencils, periodic_list,
-                   remove_boundaries_list)
+                   remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold,
+                   block_sizes_heuristic)
     end
 end
 
@@ -63,12 +73,14 @@ include("../test/generate_finite_element_matrices.jl")
 function get_matrix(dimensions, sparse_stencils, rng, comm, distributed_comm, shared_comm,
                     allocate_shared_float, allocate_shared_int)
 
-    _, data, global_i, global_j, local_i, local_j =
+    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+    local_i, local_j =
         assemble_and_scatter_global_matrix(dimensions, comm, distributed_comm,
                                            shared_comm, allocate_shared_float,
                                            allocate_shared_int, rng, sparse_stencils;
                                            return_sparse=true)
-    return data, global_i, global_j, local_i, local_j
+    return global_data, global_i, global_j, data, this_block_global_i,
+           this_block_global_j, local_i, local_j
 end
 
 function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
@@ -79,20 +91,26 @@ function get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
     return rhs, rhs_global
 end
 
-function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, level_multiplier, timer=nothing) where T
+function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared, timer=nothing) where T
     rng = StableRNG(seed)
 
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
 
-    nproc = distributed_nproc * shared_nproc
+    if use_shared
+        ns = n_shared
+    else
+        ns = Threads.nthreads()
+    end
+    nproc = distributed_nproc * n_shared * Threads.nthreads()
     ndim = length(params.nelement_list)
 
     if distributed_rank == 0 && shared_rank == 0
-        println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), level_multiplier=$level_multiplier, $params")
+        println(now(), "\nRunning nproc=$nproc, n_shared=$n_shared, n_threads=$(Threads.nthreads()), $params")
     end
 
+    nrank_list = ones(Int64, ndim)
     # For now, only distribute the last dimension.
     if distributed_nproc > params.nelement_list[end] || params.nelement_list[end] % distributed_nproc != 0
         # Cannot parallelise in this way, so skip.
@@ -101,7 +119,6 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
         end
         return nothing
     end
-    nrank_list = ones(Int64, ndim)
     nrank_list[end] = distributed_nproc
     irank_list = get_iranks(nrank_list, distributed_rank)
     dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, remove_boundaries)
@@ -111,15 +128,34 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
 
     # First run ensures solver is compiled for these parameters. Do not save these timings
     # as we do not want to measure compilation time.
-    data, global_i, global_j, local_i, local_j =
+    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+    local_i, local_j =
         get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
                    shared_comm, allocate_shared_float, allocate_shared_int)
     rhs, rhs_global = get_rhs(dimensions, rng, comm, distributed_comm, shared_comm,
                               allocate_shared_float)
     x_temp = allocate_shared_float(length(rhs))
-    run_solver(x_temp, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-               dimensions, level_multiplier, comm, distributed_comm, shared_comm,
-               allocate_shared_float, allocate_shared_int, 1, 1, 1, 1, timer)
+    run_solver(x_temp, data, this_block_global_i, this_block_global_j, local_i, local_j,
+               rhs, rhs_global, dimensions, params.sparse_C_blocks,
+               params.mumps_fill_in_threshold, params.block_sizes_heuristic, comm,
+               distributed_comm, shared_comm, allocate_shared_float, allocate_shared_int,
+               1, 1, 1, 1, timer, global_data, global_i, global_j)
+
+    if local_win_store_float !== nothing
+        # Free the MPI.Win objects, because if they are free'd by the garbage collector
+        # it may cause an MPI error or hang.
+        for w ∈ local_win_store_float
+            MPI.free(w)
+        end
+    end
+    if local_win_store_int !== nothing
+        # Free the MPI.Win objects, because if they are free'd by the garbage collector
+        # it may cause an MPI error or hang.
+        for w ∈ local_win_store_int
+            MPI.free(w)
+        end
+    end
+    MPI.Barrier(shared_comm)
 
     if timer !== nothing
         reset_timer!(timer)
@@ -128,7 +164,8 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     t_lu = Float64[]
     t_solve = Float64[]
     for imat ∈ 1:nmat
-        data, global_i, global_j, local_i, local_j =
+        global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+        local_i, local_j =
             get_matrix(dimensions, params.sparse_stencils, rng, comm, distributed_comm,
                        shared_comm, allocate_shared_float, allocate_shared_int)
         for irhs ∈ 1:nrhs
@@ -136,10 +173,12 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                                       shared_comm, allocate_shared_float)
             x = allocate_shared_float(length(rhs))
             this_t_setup, this_t_lu, this_t_solve =
-                run_solver(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                           dimensions, level_multiplier, comm, distributed_comm,
-                           shared_comm, allocate_shared_float, allocate_shared_int, nmat,
-                           nrhs, matrix_repeats, rhs_repeats, timer)
+                run_solver(x, data, this_block_global_i, this_block_global_j, local_i,
+                           local_j, rhs, rhs_global, dimensions, params.sparse_C_blocks,
+                           params.mumps_fill_in_threshold, params.block_sizes_heuristic,
+                           comm, distributed_comm, shared_comm, allocate_shared_float,
+                           allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats,
+                           timer, global_data, global_i, global_j)
             push!(t_setup, this_t_setup)
             push!(t_lu, this_t_lu)
             push!(t_solve, this_t_solve)
@@ -170,18 +209,21 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     if distributed_rank == 0 && shared_rank == 0
         println("  setup = $mean_setup ms; LU = $mean_lu ms; solve = $mean_solve ms\n")
         if label !== nothing
-            run_dir = mkpath("results-benchmark")
+            run_dir = mkpath(results_directory)
             total_size = prod(d.n for d ∈ dimensions)
-            if use_shared
-                ns = n_shared
-            else
-                ns = Threads.nthreads()
-            end
             function vec2string(v)
-                return "[" * join(v, ",") * "]"
+                if v === nothing
+                    return "nothing"
+                elseif !isa(v, AbstractVector)
+                    return v
+                elseif eltype(v) <: AbstractVector
+                    return "[" * join([vec2string(x) for x ∈ v], ",") * "]"
+                else
+                    return "[" * join(v, ",") * "]"
+                end
             end
             open(joinpath(run_dir, "benchmarks_$label.txt"), "a") do io
-                println(io, "$nproc $ns $ndim $total_size $level_multiplier $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list))")
+                println(io, "$nproc $ns $ndim $total_size $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list)) $(params.sparse_C_blocks) $(params.mumps_fill_in_threshold) $(vec2string(params.block_sizes_heuristic))")
             end
         end
     end
@@ -194,18 +236,28 @@ function benchmark(run_solver::T, params, seed, label; use_shared=true) where T
         MPI.Init()
     end
 
+    if label !== nothing && MPI.Comm_rank(MPI.COMM_WORLD) == 0 && !isempty(params)
+        run_dir = mkpath(results_directory)
+        open(joinpath(run_dir, "provenance_$label.txt"), "a") do io
+            println(io, round(now(), Dates.Second))
+            print_git_info(io)
+            println(io, "="^100)
+            println(io)
+        end
+    end
+
     comm_size = MPI.Comm_size(MPI.COMM_WORLD)
 
     if use_shared
         n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
-        level_multiplier_values = collect(2:4)
     else
-        n_shared_values = 1
-        level_multiplier_values = [1]
+        # When use_shared=false, we set up the matrix with shared-memory, but then divide
+        # it into distributed chunks to pass to MUMPS.
+        n_shared_values = comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
     end
     for n_shared ∈ n_shared_values
-        for p ∈ params, lm ∈ level_multiplier_values
-            run_benchmark(run_solver, p, seed, label, n_shared, use_shared, lm)
+        for p ∈ params
+            run_benchmark(run_solver, p, seed, label, n_shared, use_shared)
             seed += 1
         end
     end

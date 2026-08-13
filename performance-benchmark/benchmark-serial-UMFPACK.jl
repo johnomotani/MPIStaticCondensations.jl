@@ -6,15 +6,17 @@ using StatsBase
 
 include("common.jl")
 
-function run_UMFPACK(x, data, global_i, global_j, local_i, local_j, rhs, rhs_global,
-                     dimensions, level_multiplier, comm, distributed_comm, shared_comm,
-                     allocate_shared_float, allocate_shared_int, nmat, nrhs,
-                     matrix_repeats, rhs_repeats, timer)
+function run_UMFPACK(x, data, this_block_global_i, this_block_global_j, local_i, local_j,
+                     rhs, rhs_global, dimensions, sparse_C_blocks,
+                     mumps_fill_in_threshold, block_sizes_heuristic, comm,
+                     distributed_comm, shared_comm, allocate_shared_float,
+                     allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer,
+                     global_data, global_i, global_j)
     if MPI.Comm_size(comm) > 1
         error("UMFPACK can only run in serial")
     end
 
-    A = sparse(global_i, global_j, data)
+    A = sparse(this_block_global_i, this_block_global_j, data)
 
     t1 = time_ns()
     Alu = lu(A)

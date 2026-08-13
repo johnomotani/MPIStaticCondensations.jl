@@ -64,3 +64,23 @@ function get_comms(shared_nproc, with_comm=false)
            shared_nproc, shared_rank, allocate_array_float, allocate_array_int,
            local_win_store_float, local_win_store_int
 end
+
+function cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
+    if local_win_store_float !== nothing
+        # Free the MPI.Win objects, because if they are free'd by the garbage collector
+        # it may cause an MPI error or hang.
+        for w ∈ local_win_store_float
+            MPI.free(w)
+        end
+        resize!(local_win_store_float, 0)
+    end
+    if local_win_store_int !== nothing
+        # Free the MPI.Win objects, because if they are free'd by the garbage collector
+        # it may cause an MPI error or hang.
+        for w ∈ local_win_store_int
+            MPI.free(w)
+        end
+        resize!(local_win_store_int, 0)
+    end
+    return nothing
+end
