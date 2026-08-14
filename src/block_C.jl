@@ -2,6 +2,9 @@ function get_this_proc_bottom_vector_entry_contribution_indices(
              bottom_block_vector_rowinds, vector_buffer_blocks_out_offsets::Vector{Ti},
              bottom_block_size::Ti, shared_comm, shared_comm_rank,
              shared_comm_size) where Ti
+    if isa(bottom_block_vector_rowinds, Vector{Ti})
+        bottom_block_vector_rowinds = [bottom_block_vector_rowinds]
+    end
     n_per_proc = (bottom_block_size + shared_comm_size - 1) ÷ shared_comm_size
     all_procs_bottom_vector_entries = [r*n_per_proc+1:min((r+1)*n_per_proc,bottom_block_size)
                                        for r ∈ 0:shared_comm_size-1]
@@ -295,10 +298,11 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Tbuff,Tstorage,
         vector_buffer_blocks_out_storage = allocate_shared_float(sum(vector_buffer_blocks_out_proc_sizes))
         vector_buffer_blocks_out_offset = sum(vector_buffer_blocks_out_proc_sizes[1:shared_comm_rank])
         vector_buffer_block_out = @view vector_buffer_blocks_out_storage[vector_buffer_blocks_out_offset+1:vector_buffer_blocks_out_offset+nrow]
+        this_proc_offset = sum(vector_buffer_blocks_out_proc_sizes[1:shared_comm_rank])
         this_proc_bottom_vector_entries, this_proc_bottom_vector_entry_contribution_indices =
             get_this_proc_bottom_vector_entry_contribution_indices(
-                bottom_block_vector_rowinds, Ti[0], bottom_block_size, shared_comm,
-                shared_comm_rank, shared_comm_size)
+                bottom_block_vector_rowinds, Ti[this_proc_offset], bottom_block_size,
+                shared_comm, shared_comm_rank, shared_comm_size)
 
         # To avoid shared-memory errors, different subgroups must write to non-overlapping
         # entries in the output vector. However, when using multiple variables as the
@@ -904,6 +908,20 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
         synchronize_shared()
 
         # Add contributions from all blocks to the output.
+        # To avoid shared-memory errors due to output from multiple blocks needing to be
+        # added to the same entry in C_dot_Ainv_dot_u, we use a single, shared Vector
+        # (`vector_buffer_blocks_out_storage`) for the output of all the block
+        # multiplications (each member of `vector_buffer_blocks_out` is a view into
+        # `vector_buffer_blocks_out_storage`). Then we assign non-overlapping ranges of
+        # the indices in `C_dot_Ainv_dot_u` to each process in the shared-memory
+        # communicator to have the contributions from all blocks added to them. The
+        # locations of these contributions within `vector_buffer_blocks_out_storage` are
+        # stored in `this_proc_bottom_vector_entry_contribution_indices`. For each entry
+        # in `C_dot_Ainv_dot_u`, there is a set of consecutive entries in
+        # `this_proc_bottom_vector_entry_contribution_indices`. The first in the set says
+        # how many entries there are in `vector_buffer_blocks_out_storage` that contribute
+        # to this entry of `C_dot_Ainv_dot_u`, and the rest are the indices of those
+        # `vector_buffer_blocks_out_storage` entries.
         count = 0
         for i1 ∈ this_proc_bottom_vector_entries
             n_contributions = this_proc_bottom_vector_entry_contribution_indices[count+=1]
@@ -932,6 +950,20 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
         synchronize_shared()
 
         # Add contributions from all blocks to the output.
+        # To avoid shared-memory errors due to output from multiple blocks needing to be
+        # added to the same entry in C_dot_Ainv_dot_u, we use a single, shared Vector
+        # (`vector_buffer_blocks_out_storage`) for the output of all the block
+        # multiplications (each member of `vector_buffer_blocks_out` is a view into
+        # `vector_buffer_blocks_out_storage`). Then we assign non-overlapping ranges of
+        # the indices in `C_dot_Ainv_dot_u` to each process in the shared-memory
+        # communicator to have the contributions from all blocks added to them. The
+        # locations of these contributions within `vector_buffer_blocks_out_storage` are
+        # stored in `this_proc_bottom_vector_entry_contribution_indices`. For each entry
+        # in `C_dot_Ainv_dot_u`, there is a set of consecutive entries in
+        # `this_proc_bottom_vector_entry_contribution_indices`. The first in the set says
+        # how many entries there are in `vector_buffer_blocks_out_storage` that contribute
+        # to this entry of `C_dot_Ainv_dot_u`, and the rest are the indices of those
+        # `vector_buffer_blocks_out_storage` entries.
         count = 0
         for i1 ∈ this_proc_bottom_vector_entries
             n_contributions = this_proc_bottom_vector_entry_contribution_indices[count+=1]
@@ -958,6 +990,20 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::NullBlockCSh
         synchronize_shared()
 
         # Add contributions from all blocks to the output.
+        # To avoid shared-memory errors due to output from multiple blocks needing to be
+        # added to the same entry in C_dot_Ainv_dot_u, we use a single, shared Vector
+        # (`vector_buffer_blocks_out_storage`) for the output of all the block
+        # multiplications (each member of `vector_buffer_blocks_out` is a view into
+        # `vector_buffer_blocks_out_storage`). Then we assign non-overlapping ranges of
+        # the indices in `C_dot_Ainv_dot_u` to each process in the shared-memory
+        # communicator to have the contributions from all blocks added to them. The
+        # locations of these contributions within `vector_buffer_blocks_out_storage` are
+        # stored in `this_proc_bottom_vector_entry_contribution_indices`. For each entry
+        # in `C_dot_Ainv_dot_u`, there is a set of consecutive entries in
+        # `this_proc_bottom_vector_entry_contribution_indices`. The first in the set says
+        # how many entries there are in `vector_buffer_blocks_out_storage` that contribute
+        # to this entry of `C_dot_Ainv_dot_u`, and the rest are the indices of those
+        # `vector_buffer_blocks_out_storage` entries.
         count = 0
         for i1 ∈ this_proc_bottom_vector_entries
             n_contributions = this_proc_bottom_vector_entry_contribution_indices[count+=1]

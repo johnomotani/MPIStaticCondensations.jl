@@ -90,7 +90,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
         if use_shared_blocks
             if block_comm == MPI.COMM_NULL
                 A_factorization = MPIStaticCondensationNull{data_type}()
-                B = Nothing
+                B = nothing
                 C = NullBlockCShared(level_info[1].n_subgroups,
                                      sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
                                      shared_comm, shared_comm_rank, shared_comm_size,
