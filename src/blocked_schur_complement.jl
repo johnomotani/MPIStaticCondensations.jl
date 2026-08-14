@@ -90,8 +90,11 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
         if use_shared_blocks
             if block_comm == MPI.COMM_NULL
                 A_factorization = MPIStaticCondensationNull{data_type}()
-                B = NullBlockShared(level_info[1].n_subgroups, synchronize_shared)
-                C = NullBlockShared(level_info[1].n_subgroups, synchronize_shared)
+                B = Nothing
+                C = NullBlockCShared(level_info[1].n_subgroups,
+                                     sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
+                                     shared_comm, shared_comm_rank, shared_comm_size,
+                                     synchronize_shared, allocate_shared_float)
             else
                 A_factorization = get_block_diagonal_solver(level_info, data_type,
                                                             use_shared_blocks, timer,
@@ -119,7 +122,9 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             block_allocate_shared_float,
                                             isa(schur_complement, BlockDenseS),
                                             block_comm_rank, block_comm_size,
-                                            block_synchronize_shared, synchronize_shared)
+                                            shared_comm, shared_comm_rank,
+                                            shared_comm_size, synchronize_shared,
+                                            allocate_shared_float)
             end
         else
             A_factorization = get_block_diagonal_solver(level_info, data_type, false,
@@ -136,8 +141,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                     extract_block_field_from_Tuple(level_info, :local_top_vector_a_block_indices),
                     sum(length(li.local_bottom_vector_indices) for li ∈ level_info),
                     matrix_template, right_multiplication_buffer_storage,
-                    C_dense_buffer_storage, shared_comm_rank, shared_comm_size,
-                    synchronize_shared)
+                    C_dense_buffer_storage, shared_comm, shared_comm_rank,
+                    shared_comm_size, synchronize_shared, allocate_shared_float)
         end
 
         if use_shared_blocks
@@ -212,7 +217,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             B = sc.B
             C = sc.C
             Ainv_dot_u = sc.Ainv_dot_u
-            bottom_sub_range = C.vector_range
+            bottom_sub_range = C.this_proc_bottom_vector_entries
 
             @sc_timeit timer "Ainv.u" begin
                 ldiv!(Ainv_dot_u, A_factorization, U)
@@ -225,6 +230,7 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
                 end
 
                 mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
+                synchronize_shared()
             end
 
             @sc_timeit timer "Sinv.(v-C.Ainv.u)" begin

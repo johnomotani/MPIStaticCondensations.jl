@@ -1,4 +1,65 @@
-struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
+function get_this_proc_bottom_vector_entry_contribution_indices(
+             bottom_block_vector_rowinds, vector_buffer_blocks_out_offsets::Vector{Ti},
+             bottom_block_size::Ti, shared_comm, shared_comm_rank,
+             shared_comm_size) where Ti
+    n_per_proc = (bottom_block_size + shared_comm_size - 1) ÷ shared_comm_size
+    all_procs_bottom_vector_entries = [r*n_per_proc+1:min((r+1)*n_per_proc,bottom_block_size)
+                                       for r ∈ 0:shared_comm_size-1]
+    this_proc_bottom_vector_entries = all_procs_bottom_vector_entries[shared_comm_rank+1]
+    this_proc_bottom_vector_entry_contribution_indices = Ti[]
+    for (r, proc_range) ∈ zip(0:shared_comm_size-1, all_procs_bottom_vector_entries)
+        inds = Vector{Ti}[]
+        for iout ∈ proc_range
+            this_i_inds = Ti[]
+            for (bi, offset) ∈ zip(bottom_block_vector_rowinds,
+                                   vector_buffer_blocks_out_offsets)
+                block_i_range = searchsorted(bi, iout)
+                if !isempty(block_i_range)
+                    push!(this_i_inds, block_i_range[1] + offset)
+                end
+            end
+            push!(inds, this_i_inds)
+        end
+        counts = [length(is) for is ∈ inds]
+        if isempty(counts)
+            gathered_counts = Ti[]
+        else
+            gathered_counts = MPI.Gather(counts, shared_comm; root=r)
+        end
+        if shared_comm_rank == r
+            gathered_counts = reshape(gathered_counts,
+                                      length(proc_range), shared_comm_size)
+            n_inds = sum(gathered_counts; dims=1)[1,:]
+            gathered_inds = zeros(Ti, sum(n_inds))
+            MPI.Gatherv!(MPI.Buffer(reduce(vcat, inds; init=Ti[])), MPI.VBuffer(gathered_inds, n_inds),
+                         shared_comm; root=r)
+            gathered_inds_offsets = cumsum(vcat(0, n_inds[1:end-1]))
+            proc_counters = zeros(Ti, shared_comm_size)
+            for (i, n_contrib) ∈ enumerate(sum(gathered_counts; dims=2))
+                push!(this_proc_bottom_vector_entry_contribution_indices, n_contrib)
+                this_i_count = 0
+                for (s, offset) ∈ zip(1:shared_comm_size, gathered_inds_offsets)
+                    n = gathered_counts[i,s]
+                    for _ ∈ 1:n
+                        i_out = gathered_inds[offset+(proc_counters[s]+=1)]
+                        push!(this_proc_bottom_vector_entry_contribution_indices, i_out)
+                        this_i_count += 1
+                    end
+                end
+                if this_i_count != n_contrib
+                    error("Did not add the same number of indices as expected. "
+                          * "this_i_count($this_i_count)!=n_contrib($n_contrib).")
+                end
+            end
+        else
+            MPI.Gatherv!(reduce(vcat, inds; init=Ti[]), nothing, shared_comm; root=r)
+        end
+    end
+
+    return this_proc_bottom_vector_entries, this_proc_bottom_vector_entry_contribution_indices
+end
+
+struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Tbuff,Tstorage,Fs<:Function}
     blocks::Vector{Tb}
     block_rowinds::Vector{NTuple{Nvar,Trange}}
     block_row_ranges::Vector{NTuple{Nvar,UnitRange{Ti}}}
@@ -13,8 +74,10 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
     right_multiplication_buffer_blocks::Trmbb
     dense_buffer_storage::Tdbs
     vector_buffer_blocks_in::Vector{Vector{Tf}}
-    vector_buffer_blocks_out::Vector{Vector{Tf}}
-    vector_range::UnitRange{Ti}
+    vector_buffer_blocks_out::Vector{Tbuff}
+    vector_buffer_blocks_out_storage::Tstorage
+    this_proc_bottom_vector_entries::UnitRange{Ti}
+    this_proc_bottom_vector_entry_contribution_indices::Vector{Ti}
     synchronize_shared::Fs
 
     function BlockCSerial{Tf}(block_rowinds::Vector{NTuple{Nvar,Tind}},
@@ -25,8 +88,9 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:Union{AbstractSparseMatrixCSC,SharedSparseBuffer}}},Nothing},
                               right_multiplication_buffer_storage::Vector{Tf},
                               dense_buffer_storage::Vector{Tf},
-                              shared_comm_rank::Ti, shared_comm_size::Ti,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fs<:Function}
+                              shared_comm, shared_comm_rank::Ti, shared_comm_size::Ti,
+                              synchronize_shared::Fs,
+                              allocate_shared_float::Fa) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fs<:Function,Fa<:Function}
         nblock_unfiltered = length(block_rowinds)
         non_empty_blocks = [!all(isempty(vbi) for vbi ∈ block_rowinds[ib]) &&
                             !all(isempty(vbi) for vbi ∈ block_colinds[ib])
@@ -52,7 +116,7 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
             blocks = FixedSparseCSC{Tf,Ti}[]
         end
         vector_buffer_blocks_in = Vector{Tf}[]
-        vector_buffer_blocks_out = Vector{Tf}[]
+        vector_buffer_blocks_out_sizes = Ti[]
 
         # Using Vector{Any} here, we convert to a concretely typed Vector after collecting
         # the buffer blocks.
@@ -71,7 +135,7 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
                 push!(blocks, b)
             end
             push!(vector_buffer_blocks_in, zeros(Tf, ncol))
-            push!(vector_buffer_blocks_out, zeros(Tf, nrow))
+            push!(vector_buffer_blocks_out_sizes, nrow)
             right_multiplication_block_size = nrow^2
             if length(right_multiplication_buffer_storage) < offset + right_multiplication_block_size
                 resize!(right_multiplication_buffer_storage,
@@ -91,6 +155,19 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
                 resize!(dense_buffer_storage, max_length)
             end
         end
+
+        vector_buffer_blocks_out_this_proc_size = sum(vector_buffer_blocks_out_sizes)
+        vector_buffer_blocks_out_proc_sizes = MPI.Allgather(vector_buffer_blocks_out_this_proc_size, shared_comm)
+        vector_buffer_blocks_out_storage = allocate_shared_float(sum(vector_buffer_blocks_out_proc_sizes))
+        this_proc_offset = sum(vector_buffer_blocks_out_proc_sizes[1:shared_comm_rank])
+        vector_buffer_blocks_out_offsets = cumsum(vcat(0, vector_buffer_blocks_out_sizes[1:end-1])) .+ this_proc_offset
+        vector_buffer_blocks_out = [@view vector_buffer_blocks_out_storage[offset+1:offset+n]
+                                    for (offset, n) ∈ zip(vector_buffer_blocks_out_offsets,
+                                                          vector_buffer_blocks_out_sizes)]
+        this_proc_bottom_vector_entries, this_proc_bottom_vector_entry_contribution_indices =
+            get_this_proc_bottom_vector_entry_contribution_indices(
+                bottom_block_vector_rowinds, vector_buffer_blocks_out_offsets,
+                bottom_block_size, shared_comm, shared_comm_rank, shared_comm_size)
 
         # To avoid shared-memory errors, different processes must write to non-overlapping
         # entries in the output vector. However, when using multiple variables as the
@@ -117,23 +194,22 @@ struct BlockCSerial{Nvar,Tf,Ti,Tb,Trange,Trmbb,Tdbs,Fs<:Function}
                                        (iblock, (rio, bbri)) ∈ enumerate(zip(bottom_block_offset_rowinds, bottom_block_rowinds)),
                                        or ∈ output_ranges]
 
-        vector_range = output_ranges[1]
-
         # Convert from Vector{Any} to concretely-typed vector of reshaped views.
         right_multiplication_buffer_blocks = [right_multiplication_buffer_blocks...]
 
-        return new{Nvar,Tf,Ti,eltype(blocks),Tind,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),Fs}(
+        return new{Nvar,Tf,Ti,eltype(blocks),Tind,typeof(right_multiplication_buffer_blocks),typeof(dense_buffer_storage),eltype(vector_buffer_blocks_out),typeof(vector_buffer_blocks_out_storage),Fs}(
                    blocks, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_col_ranges,
                    bottom_block_output_colinds, block_output_ranges,
                    bottom_block_output_vector_indices, block_output_vector_ranges,
                    right_multiplication_buffer_blocks, dense_buffer_storage,
-                   vector_buffer_blocks_in, vector_buffer_blocks_out, vector_range,
-                   synchronize_shared)
+                   vector_buffer_blocks_in, vector_buffer_blocks_out,
+                   vector_buffer_blocks_out_storage, this_proc_bottom_vector_entries,
+                   this_proc_bottom_vector_entry_contribution_indices, synchronize_shared)
     end
 end
 
-struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Fbs<:Function,Fs<:Function}
+struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Tbuff,Tstorage,Fs<:Function}
     block::Tb
     block_rowinds::NTuple{Nvar,Tind}
     block_row_ranges::NTuple{Nvar,UnitRange{Ti}}
@@ -148,9 +224,10 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Fbs<:Function,F
     right_multiplication_buffer_block::Trmbb
     dense_buffer::Tdb
     vector_buffer_block_in::Tbi
-    vector_buffer_block_out::Vector{Tf}
-    vector_range::UnitRange{Ti}
-    block_synchronize_shared::Fbs
+    vector_buffer_block_out::Tbuff
+    vector_buffer_blocks_out_storage::Tstorage
+    this_proc_bottom_vector_entries::UnitRange{Ti}
+    this_proc_bottom_vector_entry_contribution_indices::Vector{Ti}
     synchronize_shared::Fs
 
     function BlockCShared{Tf}(block_rowinds_full::NTuple{Nvar,Tind},
@@ -161,10 +238,12 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Fbs<:Function,F
                               matrix_template::Union{<:NTuple{Nvar,<:NTuple{Nvar,<:AbstractSparseMatrixCSC}},<:NTuple{Nvar,<:NTuple{Nvar,<:SharedSparseBuffer}},Nothing},
                               right_multiplication_buffer_storage::Vector{Tf},
                               dense_buffer_storage::Vector{Tf}, subgroup_i::Ti,
-                              n_subgroups::Ti, block_allocate_shared_float::Fa,
+                              n_subgroups::Ti, block_allocate_shared_float::Fba,
                               schur_complement_is_dense::Bool, block_comm_rank::Integer,
-                              block_comm_size::Integer, block_synchronize_shared::Fbs,
-                              synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa<:Function,Fbs<:Function,Fs<:Function}
+                              block_comm_size::Integer, shared_comm,
+                              shared_comm_rank::Integer, shared_comm_size::Integer,
+                              synchronize_shared::Fs,
+                              allocate_shared_float::Fa) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fba<:Function,Fs<:Function,Fa<:Function}
         all_bottom_block_vector_rowinds_full = vcat((ri for ri ∈ bottom_block_offset_rowinds_full)...)
         vector_rows_per_proc = (length(all_bottom_block_vector_rowinds_full) + block_comm_size - 1) ÷ block_comm_size
         vector_partial_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,length(all_bottom_block_vector_rowinds_full))
@@ -212,7 +291,14 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Fbs<:Function,F
             reshape(@view(right_multiplication_buffer_storage[1:right_multiplication_buffer_block_size]),
                     nrow, nrow_full)
         vector_buffer_block_in = block_allocate_shared_float(ncol)
-        vector_buffer_block_out = zeros(Tf, nrow)
+        vector_buffer_blocks_out_proc_sizes = MPI.Allgather(nrow, shared_comm)
+        vector_buffer_blocks_out_storage = allocate_shared_float(sum(vector_buffer_blocks_out_proc_sizes))
+        vector_buffer_blocks_out_offset = sum(vector_buffer_blocks_out_proc_sizes[1:shared_comm_rank])
+        vector_buffer_block_out = @view vector_buffer_blocks_out_storage[vector_buffer_blocks_out_offset+1:vector_buffer_blocks_out_offset+nrow]
+        this_proc_bottom_vector_entries, this_proc_bottom_vector_entry_contribution_indices =
+            get_this_proc_bottom_vector_entry_contribution_indices(
+                bottom_block_vector_rowinds, Ti[0], bottom_block_size, shared_comm,
+                shared_comm_rank, shared_comm_size)
 
         # To avoid shared-memory errors, different subgroups must write to non-overlapping
         # entries in the output vector. However, when using multiple variables as the
@@ -250,16 +336,16 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Fbs<:Function,F
         noutput = length(output_ranges[1])
         n_per_proc = (noutput + block_comm_size - 1) ÷ block_comm_size
         partial_output_range = block_comm_rank*n_per_proc+1:min((block_comm_rank+1)*n_per_proc,noutput)
-        vector_range = output_ranges[1][partial_output_range]
 
-        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(bottom_block_output_colinds),typeof(block_output_ranges),typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),Fbs,Fs}(
+        return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(bottom_block_output_colinds),typeof(block_output_ranges),typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_buffer_block_out),typeof(vector_buffer_blocks_out_storage),Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,
                    bottom_block_vector_rowinds, block_colinds, block_col_ranges,
                    bottom_block_output_colinds, block_output_ranges,
                    bottom_block_output_vector_indices, block_output_vector_ranges,
                    right_multiplication_buffer_block, dense_buffer,
                    vector_buffer_block_in, vector_buffer_block_out,
-                   vector_range, block_synchronize_shared, synchronize_shared)
+                   vector_buffer_blocks_out_storage, this_proc_bottom_vector_entries,
+                   this_proc_bottom_vector_entry_contribution_indices, synchronize_shared)
     end
 end
 
@@ -268,13 +354,26 @@ end
 # call `synchronize_shared()` `n_subgroups` times, and it would be inconvenient to create
 # a separate MPI communicator including only the processes that are part of the subgroup
 # for some block with a corresponding `synchronize_shared()` function.
-struct NullBlockShared{Ti,Tsync<:Function}
+struct NullBlockCShared{Ti,Tstorage,Fs<:Function}
     n_subgroups::Ti
-    vector_range::UnitRange{Ti}
-    synchronize_shared::Tsync
+    vector_buffer_blocks_out_storage::Tstorage
+    this_proc_bottom_vector_entries::UnitRange{Ti}
+    this_proc_bottom_vector_entry_contribution_indices::Vector{Ti}
+    synchronize_shared::Fs
 
-    function NullBlockShared(n_subgroups::Ti, synchronize_shared::Tsync) where {Ti,Tsync}
-        return new{Ti,Tsync}(n_subgroups, 1:0, synchronize_shared)
+    function NullBlockCShared(n_subgroups::Ti, bottom_block_size::Ti, shared_comm,
+                              shared_comm_rank, shared_comm_size, synchronize_shared::Fs,
+                              allocate_shared_float::Fa) where {Ti,Fs<:Function,Fa<:Function}
+        vector_buffer_blocks_out_proc_sizes = MPI.Allgather(Ti(0), shared_comm)
+        vector_buffer_blocks_out_storage = allocate_shared_float(sum(vector_buffer_blocks_out_proc_sizes))
+        this_proc_bottom_vector_entries, this_proc_bottom_vector_entry_contribution_indices =
+            get_this_proc_bottom_vector_entry_contribution_indices(
+                Ti[], Ti[0], bottom_block_size, shared_comm, shared_comm_rank,
+                shared_comm_size)
+        return new{Ti,typeof(vector_buffer_blocks_out_storage),Fs}(
+                   n_subgroups, vector_buffer_blocks_out_storage,
+                   this_proc_bottom_vector_entries,
+                   this_proc_bottom_vector_entry_contribution_indices, synchronize_shared)
     end
 end
 
@@ -780,7 +879,7 @@ function copy_C_submatrix!(block_C::BlockCShared,
         return nothing
     end
 end
-function copy_C_submatrix!(block_C::NullBlockShared, full_A)
+function copy_C_submatrix!(block_C::NullBlockCShared, full_A)
     return nothing
 end
 
@@ -789,9 +888,10 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
 
     @inbounds begin
         blocks = C.blocks
-        bottom_block_output_vector_indices = C.bottom_block_output_vector_indices
-        block_output_vector_ranges = C.block_output_vector_ranges
         vector_buffer_blocks_out = C.vector_buffer_blocks_out
+        vector_buffer_blocks_out_storage = C.vector_buffer_blocks_out_storage
+        this_proc_bottom_vector_entries = C.this_proc_bottom_vector_entries
+        this_proc_bottom_vector_entry_contribution_indices = C.this_proc_bottom_vector_entry_contribution_indices
         synchronize_shared = C.synchronize_shared
 
         if length(blocks) > 0
@@ -801,16 +901,16 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCSerial
             end
         end
 
+        synchronize_shared()
+
         # Add contributions from all blocks to the output.
-        for isegment ∈ 1:size(bottom_block_output_vector_indices, 2)
-            boi = @view bottom_block_output_vector_indices[:,isegment]
-            bor = @view block_output_vector_ranges[:,isegment]
-            for (oi, or, vec_buffer_out) ∈ zip(boi, bor, vector_buffer_blocks_out)
-                for (i1, i2) ∈ zip(oi, or)
-                    C_dot_Ainv_dot_u[i1] -= vec_buffer_out[i2]
-                end
+        count = 0
+        for i1 ∈ this_proc_bottom_vector_entries
+            n_contributions = this_proc_bottom_vector_entry_contribution_indices[count+=1]
+            for _ ∈ 1:n_contributions
+                i2 = this_proc_bottom_vector_entry_contribution_indices[count+=1]
+                C_dot_Ainv_dot_u[i1] -= vector_buffer_blocks_out_storage[i2]
             end
-            synchronize_shared()
         end
 
         return nothing
@@ -822,46 +922,51 @@ function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::BlockCShared
     @inbounds begin
         block = C.block
         vector_buffer_block_out = C.vector_buffer_block_out
-        bottom_block_output_vector_indices = C.bottom_block_output_vector_indices
-        block_output_vector_ranges = C.block_output_vector_ranges
-        block_synchronize_shared = C.block_synchronize_shared
+        this_proc_bottom_vector_entries = C.this_proc_bottom_vector_entries
+        this_proc_bottom_vector_entry_contribution_indices = C.this_proc_bottom_vector_entry_contribution_indices
+        vector_buffer_blocks_out_storage = C.vector_buffer_blocks_out_storage
         synchronize_shared = C.synchronize_shared
 
-        # Just before this function is called, C_dot_Ainv_dot_u is filled with 'v'. It is
-        # better performance-wise to do this filling with UnitRange index ranges, but this
-        # means that `vector_range`, which was used for that operation, does not
-        # correspond to bottom_block_output_vector_indices[1] - both are selected from
-        # within the first element of `output_ranges` in the constructor, but the first
-        # element of output ranges is handled by the whole 'subgroup' of processes.
-        # `vector_range` is defined by dividing `output_ranges[1]` evenly among the
-        # processes in the subgroup, while bottom_block_output_vector_indices[1] is given
-        # by dividing the output indices of the first block evenly among processes in the
-        # subgroup, then selecting the part of each of those ranges that is within
-        # `output_ranges[1]`. To ensure no overlap between
-        # `bottom_block_output_vector_indices[1]` on any other process in the subgroup
-        # with `vector_range` on this subgroup, `vector_range` would have to be a
-        # `Vector{Ti}`, which is less efficient to use than a `UnitRange{Ti}`, and
-        # trickier to construct, so it seems better to just have a
-        # `block_synchronize_shared()` call here to prevent race conditions.
-        block_synchronize_shared()
         mul!(vector_buffer_block_out, block, Ainv_dot_u)
 
+        synchronize_shared()
+
         # Add contributions from all blocks to the output.
-        for (oi, or) ∈ zip(bottom_block_output_vector_indices, block_output_vector_ranges)
-            for (i1, i2) ∈ zip(oi, or)
-                C_dot_Ainv_dot_u[i1] -= vector_buffer_block_out[i2]
+        count = 0
+        for i1 ∈ this_proc_bottom_vector_entries
+            n_contributions = this_proc_bottom_vector_entry_contribution_indices[count+=1]
+            for _ ∈ 1:n_contributions
+                i2 = this_proc_bottom_vector_entry_contribution_indices[count+=1]
+                C_dot_Ainv_dot_u[i1] -= vector_buffer_blocks_out_storage[i2]
             end
-            synchronize_shared()
         end
 
         return nothing
     end
 end
-function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u, C::NullBlockShared, Ainv_dot_u)
-    n_subgroups = C.n_subgroups
-    synchronize_shared = C.synchronize_shared
-    for _ ∈ 1:n_subgroups
+function mul_C_dot_Ainv_dot_u!(C_dot_Ainv_dot_u::AbstractVector, C::NullBlockCShared,
+                               Ainv_dot_u)
+
+    @inbounds begin
+        # This process does not own any blocks, but still participates in adding the
+        # contriutions to the output vector.
+        this_proc_bottom_vector_entries = C.this_proc_bottom_vector_entries
+        this_proc_bottom_vector_entry_contribution_indices = C.this_proc_bottom_vector_entry_contribution_indices
+        vector_buffer_blocks_out_storage = C.vector_buffer_blocks_out_storage
+        synchronize_shared = C.synchronize_shared
+
         synchronize_shared()
+
+        # Add contributions from all blocks to the output.
+        count = 0
+        for i1 ∈ this_proc_bottom_vector_entries
+            n_contributions = this_proc_bottom_vector_entry_contribution_indices[count+=1]
+            for _ ∈ 1:n_contributions
+                i2 = this_proc_bottom_vector_entry_contribution_indices[count+=1]
+                C_dot_Ainv_dot_u[i1] -= vector_buffer_blocks_out_storage[i2]
+            end
+        end
+
+        return nothing
     end
-    return nothing
 end
