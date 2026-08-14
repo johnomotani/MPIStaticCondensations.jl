@@ -76,10 +76,12 @@ function run_MSC(x, matrix_data, rhs, rhs_global, dimensions, variable_dimension
     # performance test must be in a separate inner function, that can be compiled knowing
     # the concrete type of Alu.
 
-    return t_setup, run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank)...
+    return t_setup, run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank,
+                                  global_matrix)...
 end
 
-function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank)
+function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank,
+                       global_matrix)
     t_lu = Inf
     t_solve = Inf
     # Run once before the loop to try to ensure that sparse buffer arrays have been filled
@@ -106,7 +108,7 @@ function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank)
 
             # Check solution, just to be on the safe side...
             if comm_rank == 0
-                max_error = maximum(abs.(A * x - rhs))
+                max_error = maximum(abs.(global_matrix * x - rhs))
                 if max_error > 1.0e-3
                     println("Solution incorrect? Max error $max_error.")
                     MPI.Abort(MPI.COMM_WORLD, -1)

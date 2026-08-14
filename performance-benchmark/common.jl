@@ -114,7 +114,7 @@ function get_matrix(dimensions, variable_dimensions, stencil_matrix, sparse_sten
                    allocate_shared_int, rng, sparse_stencils;
                    return_separate=matrix_return_separate)
     else
-        nd = length(nelement_list)
+        nd = length(dimensions)
         variable_dimensions = [vdims === nothing ? (1:nd) : vdims
                                for vdims ∈ variable_dimensions]
         return assemble_and_scatter_global_multi_variable_matrix(
@@ -133,7 +133,7 @@ function get_rhs(dimensions, variable_dimensions, rng, comm, distributed_comm,
                 dimensions, comm, distributed_comm, shared_comm, allocate_shared_float,
                 rng)
     else
-        nd = length(nelement_list)
+        nd = length(dimensions)
         variable_dimensions = [vdims === nothing ? (1:nd) : vdims
                                for vdims ∈ variable_dimensions]
         rhs_global, rhs =
