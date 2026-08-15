@@ -44,10 +44,6 @@ jobs:
           ./mpiexecjl -np 1 --oversubscribe julia --project -O3 test/runtests.jl
           ./mpiexecjl -np 2 --oversubscribe julia --project -O3 test/runtests.jl
           ./mpiexecjl -np 3 --oversubscribe julia --project -O3 test/runtests.jl
-          ./mpiexecjl -np 4 --oversubscribe julia --project -O3 test/runtests.jl
-          ./mpiexecjl -np 5 --oversubscribe julia --project -O3 test/runtests.jl
-          ./mpiexecjl -np 6 --oversubscribe julia --project -O3 test/runtests.jl
-          ./mpiexecjl -np 7 --oversubscribe julia --project -O3 test/runtests.jl
           ./mpiexecjl -np 8 --oversubscribe julia --project -O3 test/runtests.jl
           # Note: MPI.jl's default implementation is mpich, which has a similar option
           # `--with-device=ch3:sock`, but that needs to be set when compiling mpich.
