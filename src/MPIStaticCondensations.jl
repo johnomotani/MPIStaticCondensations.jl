@@ -441,6 +441,7 @@ include("block_C.jl")
 include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
+include("distributed_mpi_helpers.jl")
 
 # Function with no methods that we can import in the MUMPS extension.
 function get_mumps_solver end
@@ -2028,8 +2029,15 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
     return nothing
 end
 
-function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
+function lu!(solver::MPIStaticCondensationParallel{Nvar}, A_in) where Nvar
     @inbounds begin
+        if solver.distributed
+            gather_matrix!(solver, A_in)
+            A = solver.matrix_buffer
+        else
+            A = A_in
+        end
+
         schur_complement_solver = solver.schur_complement_solver
         if isa(schur_complement_solver, MPISchurComplement)
             if isa(A, NTuple)
@@ -2063,8 +2071,8 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
     end
 end
 
-function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,T},
-               U::AbstractVector{T}) where {Nvar, T}
+function ldiv!(X_out::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,T},
+               U_in::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
             # MPISchurComplement allows the RHS and solution vectors to be the same array.
@@ -2081,6 +2089,16 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,
             this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
             y = solver.y_buffer
             v = solver.v_buffer
+
+            if solver.distributed
+                gather_rhs_vector!(solver, U_in)
+                U = solver.vector_buffer
+                X = solver.vector_buffer
+            else
+                U = U_in
+                X = X_out
+            end
+
             if isa(schur_complement_solver, BlockedSchurComplementSolver)
                 for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
                     # This loop uses 'no overlap' indices
@@ -2147,6 +2165,10 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,
                 else
                     ldiv!(X, schur_complement_solver, U)
                 end
+            end
+
+            if solver.distributed
+                scatter_solution_vector!(solver, X_out)
             end
         end
         return nothing
