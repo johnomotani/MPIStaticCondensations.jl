@@ -107,6 +107,7 @@ function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank,
             t_solve = min(t_solve, (t2 - t1) * 1e-6)
 
             # Check solution, just to be on the safe side...
+            Alu.synchronize_shared()
             if comm_rank == 0
                 max_error = maximum(abs.(global_matrix * x - rhs))
                 if max_error > 1.0e-3
