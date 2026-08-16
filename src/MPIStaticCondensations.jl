@@ -1351,10 +1351,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                 for vdim ∈ variable_dimensions)
     Nvar = length(variable_dimensions)
 
-    n_blocks = comm_size ÷ shared_comm_size
-
-    n_blocks_factors = factor(Vector, n_blocks)
-    shared_comm_size_factors = factor(Vector, shared_comm_size)
 
     nelement_list = [ind_type(d.nelement) for d ∈ dimensions]
     nelement_local_list = [ind_type(d.nelement ÷ d.nrank) for d ∈ dimensions]
@@ -2145,98 +2141,19 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,
                 for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices, this_shared_local_bottom_sub_selection_indices)
                     X[i1] = v[i2]
                 end
-            else
-                ldiv!(X, schur_complement_solver, U)
+            elseif schur_complement_solver !== nothing
+                if X === U
+                    ldiv!(schur_complement_solver, U)
+                else
+                    ldiv!(X, schur_complement_solver, U)
+                end
             end
         end
         return nothing
     end
 end
-function ldiv!(solver::MPIStaticCondensationParallel{Nvar,T}, U::AbstractVector{T}) where {Nvar, T}
-    @inbounds begin
-        @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
-            # MPISchurComplement allows the RHS and solution vectors to be the same array.
-            # It is slightly faster to copy the data to/from local buffers than to use
-            # @view with Vector{Int64} indices.
-            schur_complement_solver = solver.schur_complement_solver
-            partial_local_top_vector_indices = solver.partial_local_top_vector_indices
-            partial_top_sub_range = solver.partial_top_sub_range
-            this_shared_local_bottom_vector_indices = solver.this_shared_local_bottom_vector_indices
-            this_shared_local_bottom_sub_selection_indices = solver.this_shared_local_bottom_sub_selection_indices
-            this_shared_local_bottom_vector_no_overlap_indices = solver.this_shared_local_bottom_vector_no_overlap_indices
-            this_shared_local_bottom_sub_selection_no_overlap_indices = solver.this_shared_local_bottom_sub_selection_no_overlap_indices
-            this_shared_local_bottom_vector_repeat_indices = solver.this_shared_local_bottom_vector_repeat_indices
-            this_shared_local_bottom_periodic_pairs = solver.this_shared_local_bottom_periodic_pairs
-            v = solver.v_buffer
-            if isa(schur_complement_solver, BlockedSchurComplementSolver)
-                y = solver.y_buffer
-                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-                    # This loop uses 'no overlap' indices
-                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
-                    # there are periodic dimensions, at the top level (and only the top level,
-                    # not any intermediate levels) the right-hand-side entries need to be
-                    # taken only from the non-repeated points, with the repeated points being
-                    # zero-ed out.
-                    v[i1] = U[i2]
-                end
-                for i ∈ this_shared_local_bottom_vector_repeat_indices
-                    # Zero out repeated points at the top level
-                    v[i] = 0.0
-                end
-                if solver.has_periodic
-                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                        # At the bottom level, need to add any contributions that the top and
-                        # intermediate levels have added to repeated points into the
-                        # non-repeated points.
-                        v[i1] += U[i2]
-                    end
-                end
-                ldiv!(U, y, schur_complement_solver, U, v)
-                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
-                                   this_shared_local_bottom_sub_selection_indices)
-                    U[i1] = y[i2]
-                end
-            elseif isa(schur_complement_solver, MPISchurComplement)
-                u = solver.u_buffer
-                for (i1, i2) ∈ zip(partial_top_sub_range, partial_local_top_vector_indices)
-                    u[i1] = U[i2]
-                end
-                for (i1, i2) ∈ zip(this_shared_local_bottom_sub_selection_no_overlap_indices, this_shared_local_bottom_vector_no_overlap_indices)
-                    # This loop uses 'no overlap' indices
-                    # (`this_shared_local_bottom_vector_no_overlap_indices`) because when
-                    # there are periodic dimensions, at the top level (and only the top level,
-                    # not any intermediate levels) the right-hand-side entries need to be
-                    # taken only from the non-repeated points, with the repeated points being
-                    # zero-ed out.
-                    v[i1] = U[i2]
-                end
-                for i ∈ this_shared_local_bottom_vector_repeat_indices
-                    # Zero out repeated points at the top level
-                    v[i] = 0.0
-                end
-                if solver.has_periodic
-                    for (i1, i2) ∈ eachcol(this_shared_local_bottom_periodic_pairs)
-                        # At the bottom level, need to add any contributions that the top and
-                        # intermediate levels have added to repeated points into the
-                        # non-repeated points.
-                        v[i1] += U[i2]
-                    end
-                end
-                solver.synchronize_shared()
-                ldiv!(u, v, schur_complement_solver, u, v)
-                for (i1, i2) ∈ zip(partial_local_top_vector_indices, partial_top_sub_range)
-                    U[i1] = u[i2]
-                end
-                for (i1, i2) ∈ zip(this_shared_local_bottom_vector_indices,
-                                   this_shared_local_bottom_sub_selection_indices)
-                    U[i1] = v[i2]
-                end
-            else
-                ldiv!(schur_complement_solver, U)
-            end
-        end
-        return nothing
-    end
+@inline function ldiv!(solver::MPIStaticCondensationParallel{Nvar,T}, U::AbstractVector{T}) where {Nvar, T}
+    return ldiv!(U, solver, U)
 end
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensation{T},
                U::AbstractMatrix{T}) where T
