@@ -320,18 +320,21 @@ Algorithm for generating the block sizes at each level in MPIStaticCondensations
 
 First in the 'fast' phase, the block size at each level in each dimension is increased by
 `fast_multiplier` from that at the previous level until it is greater than or equal to the
-number of elements in that dimension (if the block size would be greater than the number
-of elements, it is reduced to the number of elements). If the block sizes in all
-dimensions reach the number of elements or if the current (maximum) block size is greater
-than or equal to `slow_threshold`, stop.
+number of local elements in that dimension (if the block size would be greater than the
+number of local elements, it is reduced to the number of elements). Local elements are
+those in the same shared-memory block. If the block sizes in all dimensions reach the
+number of local elements or if the current (maximum) block size is greater than or equal
+to `slow_threshold`, stop.
 
 Second in the 'slow' phase, the block size in one dimension is increased by a factor of
 two at each level. The dimension chosen at each level:
 1) Must have a block size less than the number of elements.
-2) Of the dimensions satisfying (1), has the smallest block size (to keep the blocks as
+2) If there are any dimensions remaining with block size smaller than the number of local
+   elements, the dimension chosen must be one of these.
+3) Of the dimensions satisfying (2), has the smallest block size (to keep the blocks as
    equally sized as possible).
-3) Of the dimensions satisfying (2), has the most room left to expand (largest nelement).
-4) Of the dimensions satisfying (3), is the left-most dimension, as this means the
+4) Of the dimensions satisfying (3), has the most room left to expand (largest nelement).
+5) Of the dimensions satisfying (4), is the left-most dimension, as this means the
    combined blocks will be as close as possible in the global index-space, which might
    marginally improve cache efficiency sometimes (??).
 """
@@ -345,7 +348,8 @@ struct FastSlow{Ti<:Integer} <: BlockSizesHeuristic
 end
 
 function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
-                         nelement_local_list::Vector{Ti}) where Ti <: Integer
+                         nelement_local_list::Vector{Ti},
+                         nelement_list::Vector{Ti}) where Ti <: Integer
     fm = fs.fast_multiplier
     st = fs.slow_threshold
 
@@ -360,12 +364,22 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
     end
 
     # 'Slow' expansion - one block size increases a factor of 2 at each level.
-    while any(block_sizes_list[end] .< nelement_local_list)
+    while any(block_sizes_list[end] .< nelement_list)
         previous_block_size = block_sizes_list[end]
 
         # Dimension to have block size increased must not already be at the maximum block
         # size.
-        candidate_dims = findall(previous_block_size .< nelement_local_list)
+        candidate_dims = findall(previous_block_size .< nelement_list)
+
+        # If any dimensions have a block size smaller than the number of local elements,
+        # choose only from those dimensions.
+        nelement_local_filter = previous_block_size[candidate_dims] .< nelement_local_list[candidate_dims]
+        if any(nelement_local_filter)
+            candidate_dims = candidate_dims[nelement_local_filter]
+            expand_local = true
+        else
+            expand_local = false
+        end
 
         # Try to keep block equally sized in each dimension, so pick from the dimensions
         # that have the smallest current block size.
@@ -375,8 +389,13 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
 
         # Try to increase first the dimensions where the block has the most space left to
         # expand, i.e. the ones with the largest number of elements.
-        largest_nelement = maximum(nelement_local_list[candidate_dims])
-        candidate_dims = candidate_dims[findall(nelement_local_list[candidate_dims] .== largest_nelement)]
+        if expand_local
+            largest_nelement = maximum(nelement_local_list[candidate_dims])
+            candidate_dims = candidate_dims[findall(nelement_local_list[candidate_dims] .== largest_nelement)]
+        else
+            largest_nelement = maximum(nelement_list[candidate_dims])
+            candidate_dims = candidate_dims[findall(nelement_list[candidate_dims] .== largest_nelement)]
+        end
 
         if isempty(candidate_dims)
             error("This should not happen - maybe the 'while' condition is incorrect?")
@@ -388,8 +407,13 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
         dim_to_increase = first(candidate_dims)
 
         block_size = copy(previous_block_size)
-        block_size[dim_to_increase] = min(block_size[dim_to_increase] * 2,
-                                          nelement_local_list[dim_to_increase])
+        if expand_local
+            block_size[dim_to_increase] = min(block_size[dim_to_increase] * 2,
+                                              nelement_local_list[dim_to_increase])
+        else
+            block_size[dim_to_increase] = min(block_size[dim_to_increase] * 2,
+                                              nelement_list[dim_to_increase])
+        end
 
         push!(block_sizes_list, block_size)
     end
@@ -404,10 +428,14 @@ end
 Algorithm for generating the block sizes at each level in MPIStaticCondensations.
 
 The block size at each level in each dimension is increased by `multiplier` from that at
-the previous level until it is greater than or equal to the number of elements in that
-dimension (if the block size would be greater than the number of elements, it is reduced
-to the number of elements). The last level is where block sizes in all dimensions reach
-the number of elements.
+the previous level until it is greater than or equal to the number of local elements in
+that dimension (if the block size would be greater than the number of local elements, it
+is reduced to the number of local elements). After all block sizes reach the number of
+local elements, every dimension is increased by `multiplier` at each level until it is
+greater than or equal to the total number of elements in that dimension (if the block size
+would be greater than the number of local elements, it is reduced to the number of local
+elements). The last level is where block sizes in all dimensions reach the number of
+elements.
 """
 struct LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
     multiplier::Ti
@@ -418,15 +446,21 @@ struct LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
 end
 
 function get_block_sizes(lm::LevelMultiplier, dimensions::Vector{<:Dimension},
-                         nelement_local_list::Vector{Ti}) where Ti <: Integer
+                         nelement_local_list::Vector{Ti},
+                         nelement_list::Vector{Ti}) where Ti <: Integer
     m = lm.multiplier
 
     current_size = Ti(1)
     block_sizes_list = [fill(current_size, length(dimensions))]
-    max_nelement = maximum(nelement_local_list)
-    while current_size < max_nelement
+    max_nelement_local = maximum(nelement_local_list)
+    while current_size < max_nelement_local
         current_size *= m
         this_block_sizes = @. min(current_size, nelement_local_list)
+        push!(block_sizes_list, this_block_sizes)
+    end
+    max_nelement = maximum(nelement_list)
+    while any(block_sizes_list[end] .< nelement_list)
+        this_block_sizes = @. min(block_sizes_list[end] * 2, nelement_list)
         push!(block_sizes_list, this_block_sizes)
     end
 
@@ -1357,7 +1391,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     nelement_local_list = [ind_type(d.nelement ÷ d.nrank) for d ∈ dimensions]
     if isa(block_sizes_heuristic, BlockSizesHeuristic)
         block_sizes_list = get_block_sizes(block_sizes_heuristic, dimensions,
-                                           nelement_local_list)
+                                           nelement_local_list, nelement_list)
     else
         block_sizes_list = block_sizes_heuristic
         # Check consistency of passed-in list.
