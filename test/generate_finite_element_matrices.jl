@@ -42,7 +42,7 @@ function construct_sparse_finite_element_matrix(dimensions::Vector{<:Dimension},
                                                  (args...)->zeros(Int64, args...);
                                                  row_dimensions, column_dimensions,
                                                  stencil)
-    rand!(matrix.nzval)
+    rand!(rng, matrix.nzval)
 
     if diagonal_block
         # Add 1 to diagonal to ensure matrix is invertible.

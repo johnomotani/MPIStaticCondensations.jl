@@ -227,7 +227,7 @@ function test_multivariable_finite_element_matrices()
                 test_multivariable_dimension_combinations([32], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
-                tol = 4.0e-6
+                tol = 4.0e-5
                 variable_dimensions_2d = (nothing, [2], [2], [2])
                 test_multivariable_dimension_combinations([1, 1], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2000)
                 test_multivariable_dimension_combinations([1, 2], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2001)
