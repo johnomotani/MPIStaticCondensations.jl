@@ -57,13 +57,13 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
         shared_comm_rank = MPI.Comm_rank(shared_comm)
         shared_comm_size = MPI.Comm_size(shared_comm)
-        block_comm = level_info[1].block_comm
-        if block_comm == MPI.COMM_NULL
-            block_comm_rank = 0
-            block_comm_size = 1
+        block_shared_comm = level_info[1].block_shared_comm
+        if block_shared_comm == MPI.COMM_NULL
+            block_shared_comm_rank = 0
+            block_shared_comm_size = 1
         else
-            block_comm_rank = MPI.Comm_rank(block_comm)
-            block_comm_size = MPI.Comm_size(block_comm)
+            block_shared_comm_rank = MPI.Comm_rank(block_shared_comm)
+            block_shared_comm_size = MPI.Comm_size(block_shared_comm)
         end
 
         if level ≤ length(schur_complement_buffer_list)
@@ -88,7 +88,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
         nbottom = sum(length(li.local_bottom_vector_indices) for li ∈ level_info)
 
         if use_shared_blocks
-            if block_comm == MPI.COMM_NULL
+            if block_shared_comm == MPI.COMM_NULL
                 A_factorization = MPIStaticCondensationNull{data_type}()
                 B = nothing
                 C = NullBlockCShared(level_info[1].n_subgroups,
@@ -107,7 +107,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                         Tuple(li.local_top_vector_a_block_offset_indices[1] for li ∈ level_info),
                         Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
                         Tuple(li.a_block_off_diagonal_bottom_vector_offset_indices[1] for li ∈ level_info),
-                        block_comm_rank, block_comm_size, block_allocate_shared_float,
+                        block_shared_comm_rank, block_shared_comm_size, block_allocate_shared_float,
                         block_synchronize_shared)
                 C = BlockCShared{data_type}(Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
                                             Tuple(li.a_block_off_diagonal_bottom_vector_indices[1] for li ∈ level_info),
@@ -121,7 +121,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                                             level_info[1].n_subgroups,
                                             block_allocate_shared_float,
                                             isa(schur_complement, BlockDenseS),
-                                            block_comm_rank, block_comm_size,
+                                            block_shared_comm_rank, block_shared_comm_size,
                                             shared_comm, shared_comm_rank,
                                             shared_comm_size, synchronize_shared,
                                             allocate_shared_float)

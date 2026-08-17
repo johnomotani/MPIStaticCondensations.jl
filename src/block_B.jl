@@ -71,7 +71,8 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Tind,Tsync}
                                      block_vector_rowinds::NTuple{Nvar,Tind},
                                      block_colinds::NTuple{Nvar,Tind},
                                      bottom_block_vector_colinds::NTuple{Nvar,Tind},
-                                     block_comm_rank::Integer, block_comm_size::Integer,
+                                     block_shared_comm_rank::Integer,
+                                     block_shared_comm_size::Integer,
                                      allocate_shared_float::Fa,
                                      synchronize_shared::Fs) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fa,Fs}
         if isempty(block_rowinds) || isempty(block_colinds)
@@ -92,12 +93,12 @@ struct BlockAinvDotBShared{Nvar,Tf,Ti,Tb,Tind,Tsync}
                                  for (offset, ri) ∈ zip(block_row_offsets, block_rowinds))
 
         bottom_block_vector_colinds = vcat(bottom_block_vector_colinds...)
-        vector_cols_per_proc = (ncol + block_comm_size - 1) ÷ block_comm_size
-        partial_vector_col_range = block_comm_rank*vector_cols_per_proc+1:min((block_comm_rank+1)*vector_cols_per_proc,ncol)
+        vector_cols_per_proc = (ncol + block_shared_comm_size - 1) ÷ block_shared_comm_size
+        partial_vector_col_range = block_shared_comm_rank*vector_cols_per_proc+1:min((block_shared_comm_rank+1)*vector_cols_per_proc,ncol)
         bottom_block_partial_vector_colinds = bottom_block_vector_colinds[partial_vector_col_range]
         block_vector_rowinds = vcat(block_vector_rowinds...)
-        vector_rows_per_proc = (nrow + block_comm_size - 1) ÷ block_comm_size
-        partial_vector_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,nrow)
+        vector_rows_per_proc = (nrow + block_shared_comm_size - 1) ÷ block_comm_size
+        partial_vector_row_range = block_shared_comm_rank*vector_rows_per_proc+1:min((block_shared_comm_rank+1)*vector_rows_per_proc,nrow)
         partial_nrow = length(partial_vector_row_range)
         block_partial_vector_rowinds = block_vector_rowinds[partial_vector_row_range]
         block_col_offsets = vcat(0, cumsum(length(bi) for bi ∈ block_colinds))

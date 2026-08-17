@@ -242,14 +242,14 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Tbuff,Tstorage,
                               right_multiplication_buffer_storage::Vector{Tf},
                               dense_buffer_storage::Vector{Tf}, subgroup_i::Ti,
                               n_subgroups::Ti, block_allocate_shared_float::Fba,
-                              schur_complement_is_dense::Bool, block_comm_rank::Integer,
-                              block_comm_size::Integer, shared_comm,
+                              schur_complement_is_dense::Bool, block_shared_comm_rank::Integer,
+                              block_shared_comm_size::Integer, shared_comm,
                               shared_comm_rank::Integer, shared_comm_size::Integer,
                               synchronize_shared::Fs,
                               allocate_shared_float::Fa) where {Nvar,Tf,Ti,Tind<:AbstractVector{Ti},Fba<:Function,Fs<:Function,Fa<:Function}
         all_bottom_block_vector_rowinds_full = vcat((ri for ri ∈ bottom_block_offset_rowinds_full)...)
-        vector_rows_per_proc = (length(all_bottom_block_vector_rowinds_full) + block_comm_size - 1) ÷ block_comm_size
-        vector_partial_row_range = block_comm_rank*vector_rows_per_proc+1:min((block_comm_rank+1)*vector_rows_per_proc,length(all_bottom_block_vector_rowinds_full))
+        vector_rows_per_proc = (length(all_bottom_block_vector_rowinds_full) + block_shared_comm_size - 1) ÷ block_shared_comm_size
+        vector_partial_row_range = block_shared_comm_rank*vector_rows_per_proc+1:min((block_shared_comm_rank+1)*vector_rows_per_proc,length(all_bottom_block_vector_rowinds_full))
         block_m_full = Tuple(length(ri) for ri ∈ block_rowinds_full)
         block_row_range_offsets_full = vcat(0, cumsum(m for m ∈ block_m_full[1:end-1]))
         partial_row_ranges = Tuple(max(1,first(vector_partial_row_range)-offset):min(m,last(vector_partial_row_range)-offset)
@@ -338,8 +338,8 @@ struct BlockCShared{Nvar,Tf,Ti,Tb,Tind,Tbboci,Tbor,Trmbb,Tdb,Tbi,Tbuff,Tstorage,
         end
 
         noutput = length(output_ranges[1])
-        n_per_proc = (noutput + block_comm_size - 1) ÷ block_comm_size
-        partial_output_range = block_comm_rank*n_per_proc+1:min((block_comm_rank+1)*n_per_proc,noutput)
+        n_per_proc = (noutput + block_shared_comm_size - 1) ÷ block_shared_comm_size
+        partial_output_range = block_shared_comm_rank*n_per_proc+1:min((block_shared_comm_rank+1)*n_per_proc,noutput)
 
         return new{Nvar,Tf,Ti,typeof(block),Tind,typeof(bottom_block_output_colinds),typeof(block_output_ranges),typeof(right_multiplication_buffer_block),typeof(dense_buffer),typeof(vector_buffer_block_in),typeof(vector_buffer_block_out),typeof(vector_buffer_blocks_out_storage),Fs}(
                    block, block_rowinds, block_row_ranges, bottom_block_rowinds,

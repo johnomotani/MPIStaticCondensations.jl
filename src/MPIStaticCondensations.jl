@@ -631,7 +631,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     n_subgroups::Ti
     subgroup_i::Ti
     subgroup_size::Ti
-    block_comm::Tcomm
+    block_shared_comm::Tcomm
     bottom_vector_indices::Vector{Ti}
     bottom_vector_offset_indices::Vector{Ti}
     local_bottom_vector_indices::Vector{Ti}
@@ -682,7 +682,7 @@ function get_level_info_for_variable(
                              a_block_off_diagonal_bottom_vector_indices=Vector{Ti}[],
                              a_block_off_diagonal_bottom_vector_offset_indices=Vector{Ti}[],
                              n_subgroups=0, subgroup_i=-1, subgroup_size=0,
-                             block_comm=shared_comm, bottom_vector_indices=Ti[],
+                             block_shared_comm=shared_comm, bottom_vector_indices=Ti[],
                              bottom_vector_offset_indices=Ti[],
                              local_bottom_vector_indices=Ti[],
                              local_bottom_vector_offset_indices=Ti[],
@@ -798,7 +798,7 @@ function get_level_info_for_variable(
             subgroup_i = shared_comm_rank ÷ subgroup_size
         end
         n_subgroups = min(shared_comm_size ÷ subgroup_size, total_nblocks)
-        block_comm = MPI.Comm_split(shared_comm, subgroup_i < 0 ? nothing : subgroup_i, 0)
+        block_shared_comm = MPI.Comm_split(shared_comm, subgroup_i < 0 ? nothing : subgroup_i, 0)
         blocks_per_proc = (total_nblocks + shared_comm_size - 1) ÷ shared_comm_size
         if subgroup_i < 0
             this_proc_blocks = 1:0
@@ -1193,7 +1193,7 @@ function get_level_info_for_variable(
                          a_block_off_diagonal_bottom_vector_indices=a_block_off_diagonal_bottom_vector_indices,
                          a_block_off_diagonal_bottom_vector_offset_indices=[x .+ local_bottom_vector_offset for x ∈ a_block_off_diagonal_bottom_vector_indices],
                          n_subgroups=n_subgroups, subgroup_i=subgroup_i,
-                         subgroup_size=subgroup_size, block_comm=block_comm,
+                         subgroup_size=subgroup_size, block_shared_comm=block_shared_comm,
                          bottom_vector_indices=global_bottom_vector_indices,
                          bottom_vector_offset_indices=global_bottom_vector_indices.+global_offset,
                          local_bottom_vector_indices=local_bottom_vector_indices,
@@ -1459,7 +1459,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                               a_block_off_diagonal_bottom_vector_indices=level_info_to_copy.a_block_off_diagonal_bottom_vector_indices,
                               a_block_off_diagonal_bottom_vector_offset_indices=Vector{ind_type}[x .+ local_bottom_vector_offset for x ∈ level_info_to_copy.a_block_off_diagonal_bottom_vector_indices],
                               n_subgroups=level_info_to_copy.n_subgroups, subgroup_i=level_info_to_copy.subgroup_i,
-                              subgroup_size=level_info_to_copy.subgroup_size, block_comm=level_info_to_copy.block_comm,
+                              subgroup_size=level_info_to_copy.subgroup_size, block_shared_comm=level_info_to_copy.block_shared_comm,
                               bottom_vector_indices=level_info_to_copy.bottom_vector_indices,
                               bottom_vector_offset_indices=level_info_to_copy.bottom_vector_indices.+global_offset,
                               local_bottom_vector_indices=level_info_to_copy.local_bottom_vector_indices,
@@ -1619,21 +1619,21 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     elseif level_info_list[end][1].level_shared_comm != MPI.COMM_NULL
         last_level_info = level_info_list[end]
         # Always use 'shared memory' solver on last level
-        if last_level_info[1].block_comm != MPI.COMM_NULL
-            block_comm_rank = MPI.Comm_rank(last_level_info[1].block_comm)
-            block_comm_size = MPI.Comm_size(last_level_info[1].block_comm)
-            if block_comm_size == shared_comm_size
+        if last_level_info[1].block_shared_comm != MPI.COMM_NULL
+            block_shared_comm_rank = MPI.Comm_rank(last_level_info[1].block_shared_comm)
+            block_shared_comm_size = MPI.Comm_size(last_level_info[1].block_shared_comm)
+            if block_shared_comm_size == shared_comm_size
                 last_block_allocate_shared_float = allocate_shared_float
                 last_block_allocate_shared_int = allocate_shared_int
                 if synchronize_shared === nothing
-                    last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_comm)
+                    last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_shared_comm)
                 else
                     last_block_synchronize_shared = synchronize_shared
                 end
             else
-                last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info[1].block_comm)
-                last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info[1].block_comm)
-                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_comm)
+                last_block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=last_level_info[1].block_shared_comm)
+                last_block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=last_level_info[1].block_shared_comm)
+                last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_shared_comm)
             end
 
             if !all(nblock_list[length(level_info_list)] .== 1)
@@ -1656,7 +1656,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                local_top_vector_a_block_indices=(1:ntop,),
                                local_top_vector_a_block_offset_indices=(1:ntop,),
                                a_block_off_diagonal_indices=(1:0,),
-                               block_comm=last_level_info[1].block_comm),)
+                               block_shared_comm=last_level_info[1].block_shared_comm),)
             last_A_block_solver = get_block_diagonal_solver(fake_level_info, data_type,
                                                             true, timer, check_lu,
                                                             last_block_allocate_shared_float,
@@ -1712,31 +1712,31 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 level_synchronize_shared = synchronize_shared
             end
 
-            if this_level_info[1].block_comm == MPI.COMM_NULL
-                block_comm_rank = 0
-                block_comm_size = 1
+            if this_level_info[1].block_shared_comm == MPI.COMM_NULL
+                block_shared_comm_rank = 0
+                block_shared_comm_size = 1
             else
-                block_comm_rank = MPI.Comm_rank(this_level_info[1].block_comm)
-                block_comm_size = MPI.Comm_size(this_level_info[1].block_comm)
+                block_shared_comm_rank = MPI.Comm_rank(this_level_info[1].block_shared_comm)
+                block_shared_comm_size = MPI.Comm_size(this_level_info[1].block_shared_comm)
             end
             use_shared_blocks = this_level_info[1].subgroup_size > 1
-            if block_comm_size == 1
+            if block_shared_comm_size == 1
                 # No shared-memory parallelism.
                 block_allocate_shared_float = (args...) -> Vector{data_type}(undef, args...)
                 block_allocate_shared_int = (args...) -> Vector{ind_type}(undef, args...)
                 block_synchronize_shared = () -> nothing
-            elseif block_comm_size == shared_comm_size
+            elseif block_shared_comm_size == shared_comm_size
                 block_allocate_shared_float = allocate_shared_float
                 block_allocate_shared_int = allocate_shared_int
                 if synchronize_shared === nothing
-                    block_synchronize_shared = () -> MPI.Barrier(this_level_info[1].block_comm)
+                    block_synchronize_shared = () -> MPI.Barrier(this_level_info[1].block_shared_comm)
                 else
                     block_synchronize_shared = synchronize_shared
                 end
             else
-                block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_info[1].block_comm)
-                block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_info[1].block_comm)
-                block_synchronize_shared = () -> MPI.Barrier(this_level_info[1].block_comm)
+                block_allocate_shared_float = (args...) -> allocate_shared_float(args...; comm=this_level_info[1].block_shared_comm)
+                block_allocate_shared_int = (args...) -> allocate_shared_int(args...; comm=this_level_info[1].block_shared_comm)
+                block_synchronize_shared = () -> MPI.Barrier(this_level_info[1].block_shared_comm)
             end
 
             if level == 1

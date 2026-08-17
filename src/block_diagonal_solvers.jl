@@ -73,17 +73,17 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
     partial_col_ranges::NTuple{Nvar,UnitRange{Ti}}
     u_buffer::Vector{Tf}
     B_column_indices::NTuple{Nvar,Tinds}
-    block_comm_rank::Ti
+    block_shared_comm_rank::Ti
     synchronize_shared::Tsync
     check_lu::Bool
     function BlockDiagonalSolverShared{Tf}(n::Ti, block_indices, block_vector_indices,
-                                           B_column_indices, block_comm,
+                                           B_column_indices, block_shared_comm,
                                            allocate_shared_float, allocate_shared_int,
                                            synchronize_shared::F, timer,
                                            check_lu) where {Tf, Ti <: Integer, F}
         block_size = sum(length(bi) for bi ∈ block_indices)
-        block_comm_rank = MPI.Comm_rank(block_comm)
-        block_comm_size = MPI.Comm_size(block_comm)
+        block_shared_comm_rank = MPI.Comm_rank(block_shared_comm)
+        block_shared_comm_size = MPI.Comm_size(block_shared_comm)
 
         block_offsets = vcat(Ti(0), cumsum(length(bi) for bi ∈ block_indices[1:end-1]))
         block_ranges = Tuple(block_offsets[i] .+ (1:length(bi))
@@ -96,17 +96,17 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
             local_block_serial_solver = nothing
             factors = nothing
             u_buffer = fill(NaN, block_size)
-        elseif block_comm_size > 1 && block_size > 1024
+        elseif block_shared_comm_size > 1 && block_size > 1024
             # Have multiple processes working on this block, and the block size is
             # big enough to be worth using a parallel dense-matrix LU solver.
             factors = allocate_shared_float(block_size, block_size)
-            if MPI.Comm_rank(block_comm) == 0
+            if MPI.Comm_rank(block_shared_comm) == 0
                 copyto!(factors, I)
             end
 
             local_block_solver =
-                mpi_dense_lu(factors, 128, block_comm, block_comm, MPI.COMM_SELF,
-                             allocate_shared_float, allocate_shared_int;
+                mpi_dense_lu(factors, 128, block_shared_comm, block_shared_comm,
+                             MPI.COMM_SELF, allocate_shared_float, allocate_shared_int;
                              synchronize_shared=synchronize_shared,
                              distributed_block_rows=1, skip_factorization=true,
                              check_lu=check_lu)
@@ -114,13 +114,13 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
                                            local_block_solver.factorization_shared_lu.ipiv,
                                            block_size)
             u_buffer = allocate_shared_float(block_size)
-            if block_comm_rank == 0
+            if block_shared_comm_rank == 0
                 u_buffer .= NaN
             end
         else
             factors = allocate_shared_float(block_size, block_size)
             ipiv = allocate_shared_int(block_size)
-            if MPI.Comm_rank(block_comm) == 0
+            if MPI.Comm_rank(block_shared_comm) == 0
                 copyto!(factors, I)
                 local_block_solver = LU(factors, ipiv, block_size)
                 local_block_serial_solver = local_block_solver
@@ -132,8 +132,8 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
             u_buffer = fill(NaN, block_size)
         end
 
-        cols_per_proc = Tuple((length(bi) + block_comm_size - 1) ÷ block_comm_size for bi ∈ block_indices)
-        partial_col_block_ranges = Tuple(block_comm_rank*nc+1:min((block_comm_rank+1)*nc,length(bi))
+        cols_per_proc = Tuple((length(bi) + block_shared_comm_size - 1) ÷ block_shared_comm_size for bi ∈ block_indices)
+        partial_col_block_ranges = Tuple(block_shared_comm_rank*nc+1:min((block_shared_comm_rank+1)*nc,length(bi))
                                          for (nc, bi) ∈ zip(cols_per_proc, block_indices))
         block_col_offsets = vcat(Ti(0), cumsum(length(ci) for ci ∈ block_indices[1:end-1]))
         partial_col_ranges = Tuple(offset .+ pcr
@@ -146,7 +146,7 @@ struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Uni
                    n, local_block_solver, local_block_serial_solver, factors,
                    block_indices, block_vector_indices, block_ranges,
                    partial_block_indices, partial_col_ranges, u_buffer, B_column_indices,
-                   block_comm_rank, synchronize_shared, check_lu)
+                   block_shared_comm_rank, synchronize_shared, check_lu)
     end
 end
 Base.size(Alu::BlockDiagonalSolverShared) = (Alu.n, Alu.n)
@@ -164,7 +164,7 @@ function get_block_diagonal_solver(level_info, data_type, use_shared_blocks, tim
                    n, Tuple(li.local_top_vector_a_block_indices[1] for li ∈ level_info),
                    Tuple(li.local_top_vector_a_block_offset_indices[1] for li ∈ level_info),
                    Tuple(li.a_block_off_diagonal_indices[1] for li ∈ level_info),
-                   level_info[1].block_comm, block_allocate_shared_float,
+                   level_info[1].block_shared_comm, block_allocate_shared_float,
                    block_allocate_shared_int, block_synchronize_shared, timer, check_lu)
     else
         return BlockDiagonalSolverSerial{data_type}(
@@ -374,13 +374,14 @@ function ldiv!(buffer::AbstractVector{T},
                u::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
         solver = block_diagonal_solver.local_block_solver
-        block_comm_rank = block_diagonal_solver.block_comm_rank
+        block_shared_comm_rank = block_diagonal_solver.block_shared_comm_rank
         block_vector_indices = block_diagonal_solver.block_vector_indices
         synchronize_shared = block_diagonal_solver.synchronize_shared
 
-        # Need to synchronize here as `u_buffer` is filled only on block_comm_rank==0, but
-        # `u` was filled in parallel. Maybe it would be worth filling `u_buffer` in
-        # parallel? Then would need to synchronize before `ldiv!()` call.
+        # Need to synchronize here as `u_buffer` is filled only on
+        # block_shared_comm_rank==0, but `u` was filled in parallel. Maybe it would be
+        # worth filling `u_buffer` in parallel? Then would need to synchronize before
+        # `ldiv!()` call.
         synchronize_shared()
 
         if solver === nothing
@@ -392,7 +393,7 @@ function ldiv!(buffer::AbstractVector{T},
                 ldiv!(buffer, solver, u)
             else
                 u_buffer = block_diagonal_solver.u_buffer
-                if block_comm_rank == 0
+                if block_shared_comm_rank == 0
                     for (i1, i2) ∈ enumerate(block_vector_indices)
                         u_buffer[i1] = u[i2]
                     end
@@ -400,7 +401,7 @@ function ldiv!(buffer::AbstractVector{T},
                 ldiv!(buffer, solver, u_buffer)
             end
         else
-            if block_comm_rank == 0
+            if block_shared_comm_rank == 0
                 for (i1, i2) ∈ enumerate(block_vector_indices)
                     buffer[i1] = u[i2]
                 end
