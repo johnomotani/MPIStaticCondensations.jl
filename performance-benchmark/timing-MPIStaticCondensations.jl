@@ -25,7 +25,7 @@ function timing_run()
     n_shared = parse(Int64, ARGS[1])
     timer = TimerOutput()
 
-    run_benchmark(run_MSC, timing_params, 42, nothing, n_shared, true, level_multiplier, timer)
+    run_benchmark(run_MSC, timing_params, 42, nothing, n_shared, true, false, false, timer)
 
     if MPI.Comm_rank(MPI.COMM_WORLD) == 0
         save_timer("timing-$comm_size-$n_shared.jld", timer)

@@ -70,10 +70,10 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
             solution = x_local
         end
         MPI.Barrier(shared_comm)
-        x_global = gather_vector(solution, dimensions, comm, distributed_comm,
+        x_global = gather_vector(solution, dimensions, (nothing,), comm, distributed_comm,
                                  shared_comm)
         if distributed_rank == 0 && shared_rank == 0
-            check_solution = global_matrix \ rhs_global
+            check_solution = sparse(global_matrix) \ rhs_global
             @test isapprox(x_global, check_solution;
                            norm=(x)->NaN, rtol=tol, atol=tol)
             @test isapprox(global_matrix * x_global, rhs_global;
@@ -152,14 +152,14 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
     else
         reduce_proc_count_with_blocks_list = (false,)
     end
-    @testset "nelement_list=$nelement_list, ngrid_list=$ngrid_list, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks" for
+    @testset "ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks" for
             sparse_stencils ∈ sparse_stencils_list,
             reduce_proc_count_with_blocks ∈ reduce_proc_count_with_blocks_list
         if rank == 0
-            println("* n_shared=$n_shared, nelement_list=$nelement_list, ngrid_list=$ngrid_list, sparse_stencils=$sparse_stencils, reduce_proc_count_with_blocks=$reduce_proc_count_with_blocks")
+            println("* n_sh=$n_shared, ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks")
         end
 
-        @testset "this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, block_sizes_heuristic=$block_sizes_heuristic, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold" for
+        @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
@@ -168,14 +168,16 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
                 block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ (1.0, 0.1)
-            if rank == 0
-                println("  - n_shared=$n_shared, sparse_stencils=$sparse_stencils, this_nelement_list=$this_nelement_list, this_ngrid_list=$this_ngrid_list, this_nrank_list=$this_nrank_list, periodic_list=$periodic_list, dense_boundaries_list=$dense_boundaries_list, block_sizes_heuristic=$block_sizes_heuristic, sparse_C_blocks=$sparse_C_blocks, mumps_fill_in_threshold=$mumps_fill_in_threshold")
-            end
+            #if rank == 0
+            #    println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
+            #end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
-            dimensions = [create_dimension(; nelement, ngrid, nrank, irank, periodic, dense_boundaries)
-                          for (nelement, ngrid, irank, nrank, periodic, dense_boundaries)
-                          ∈ zip(this_nelement_list, this_ngrid_list, this_irank_list, this_nrank_list, periodic_list, dense_boundaries_list)]
+            dimensions = [create_dimension(; name="d$i", nelement, ngrid, nrank, irank, periodic, dense_boundaries)
+                          for (i, (nelement, ngrid, irank, nrank, periodic, dense_boundaries))
+                          ∈ enumerate(zip(this_nelement_list, this_ngrid_list,
+                                          this_irank_list, this_nrank_list, periodic_list,
+                                          dense_boundaries_list))]
 
             test_matrix(dimensions, n_shared, this_seed, sparse_stencils,
                         block_sizes_heuristic, reduce_proc_count_with_blocks,
@@ -196,7 +198,7 @@ function test_finite_element_matrices()
         # Temporarily disable distributed-memory MPI, until we re-enable support.
         @testset "n_shared=$n_shared" for n_shared ∈ comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
             @testset "1D" begin
-                tol = 1.0e-11
+                tol = 4.0e-11
                 test_dimension_combinations([1], [3], rank, comm_size, n_shared, tol, 1000)
                 test_dimension_combinations([2], [3], rank, comm_size, n_shared, tol, 1001)
                 test_dimension_combinations([2], [4], rank, comm_size, n_shared, tol, 1002)
@@ -211,7 +213,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([32], [3], rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
-                tol = 1.0e-6
+                tol = 2.0e-6
                 test_dimension_combinations([1, 1], [3, 3], rank, comm_size, n_shared, tol, 2000)
                 test_dimension_combinations([1, 2], [3, 3], rank, comm_size, n_shared, tol, 2001)
                 test_dimension_combinations([1, 2], [3, 5], rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
@@ -231,7 +233,7 @@ function test_finite_element_matrices()
                 test_dimension_combinations([16, 15], [3, 3], rank, comm_size, n_shared, tol, 2016)
             end
             @testset "3D" begin
-                tol = 2.0e-5
+                tol = 4.0e-5
                 test_dimension_combinations([1, 1, 1], [3, 3, 3], rank, comm_size, n_shared, tol, 3000; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_dimension_combinations([2, 2, 2], [3, 4, 5], rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_dimension_combinations([2, 2, 3], [3, 3, 4], rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)

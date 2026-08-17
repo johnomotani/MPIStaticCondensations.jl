@@ -1,0 +1,172 @@
+using LinearAlgebra
+using MPI
+using MPIStaticCondensations
+using StableRNGs
+using StatsBase
+
+using MUMPS
+using MUMPS: set_job!, invoke_mumps!, finalize!
+
+include("common.jl")
+
+function set_matrix!(mumps, data, global_i, global_j)
+    n = length(data)
+    mumps.nnz_loc = n
+    mumps.irn_loc = pointer(global_i)
+    mumps.jcn_loc = pointer(global_j)
+
+    # Perform analysis phase without using matrix values.
+    set_job!(mumps, 1)
+    invoke_mumps!(mumps)
+
+    mumps.a_loc = pointer(data)
+    return nothing
+end
+
+function set_rhs_solution!(mumps, x, isol, rhs, irhs)
+    mumps.sol_loc = pointer(x)
+    mumps.isol_loc = pointer(isol)
+    mumps.rhs_loc = pointer(rhs)
+    mumps.irhs_loc = pointer(irhs)
+    mumps.nloc_rhs = length(rhs)
+    mumps.lrhs_loc = length(rhs)
+    return nothing
+end
+
+function set_global_rhs!(mumps, rhs_global)
+    mumps.rhs = pointer(rhs_global)
+    mumps.lrhs = length(rhs_global)
+    return nothing
+end
+
+function run_MUMPS(x, matrix_data, rhs, rhs_global, dimensions, variable_dimensions,
+                   sparse_C_blocks, mumps_fill_in_threshold, block_sizes_heuristic, comm,
+                   distributed_comm, shared_comm, allocate_shared_float,
+                   allocate_shared_int, nmat, nrhs, matrix_repeats, rhs_repeats, timer)
+
+    global_data, global_i, global_j, data, this_block_global_i, this_block_global_j,
+        local_i, local_j = matrix_data
+
+    if variable_dimensions === nothing
+        total_size = prod(d.n for d ∈ dimensions)
+    else
+        total_size = sum(vdim === nothing ? prod(d.n for d ∈ dimensions)
+                                          : prod(d.n for d ∈ dimensions[vdim])
+                         for vdim ∈ variable_dimensions)
+    end
+    is_root = (MPI.Comm_rank(comm) == 0)
+    shared_comm_rank = MPI.Comm_rank(shared_comm)
+    shared_comm_size = MPI.Comm_size(shared_comm)
+
+    # Select a subset of columns from 'this block' to handle on this process, because
+    # MUMPS only uses distributed-memory MPI parallelism, not shared-memory MPI
+    # parallelism (but we want to be able to run MUMPS on any number of processes, not
+    # just those where the number of elements in the 'distributed' dimension is exactly
+    # divisible by the number of processes.
+    first_col, last_col = extrema(this_block_global_j)
+    ncol = last_col - first_col + 1
+    cols_per_proc = (ncol + shared_comm_size - 1) ÷ shared_comm_size
+    first_local_col = min(shared_comm_rank * cols_per_proc + first_col, last_col + 1)
+    last_local_col = min((shared_comm_rank + 1) * cols_per_proc + first_col - 1, last_col)
+    local_filter = first_local_col .≤ this_block_global_j .≤ last_local_col
+    data = data[local_filter]
+    this_block_global_i = this_block_global_i[local_filter]
+    this_block_global_j = this_block_global_j[local_filter]
+    local_i = local_i[local_filter]
+    local_j = local_j[local_filter]
+
+    # The row/column indices need to be 32-bit integers for MUMPS.
+    this_block_global_i = Cint.(this_block_global_i)
+    this_block_global_j = Cint.(this_block_global_j)
+
+    # The locally-owned vector entries should be given by the min/max of the matrix
+    # indices in this_block_global_i or this_block_global_j.
+    indrange = extrema(this_block_global_i)
+    irhs = collect(indrange[1]:indrange[2])
+    #isol = similar(irhs)
+
+    t1 = time_ns()
+    icntl = copy(default_icntl)
+    icntl[4] = 1 # Non-verbose, only error messages.
+    icntl[6] = 1 # A pivoting strategy based only on the pattern of non-zeros - does not require values of matrix entries - so analysis can be done once, and different matrices (with the same non-zero pattern) can be factorised without re-doing analysis.
+    icntl[14] = 35 # Percentage increase in the estimated working space (default is between 25 and 35).
+    icntl[18] = 3 # User-provided distributed matrix pattern.
+    #icntl[20] = 11 # Distributed RHS (also 10, not sure which value is best)
+    icntl[20] = 0 # Centralised RHS.
+    #icntl[21] = 1 # Solution is kept distributed.
+    icntl[21] = 0 # Solution is gathered centrally.
+    icntl[4] = 1 # Use 'tree parallelism' when multi-threaded.
+    cntl = copy(default_cntl64)
+    MumpsExt = Base.get_extension(MPIStaticCondensations, :MumpsExt)
+    Alu = Mumps{Float64}(0, icntl, cntl; comm=MumpsExt.comm2f(comm))
+    Alu.n = total_size
+    set_matrix!(Alu, data, this_block_global_i, this_block_global_j)
+    t2 = time_ns()
+    t_setup = (t2 - t1) * 1e-6 # in ms
+    if is_root
+        A_sparse = sparse(global_i, global_j, global_data)
+    end
+
+    t_lu = Inf
+    t_solve = Inf
+    for _ ∈ 1:matrix_repeats
+        t1 = time_ns()
+        set_job!(Alu, 2)
+        invoke_mumps!(Alu)
+        t2 = time_ns()
+        t_lu = min(t_lu, (t2 - t1) * 1e-6)
+        if Alu.info[1] != 0
+            error("some MUMPS error occured: $(Alu.info[1:2])")
+        end
+
+        nsol_loc = Alu.info[23]
+        isol_loc = zeros(Cint, nsol_loc)
+        x_loc = fill(NaN, nsol_loc)
+        Alu.lsol_loc = nsol_loc
+
+        for _ ∈ 1:rhs_repeats
+            if is_root
+                solution = copy(rhs_global)
+            end
+            t1 = time_ns()
+            #set_rhs_solution!(Alu, x_loc, isol_loc, rhs, irhs)
+            if is_root
+                set_global_rhs!(Alu, solution)
+            end
+            set_job!(Alu, 3)
+            invoke_mumps!(Alu)
+            t2 = time_ns()
+            t_solve = min(t_solve, (t2 - t1) * 1e-6)
+            if Alu.info[1] != 0
+                error("some MUMPS error occured: $(Alu.info[1:2])")
+            end
+
+            # Check solution, just to be on the safe side...
+            if is_root
+                max_error = maximum(abs.(A_sparse * solution - rhs_global))
+                if max_error > 1.0e-3
+                    println("Solution incorrect? Max error $max_error.")
+                    MPI.Abort(MPI.COMM_WORLD, -1)
+                end
+            end
+        end
+    end
+    if Alu.info[1] != 0
+        # This conditional should never be entered, but seems to prevent
+        # this_block_global_i, this_block_global_j and data from being garbage collected
+        # (which would cause errors in MUMPS).
+        println("this_block_global_i=$(extrema(this_block_global_i)), "
+                * "this_block_global_j=$(extrema(this_block_global_j)), "
+                * "data=$(extrema(data))")
+    end
+
+    finalize!(Alu)
+
+    return t_setup, t_lu, t_solve
+end
+
+BLAS.set_num_threads(Threads.nthreads())
+
+if !MPI.Initialized()
+    MPI.Init()
+end
