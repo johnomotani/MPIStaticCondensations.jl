@@ -120,25 +120,3 @@ function run_MSC_inner(Alu, A, x, rhs, matrix_repeats, rhs_repeats, comm_rank,
 
     return t_lu, t_solve
 end
-
-function run_benchmarks()
-    BLAS.set_num_threads(1)
-
-    if !MPI.Initialized()
-        MPI.Init()
-    end
-    if MPI.Comm_rank(MPI.COMM_WORLD) == 0
-        println("MPIStaticCondensations benchmark")
-        println("================================\n")
-    end
-
-    benchmark(run_MSC, params_1d, seed_1d, "MPIStaticCondensations_1d")
-    benchmark(run_MSC, params_2d, seed_2d, "MPIStaticCondensations_2d")
-    benchmark(run_MSC, params_3d, seed_3d, "MPIStaticCondensations_3d")
-
-    return nothing
-end
-
-if abspath(PROGRAM_FILE) == @__FILE__
-    run_benchmarks()
-end
