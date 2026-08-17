@@ -8,13 +8,7 @@ function get_comms(shared_nproc, with_comm=false)
     end
     distributed_rank, shared_rank = divrem(rank, shared_nproc)
     shared_comm = MPI.Comm_split(MPI.COMM_WORLD, distributed_rank, shared_rank)
-    if shared_rank == 0
-        distributed_color = 0
-    else
-        distributed_color = nothing
-    end
-    distributed_comm = MPI.Comm_split(MPI.COMM_WORLD, distributed_color,
-                                      distributed_rank)
+    distributed_comm = MPI.Comm_split(MPI.COMM_WORLD, shared_rank, distributed_rank)
 
     local_win_store_float = MPI.Win[]
     if shared_comm == MPI.COMM_SELF && !with_comm

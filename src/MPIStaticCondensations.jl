@@ -656,7 +656,7 @@ function get_level_info_for_variable(
              level_indices::Vector{Ti}, block_sizes::Vector{Ti}, nblock::Vector{Ti},
              global_size::Ti, global_offset::Ti, local_offset::Ti,
              local_bottom_vector_offset::Ti, is_top_level::Bool, is_bottom_level::Bool,
-             distributed_comm::Union{MPI.Comm,Nothing,FakeComm},
+             distributed_comm::Union{MPI.Comm,FakeComm},
              shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
         if length(dimensions) != length(block_sizes)
@@ -1217,7 +1217,7 @@ end
                             reduce_proc_count_with_blocks::Bool=false,
                             sparse_C_blocks::Bool=true,
                             comm::MPI.Comm=MPI.COMM_WORLD,
-                            distributed_comm::Union{MPI.Comm,Nothing}=missing,
+                            distributed_comm::Union{MPI.Comm,Missing}=missing,
                             shared_comm::MPI.Comm=MPI.COMM_SELF,
                             allocate_shared_float::Union{Function,Nothing}=nothing,
                             allocate_shared_int::Union{Function,Nothing}=nothing,
@@ -1306,7 +1306,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  sparse_C_blocks::Bool=true,
                                  mumps_fill_in_threshold::Number=1.0,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
-                                 distributed_comm::Union{MPI.Comm,Nothing}=missing,
+                                 distributed_comm::Union{MPI.Comm,Missing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
                                  allocate_shared_float::F1=nothing,
                                  allocate_shared_int::F2=nothing,
@@ -1325,7 +1325,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     if distributed_comm === missing
         # Create default distributed_comm
-        distributed_comm = MPI.Comm_split(comm, shared_comm_rank == 0 ? 0 : nothing, 0)
+        distributed_comm = MPI.Comm_split(comm, shared_comm_rank, 0)
     end
 
     if comm_size % shared_comm_size != 0
