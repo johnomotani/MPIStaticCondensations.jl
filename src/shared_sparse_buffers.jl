@@ -320,10 +320,13 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                         eq_list[count+=1] = eq
                     end
                 else
-                    for _ ∈ 1:block_size*(d.ngrid-1)
+                    first_block_n = block_size*(d.ngrid-1)
+                    for _ ∈ 1:first_block_n
                         eq_list[count+=1] = eq
                     end
-                    eq += 1
+                    if first_block_n > 0
+                        eq += 1
+                    end
                     for _ ∈ 2:nblock
                         # Lower boundary
                         eq_list[count+=1] = eq
@@ -345,7 +348,14 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                     end
                     # Upper boundary
                     if count == d_n_local - 1
-                        eq_list[count+=1] = eq - 1
+                        if d.ngrid == 2
+                            # There are no 'interior' points, so `eq-1` would actually be
+                            # the last boundary between elements, which is not equivalent
+                            # to the last grid point.
+                            eq_list[count+=1] = eq
+                        else
+                            eq_list[count+=1] = eq - 1
+                        end
                     end
                 end
                 return eq_list
