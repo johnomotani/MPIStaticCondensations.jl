@@ -174,6 +174,8 @@ struct Dimension{Ti<:Integer}
     n_local::Ti
     n_block::Ti
     nelement::Ti
+    nelement_block::Ti
+    nelement_local::Ti
     ngrid::Ti
     nrank::Ti
     irank::Ti
@@ -257,8 +259,9 @@ struct Dimension{Ti<:Integer}
             global_inds[end] = 1
         end
 
-        return new{Ti}(name, n, n_local, n_block, nelement, ngrid, nrank, irank,
-                       global_inds, periodic, dense_boundaries, remove_boundaries)
+        return new{Ti}(name, n, n_local, n_block, nelement, nelement_block,
+                       nelement_local, ngrid, nrank, irank, global_inds, periodic,
+                       dense_boundaries, remove_boundaries)
     end
 end
 
@@ -1449,13 +1452,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             end
         end
     end
-    nblock_list = [(nelement_local_list .+ bs .- 1) .÷ bs for bs ∈ block_sizes_list]
-    for (nb, bs) ∈ zip(nblock_list, block_sizes_list)
-        if !all(nb .> 0)
-            error("nb not positive for block_sizes=$bs.")
-        end
-    end
-    total_local_nblock_list = [prod(nb) for nb ∈ nblock_list]
 
     dimensions_without_periodic = [Dimension(; name=d.name, nelement=d.nelement,
                                              ngrid=d.ngrid, nrank=d.nrank, irank=d.irank,
@@ -1473,17 +1469,53 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_global_size = total_global_size
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
+    block_distributed_comm = MPI.COMM_SELF
+    block_gather_comm = MPI.COMM_SELF
     # When variable_dimensions has duplicate indices, we can re-use a single LevelInfo for
     # each of the duplicates.
     duplicate_var_first_position = Tuple(findfirst(variable_dimensions .== (vdim,))
                                          for vdim ∈ variable_dimensions)
-    for (level, (block_sizes, nblock, total_local_nblock)) ∈
-            enumerate(zip(block_sizes_list, nblock_list, total_local_nblock_list))
+    level_dimensions = dimensions
+    for (level, block_sizes) ∈ enumerate(block_sizes_list)
+        if any(block_sizes .> [(d.nelement + d.nrank - 1) ÷ d.nrank for d ∈ level_dimensions])
+            # At least one block size is bigger than the locally-owned part of the
+            # corresponding dimension. Need to merge two (or more) groups of processes and
+            # gather the matrix/vector onto the root shared-memory block of the new
+            # groups.
+
+            # Reduce `nrank` as necessary so that each dimension in level_dimensions is
+            # big enough to contain the corresponding size from block_sizes.
+            level_dimensions = [Dimension(; name=d.name, nelement=d.nelement,
+                                          ngrid=d.ngrid,
+                                          nrank=min(d.nrank, (d.nelement + bs - 1) ÷ bs),
+                                          irank=d.irank, periodic=d.periodic,
+                                          dense_boundaries=d.dense_boundaries,
+                                          remove_boundaries=(d.periodic || d.remove_boundaries))
+                                for (d, bs) ∈ zip(level_dimensions, block_sizes)]
+            old_block_distributed_comm_rank = MPI.Comm_rank(block_distributed_comm)
+            distributed_block_colour = 0
+            for d ∈ reverse(level_dimensions)
+                distributed_block_colour = distributed_block_colour * d.nrank + d.irank
+            end
+            block_distributed_comm = MPI.Comm_split(distributed_comm,
+                                                    distributed_block_colour, 0)
+            gather_colour = old_block_distributed_comm_rank == 0 ? distributed_block_colour : nothing
+            block_gather_comm = MPI.Comm_split(distributed_comm, gather_colour, 0)
+        end
+        nblock = [(d.nelement_block + bs - 1) ÷ bs
+                  for (d, bs) ∈ zip(level_dimensions, block_sizes)]
+        local_nblock = [(d.nelement_local + bs - 1) ÷ bs
+                        for (d, bs) ∈ zip(level_dimensions, block_sizes)]
+        total_local_nblock = prod(local_nblock)
         if level == 1 || level == n_levels
             # Only handle periodicity on the final level
-            dims = dimensions
+            dims = level_dimensions
         else
-            dims = dimensions_without_periodic
+            dims = [Dimension(; name=d.name, nelement=d.nelement, ngrid=d.ngrid,
+                              nrank=d.nrank, irank=d.irank, periodic=false,
+                              dense_boundaries=d.dense_boundaries,
+                              remove_boundaries=(d.periodic || d.remove_boundaries))
+                    for d ∈ level_dimensions]
         end
         if reduce_proc_count_with_blocks && level_shared_comm_size > total_local_nblock
             # Not enough blocks to divide among processes in existing level_shared_comm,
