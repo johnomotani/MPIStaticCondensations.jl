@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Slurm job options (job-name, compute nodes, job time)
+#SBATCH --job-name=benchmark
+#SBATCH --time=1:0:0
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=200G
+
+#SBATCH --account=<account_name>
+#SBATCH --partition=dcgp_fua_prod
+#SBATCH --qos=normal
+
+# Set the number of threads to 1
+#   This prevents any threaded system libraries from automatically
+#   using threading.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+source julia.env
+
+export MPITRAMPOLINE_MPIEXEC=$PWD/mpiwrapper/bin/mpiwrapper-mpiexec
+export MPITRAMPOLINE_LIB=$PWD/mpiwrapper/lib64/libmpiwrapper.so
+
+#JSO="-J mpistaticcondensations.so"
+
+mpirun -np 1 ./julia $JSO --project -O3 -t1 benchmark-serial-UMFPACK.jl
