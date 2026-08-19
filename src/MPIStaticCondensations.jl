@@ -479,7 +479,6 @@ include("block_C.jl")
 include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
-include("distributed_mpi_helpers.jl")
 
 # Function with no methods that we can import in the MUMPS extension.
 function get_mumps_solver end
@@ -507,6 +506,8 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
 Base.size(Alu::MPIStaticCondensationParallel, d::Integer) = size(Alu)[d]
+
+include("distributed_mpi_helpers.jl")
 
 function get_global_indices(dimensions::Vector{<:Dimension}, local_inds::Vector{<:Integer})
     n_local_tuple = Tuple(d.n_local for d ∈ dimensions)
@@ -1403,18 +1404,48 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                            nelement_block_list, nelement_list)
     else
         block_sizes_list = block_sizes_heuristic
-        # Check consistency of passed-in list.
-        for i ∈ 1:length(block_sizes_list)-1
-            bs = block_sizes_list[i]
-            bs_next = block_sizes_list[i+1]
-            if !all(bs_next .≥ bs)
-                error("Block size for each dimension must not decrease at any level. "
-                      * "Got block_sizes_list=$block_sizes_list.")
+    end
+    # Check consistency of block_sizes_list.
+    next_level_is_distributed = false
+    for i ∈ 1:length(block_sizes_list)-1
+        bs = block_sizes_list[i]
+        bs_next = block_sizes_list[i+1]
+        if !all(bs_next .≥ bs)
+            error("Block size for each dimension must not decrease at any level. "
+                  * "Got block_sizes_list=$block_sizes_list.")
+        end
+        if next_level_is_distributed
+            if i == length(block_sizes_list) - 1
+                if bs_next != nelement_list
+                    error("Block sizes at final level should mean that one block covers "
+                          * "the whole grid. nelement_list=$nelement_list, "
+                          * "block_sizes_list=$block_sizes_list.")
+                end
+            else
+                if !all(@. (bs_next % bs == 0) || (bs_next == nelement_list))
+                    error("Block size for each dimension must be an integer multiple of "
+                          * "the block size at the previous level, except when the block "
+                          * "size is equal to nelement_local or nelement. "
+                          * "Got block_sizes_list=$block_sizes_list.")
+                end
             end
-            if !all(bs_next .% bs .== 0)
-                error("Block size for each dimension must be an integer multiple of the "
-                      * "block size at the previous level. "
-                      * "Got block_sizes_list=$block_sizes_list.")
+        else
+            if bs_next == nelement_block_list
+                # Next level is distributed.
+                next_level_is_distributed = true
+            else
+                if !all(@. (bs_next % bs == 0) || (bs_next == nelement_block_list))
+                    error("Block size for each dimension must be an integer multiple of "
+                          * "the block size at the previous level, except when the block "
+                          * "size is equal to nelement_local or nelement. "
+                          * "Got block_sizes_list=$block_sizes_list.")
+                end
+            end
+            if any(bs_next .> nelement_block_list)
+                error("Some block size is greater than nelement_block, but there has not "
+                      * "been a level where all block sizes are equal to nelement_block. "
+                      * "nelement_block=$nelement_block, "
+                      * "block_sizes_list=$block_sizes_list.")
             end
         end
     end
