@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# Slurm job options (job-name, compute nodes, job time)
+#SBATCH --job-name=benchmark
+#SBATCH --time=12:0:0
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=128
+#SBATCH --cpus-per-task=2
+
+#SBATCH --account=<account_name>
+#SBATCH --partition=dcgp_fua_prod
+#SBATCH --qos=normal
+
+# Set environment variables for OpenMP
+export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK  # Set number of OpenMP threads
+export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK  # Set number of BLAS threads
+
+source julia.env
+
+export MPITRAMPOLINE_MPIEXEC=$PWD/mpiwrapper/bin/mpiwrapper-mpiexec
+export MPITRAMPOLINE_LIB=$PWD/mpiwrapper/lib64/libmpiwrapper.so
+
+#JSO="-J mpistaticcondensations.so"
+
+for np in 128 64 32 16 8 4 2 1; do
+  srun --ntasks=$np --cpu-bind=cores ./julia $JSO --project -O3 -t$SLURM_CPUS_PER_TASK benchmark-MUMPS.jl
+done
