@@ -172,6 +172,7 @@ struct Dimension{Ti<:Integer}
     name::String
     n::Ti
     n_local::Ti
+    n_block::Ti
     nelement::Ti
     ngrid::Ti
     nrank::Ti
@@ -187,9 +188,6 @@ struct Dimension{Ti<:Integer}
                        periodic::Bool, dense_boundaries::Bool,
                        remove_boundaries::Union{Bool,Nothing}) where Ti <: Integer
 
-        if nelement % nrank != 0
-            error("`nrank=$nrank` does not divide nelement=$nelement")
-        end
         if nelement < 0
             error("nelement=$nelement cannot be negative")
         end
@@ -203,7 +201,8 @@ struct Dimension{Ti<:Integer}
             error("irank=$irank cannot be negative")
         end
 
-        nelement_local = nelement ÷ nrank
+        nelement_block = (nelement + nrank - 1) ÷ nrank
+        nelement_local = min(nelement_block, nelement - irank * nelement_block)
 
         # Assume a continuous-Galerkin finite element discretization where adjacent
         # elements share a boundary point. `ngrid` counts the points in a single element,
@@ -218,8 +217,13 @@ struct Dimension{Ti<:Integer}
         else
             n_local = nelement_local * (ngrid - 1) + 1
         end
-        first_global_ind = irank * nelement_local * (ngrid - 1) + 1
-        last_global_ind = (irank + 1) * nelement_local * (ngrid - 1) + 1
+        if nelement_block == 0
+            n_block = 0
+        else
+            n_block = nelement_block * (ngrid - 1) + 1
+        end
+        first_global_ind = min(irank * nelement_block * (ngrid - 1) + 1, n + 1)
+        last_global_ind = min((irank + 1) * nelement_block * (ngrid - 1) + 1, n)
 
         if remove_boundaries === nothing
             remove_boundaries = periodic || dense_boundaries
@@ -253,8 +257,8 @@ struct Dimension{Ti<:Integer}
             global_inds[end] = 1
         end
 
-        return new{Ti}(name, n, n_local, nelement, ngrid, nrank, irank, global_inds,
-                       periodic, dense_boundaries, remove_boundaries)
+        return new{Ti}(name, n, n_local, n_block, nelement, ngrid, nrank, irank,
+                       global_inds, periodic, dense_boundaries, remove_boundaries)
     end
 end
 
@@ -348,7 +352,7 @@ struct FastSlow{Ti<:Integer} <: BlockSizesHeuristic
 end
 
 function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
-                         nelement_local_list::Vector{Ti},
+                         nelement_block_list::Vector{Ti},
                          nelement_list::Vector{Ti}) where Ti <: Integer
     fm = fs.fast_multiplier
     st = fs.slow_threshold
@@ -356,10 +360,10 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
     # 'Fast' expansion - all block sizes increase by the same factor at each level.
     current_size = Ti(1)
     block_sizes_list = [fill(current_size, length(dimensions))]
-    max_fast = min(st, maximum(nelement_local_list))
+    max_fast = min(st, maximum(nelement_block_list))
     while current_size < max_fast
         current_size *= fm
-        this_block_sizes = @. min(current_size, nelement_local_list)
+        this_block_sizes = @. min(current_size, nelement_block_list)
         push!(block_sizes_list, this_block_sizes)
     end
 
@@ -373,7 +377,7 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
 
         # If any dimensions have a block size smaller than the number of local elements,
         # choose only from those dimensions.
-        nelement_local_filter = previous_block_size[candidate_dims] .< nelement_local_list[candidate_dims]
+        nelement_local_filter = previous_block_size[candidate_dims] .< nelement_block_list[candidate_dims]
         if any(nelement_local_filter)
             candidate_dims = candidate_dims[nelement_local_filter]
             expand_local = true
@@ -390,8 +394,8 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
         # Try to increase first the dimensions where the block has the most space left to
         # expand, i.e. the ones with the largest number of elements.
         if expand_local
-            largest_nelement = maximum(nelement_local_list[candidate_dims])
-            candidate_dims = candidate_dims[findall(nelement_local_list[candidate_dims] .== largest_nelement)]
+            largest_nelement = maximum(nelement_block_list[candidate_dims])
+            candidate_dims = candidate_dims[findall(nelement_block_list[candidate_dims] .== largest_nelement)]
         else
             largest_nelement = maximum(nelement_list[candidate_dims])
             candidate_dims = candidate_dims[findall(nelement_list[candidate_dims] .== largest_nelement)]
@@ -409,7 +413,7 @@ function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
         block_size = copy(previous_block_size)
         if expand_local
             block_size[dim_to_increase] = min(block_size[dim_to_increase] * 2,
-                                              nelement_local_list[dim_to_increase])
+                                              nelement_block_list[dim_to_increase])
         else
             block_size[dim_to_increase] = min(block_size[dim_to_increase] * 2,
                                               nelement_list[dim_to_increase])
@@ -446,16 +450,16 @@ struct LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
 end
 
 function get_block_sizes(lm::LevelMultiplier, dimensions::Vector{<:Dimension},
-                         nelement_local_list::Vector{Ti},
+                         nelement_block_list::Vector{Ti},
                          nelement_list::Vector{Ti}) where Ti <: Integer
     m = lm.multiplier
 
     current_size = Ti(1)
     block_sizes_list = [fill(current_size, length(dimensions))]
-    max_nelement_local = maximum(nelement_local_list)
+    max_nelement_local = maximum(nelement_block_list)
     while current_size < max_nelement_local
         current_size *= m
-        this_block_sizes = @. min(current_size, nelement_local_list)
+        this_block_sizes = @. min(current_size, nelement_block_list)
         push!(block_sizes_list, this_block_sizes)
     end
     max_nelement = maximum(nelement_list)
@@ -762,14 +766,15 @@ function get_level_info_for_variable(
                 d = this_var_dims[this_dim]
                 n = d.n
                 n_local = d.n_local
+                n_block = d.n_block
                 flat_i *= n
 
                 # Add offset for distributed blocks.
-                flat_i += d.irank * (n_local - 1)
+                flat_i += d.irank * (n_block - 1)
 
                 if idim == this_dim
                     bs = this_var_block_sizes[idim]
-                    nelement_local = d.nelement ÷ d.nrank
+                    nelement_block = (d.nelement + d.nrank - 1) ÷ d.nrank
                     ngrid = d.ngrid
 
                     if d.remove_boundaries || d.periodic
@@ -787,7 +792,7 @@ function get_level_info_for_variable(
                     end
 
                     # Add the interior boundary points
-                    nblocks = (nelement_local + bs - 1) ÷ bs
+                    nblocks = (nelement_block + bs - 1) ÷ bs
                     for b ∈ 1:nblocks-1
                         # Note we do not `+1` to boundary here because it is more convenient to
                         # construct `flat_i` as a 0-based index, and only convert to 1-based just
@@ -819,9 +824,9 @@ function get_level_info_for_variable(
         end
 
         # Get interior indices of the blocks that should be inverted by this processor.
-        nelement_local_list = [d.nelement ÷ d.nrank for d ∈ dimensions]
+        nelement_block_list = [ind_type((d.nelement + d.nrank - 1) ÷ d.nrank) for d ∈ dimensions]
         nblocks_list = [(nelement + bs - 1) ÷ bs
-                        for (nelement, bs) ∈ zip(nelement_local_list, block_sizes)]
+                        for (nelement, bs) ∈ zip(nelement_block_list, block_sizes)]
         total_nblocks = prod(nblocks_list)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
         shared_comm_size = MPI.Comm_size(shared_comm)
@@ -877,11 +882,13 @@ function get_level_info_for_variable(
                 d = dimensions[this_dim]
                 n = d.n
                 ngrid = d.ngrid
-                nelement_local = d.nelement ÷ d.nrank
+                nelement_block = (d.nelement + d.nrank - 1) ÷ d.nrank
+                nelement_local = min(nelement_block,
+                                     d.nelement - d.irank * nelement_block)
                 flat_i *= n
 
                 # Add offset for distributed blocks.
-                flat_i += d.irank * (d.n_local - 1)
+                flat_i += d.irank * (d.n_block - 1)
 
                 this_block = iblock[this_dim]
                 bs = block_sizes[this_dim]
@@ -927,11 +934,13 @@ function get_level_info_for_variable(
                 d = dimensions[this_dim]
                 n = d.n
                 ngrid = d.ngrid
-                nelement_local = d.nelement ÷ d.nrank
+                nelement_block = (d.nelement + d.nrank - 1) ÷ d.nrank
+                nelement_local = min(nelement_block,
+                                     d.nelement - d.irank * nelement_block)
                 flat_i *= n
 
                 # Add offset for distributed blocks.
-                flat_i += d.irank * (d.n_local - 1)
+                flat_i += d.irank * (d.n_block - 1)
 
                 this_block = iblock[this_dim]
                 bs = block_sizes[this_dim]
@@ -1388,10 +1397,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
 
     nelement_list = [ind_type(d.nelement) for d ∈ dimensions]
-    nelement_local_list = [ind_type(d.nelement ÷ d.nrank) for d ∈ dimensions]
+    nelement_block_list = [ind_type((d.nelement + d.nrank - 1) ÷ d.nrank) for d ∈ dimensions]
     if isa(block_sizes_heuristic, BlockSizesHeuristic)
         block_sizes_list = get_block_sizes(block_sizes_heuristic, dimensions,
-                                           nelement_local_list, nelement_list)
+                                           nelement_block_list, nelement_list)
     else
         block_sizes_list = block_sizes_heuristic
         # Check consistency of passed-in list.

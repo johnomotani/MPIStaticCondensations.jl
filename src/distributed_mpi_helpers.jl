@@ -45,6 +45,10 @@ function gather_matrix!(solver::MPIStaticCondensationParallel, A_in::AbstractMat
             # to store any of the remotely-owned parts - its values are not needed any
             # more after they have been copied into `A`, and `A_in` is at least as big on
             # the root process as it is on any other.
+            #
+            # If we wanted to optimise this branch a bit, in principle we could have two
+            # buffers so that we could overlap communication (receiving into one buffer)
+            # with 'computation' (copying/adding out of the other buffer).
             root_gather_to_column_range = vector_gather_to_ranges[1]
             root_gather_from_column_range = vector_gather_from_ranges[1]
             root_gather_to_row_range = matrix_gather_to_row_ranges[1]
