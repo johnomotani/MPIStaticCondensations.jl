@@ -508,6 +508,8 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     distributed::Bool
     block_distributed_comm::MPI.Comm
     block_gather_comm::MPI.Comm
+    block_gather_comm_rank::Ti
+    block_gather_comm_size::Ti
     timer::Ttimer
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
@@ -1951,6 +1953,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
+        block_gather_comm = this_level_info[1].block_gather_comm
+        if block_gather_comm != MPI.COMM_NULL
+            block_gather_comm_rank = MPI.Comm_rank(block_gather_comm)
+            block_gather_comm_size = MPI.Comm_size(block_gather_comm)
+        else
+            block_gather_comm_rank = -1
+            block_gather_comm_size = 0
+        end
         this_level_schur_solver =
             MPIStaticCondensationParallel(Val(Nvar),
                                           sum(li.global_size for li ∈ this_level_info),
@@ -1969,7 +1979,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           level_synchronize_shared,
                                           this_level_info[1].distributed,
                                           this_level_info[1].block_distributed_comm,
-                                          this_level_info[1].block_gather_comm, timer)
+                                          block_gather_comm, block_gather_comm_rank,
+                                          block_gather_comm_size, timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.

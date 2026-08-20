@@ -1,10 +1,13 @@
 function gather_matrix!(solver::MPIStaticCondensationParallel, A_in::AbstractMatrix)
-    distributed_comm = solver.distributed_comm
-    distributed_comm_rank = solver.distributed_comm_rank
-    distributed_comm_size = solver.distributed_comm_size
+    block_gather_comm = solver.block_gather_comm
+    if block_gather_comm == MPI.COMM_NULL
+        return nothing
+    end
+    block_gather_comm_rank = solver.block_gather_comm_rank
+    block_gather_comm_size = solver.block_gather_comm_size
     vector_gather_from_ranges = solver.vector_gather_from_ranges
 
-    if distributed_comm_rank == 0
+    if block_gather_comm_rank == 0
         A = solver.matrix_buffer
         gather_no_multiple_overlap = solver.gather_no_multiple_overlap
         matrix_gather_to_row_ranges = solver.matrix_gather_to_row_ranges
@@ -15,10 +18,10 @@ function gather_matrix!(solver::MPIStaticCondensationParallel, A_in::AbstractMat
         if gather_no_multiple_overlap
             # Special case that can use a more optimised communication pattern.
             req_count = 0
-            for r ∈ 1:distributed_comm_size-1
+            for r ∈ 1:block_gather_comm_size-1
                 this_column_range = vector_gather_to_ranges[r+1]
                 this_row_range = matrix_gather_to_row_ranges[r+1]
-                @views MPI.Irecv!(A[this_row_range, this_column_range], distributed_comm,
+                @views MPI.Irecv!(A[this_row_range, this_column_range], block_gather_comm,
                                   comm_reqs[req_count+=1]; source=r)
             end
             gather_to_column_range = vector_gather_to_ranges[1]
@@ -58,7 +61,7 @@ function gather_matrix!(solver::MPIStaticCondensationParallel, A_in::AbstractMat
             end
 
             receive_column_offset = root_gather_from_column_range[1] - 1
-            for r ∈ 1:distributed_comm_size-1
+            for r ∈ 1:block_gather_comm_size-1
                 gather_to_column_range = vector_gather_to_ranges[r+1]
                 gather_from_column_range = vector_gather_from_ranges[r+1]
                 reduce_to_column_range = reudce_gather_to_ranges[r+1]
@@ -70,7 +73,7 @@ function gather_matrix!(solver::MPIStaticCondensationParallel, A_in::AbstractMat
                 receive_from_row_range = 1:length(gather_to_row_range)+length(reduce_to_row_range)
 
                 receive_buffer = @view(A_in[receive_from_row_range,receive_from_column_range])
-                MPI.Recv!(receive_buffer, distributed_comm; source=r)
+                MPI.Recv!(receive_buffer, block_gather_comm; source=r)
                 for (j1, j2) ∈ zip(gather_to_column_range, gather_from_column_range),
                         (i1, i2) ∈ zip(gather_to_row_range, gather_from_row_range)
                     A[i1,j1] = receive_buffer[i2,j2]
@@ -83,20 +86,23 @@ function gather_matrix!(solver::MPIStaticCondensationParallel, A_in::AbstractMat
         end
     else
         gather_from_column_range = vector_gather_from_ranges[1]
-        MPI.Send(@view(A_in[:,gather_from_column_range]), distributed_comm; dest=0)
+        MPI.Send(@view(A_in[:,gather_from_column_range]), block_gather_comm; dest=0)
     end
 
     return nothing
 end
 
 function gather_rhs_vector!(solver::MPIStaticCondensationParallel, U_in::AbstractVector)
-    distributed_comm = solver.distributed_comm
-    distributed_comm_rank = solver.distributed_comm_rank
-    distributed_comm_size = solver.distributed_comm_size
+    block_gather_comm = solver.block_gather_comm
+    if block_gather_comm == MPI.COMM_NULL
+        return nothing
+    end
+    block_gather_comm_rank = solver.block_gather_comm_rank
+    block_gather_comm_size = solver.block_gather_comm_size
     gather_no_multiple_overlap = solver.gather_no_multiple_overlap
     vector_gather_from_ranges = solver.vector_gather_from_ranges
 
-    if distributed_comm_rank == 0
+    if block_gather_comm_rank == 0
         U = solver.vector_buffer
         vector_gather_to_ranges = solver.vector_gather_to_ranges
         vector_reduce_to_ranges = solver.vector_reduce_to_ranges
@@ -105,8 +111,8 @@ function gather_rhs_vector!(solver::MPIStaticCondensationParallel, U_in::Abstrac
         if gather_no_multiple_overlap
             # Special case that can use a more optimised communication pattern.
             req_count = 0
-            for r ∈ 1:distributed_comm_size-1
-                @views MPI.Irecv!(U[vector_gather_to_ranges[r+1]], distributed_comm,
+            for r ∈ 1:block_gather_comm_size-1
+                @views MPI.Irecv!(U[vector_gather_to_ranges[r+1]], block_gather_comm,
                                   comm_reqs[req_count+=1]; source=r)
             end
             for (i1, i2) ∈ zip(vector_gather_to_ranges[1], vector_gather_from_ranges[1])
@@ -123,14 +129,14 @@ function gather_rhs_vector!(solver::MPIStaticCondensationParallel, U_in::Abstrac
             if !isa(vector_gather_buffer, MPI.VBuffer)
                 error("wrong type!!!!")
             end
-            temp_Igatherv!(MPI.IN_PLACE, vector_gather_buffer, distributed_comm,
+            temp_Igatherv!(MPI.IN_PLACE, vector_gather_buffer, block_gather_comm,
                            comm_reqs[1]; root=0)
             for (i1, i2) ∈ zip(vector_gather_to_ranges[1], vector_gather_from_ranges[1])
                 U[i1] = U_in[i2]
             end
             MPI.Waitall(comm_reqs)
             gathered_data = vector_gather_buffer.data
-            for r_plus_one ∈ 2:distributed_comm_size
+            for r_plus_one ∈ 2:block_gather_comm_size
                 gather_to_range = vector_gather_to_ranges[r_plus_one]
                 gather_from_range = vector_gather_from_ranges[r_plus_one]
                 reduce_to_range = vector_reduce_to_ranges[r_plus_one]
@@ -146,9 +152,9 @@ function gather_rhs_vector!(solver::MPIStaticCondensationParallel, U_in::Abstrac
     else
         if gather_no_multiple_overlap
             # Special case that can use a more optimised communication pattern.
-            MPI.Send(@view(U_in[vector_gather_from_ranges[1]]), distributed_comm; dest=0)
+            MPI.Send(@view(U_in[vector_gather_from_ranges[1]]), block_gather_comm; dest=0)
         else
-            MPI.Gatherv!(@view(U_in[vector_gather_from_ranges[1]]), nothing, distributed_comm; root=0)
+            MPI.Gatherv!(@view(U_in[vector_gather_from_ranges[1]]), nothing, block_gather_comm; root=0)
         end
     end
 
@@ -157,32 +163,35 @@ end
 
 function scatter_solution_vector!(solver::MPIStaticCondensationParallel,
                                   X_out::AbstractVector)
-    distributed_comm = solver.distributed_comm
-    distributed_comm_rank = solver.distributed_comm_rank
-    distributed_comm_size = solver.distributed_comm_size
+    block_gather_comm = solver.block_gather_comm
+    if block_gathe_comm == MPI.COMM_NULL
+        return nothing
+    end
+    block_gather_comm_rank = solver.block_gather_comm_rank
+    block_gather_comm_size = solver.block_gather_comm_size
 
-    if distributed_comm_rank == 0
+    if block_gather_comm_rank == 0
         X = solver.vector_buffer
         vector_scatter_from_ranges = solver.vector_scatter_from_ranges
         comm_reqs = solver.comm_reqs
         req_count = 0
         if eltype(vector_scatter_from_ranges) <: UnitRange
             # Special case that can use a more optimised communication pattern.
-            for (r, scatter_range) ∈ zip(1:distributed_comm_size-1,
+            for (r, scatter_range) ∈ zip(1:block_gather_comm_size-1,
                                          @view(vector_scatter_from_ranges[2:end]))
-                MPI.Isend(@view(X[scatter_range]), distributed_comm,
+                MPI.Isend(@view(X[scatter_range]), block_gather_comm,
                           comm_reqs[req_count+=1]; dest=r)
             end
         else
             vector_scatter_to_ranges = solver.vector_scatter_to_ranges
             vector_gather_buffer = solver.vector_gather_buffer
             for (r, scatter_to, scatter_from) ∈
-                    zip(1:distributed_comm_size-1, @view(vector_scatter_to_ranges[2:end]),
+                    zip(1:block_gather_comm_size-1, @view(vector_scatter_to_ranges[2:end]),
                         @view(vector_scatter_from_ranges[2:end]))
                 for (i1, i2) ∈ zip(scatter_to, scatter_from)
                     vector_gather_buffer[i1] = X[i2]
                 end
-                MPI.Isend(@view(vector_gather_buffer[scatter_to]), distributed_comm,
+                MPI.Isend(@view(vector_gather_buffer[scatter_to]), block_gather_comm,
                           comm_reqs[req_count+=1]; dest=r)
             end
         end
@@ -191,7 +200,7 @@ function scatter_solution_vector!(solver::MPIStaticCondensationParallel,
         end
         MPI.Waitall(comm_reqs)
     else
-        MPI.Recv(X_out, distributed_comm; source=0)
+        MPI.Recv(X_out, block_gather_comm; source=0)
     end
     return nothing
 end
