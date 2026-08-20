@@ -506,6 +506,8 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     has_periodic::Bool
     synchronize_shared::Tsync
     distributed::Bool
+    block_distributed_comm::MPI.Comm
+    block_gather_comm::MPI.Comm
     timer::Ttimer
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
@@ -690,6 +692,9 @@ MPI.Barrier(comm::FakeComm) = nothing
     #level_comm::Tcomm
     #level_distributed_comm::Tdcomm
     level_shared_comm::Tcomm
+    distributed::Bool
+    block_distributed_comm::Tcomm
+    block_gather_comm::Tcomm
 end
 
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
@@ -700,7 +705,9 @@ function get_level_info_for_variable(
              global_size::Ti, global_offset::Ti, local_offset::Ti,
              local_bottom_vector_offset::Ti, is_top_level::Bool, is_bottom_level::Bool,
              distributed_comm::Union{MPI.Comm,FakeComm},
-             shared_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
+             shared_comm::Union{MPI.Comm,FakeComm}, distributed_level::Bool,
+             block_distributed_comm::Union{MPI.Comm,FakeComm},
+             block_gather_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
     @inbounds begin
         if length(dimensions) != length(block_sizes)
             error("dimensions and block_sizes should be the same length")
@@ -737,7 +744,8 @@ function get_level_info_for_variable(
                              local_bottom_vector_repeat_offset_indices=Ti[],
                              local_bottom_vector_periodic_pairs=zeros(Ti,2,0),
                              local_bottom_vector_offset_periodic_pairs=zeros(Ti,2,0),
-                             level_shared_comm=shared_comm)
+                             level_shared_comm=shared_comm, distributed=distributed_level,
+                             block_distributed_comm, block_gather_comm)
         end
 
         other_dimensions = setdiff(1:length(dimensions), variable_dimensions)
@@ -1254,7 +1262,8 @@ function get_level_info_for_variable(
                          local_bottom_vector_repeat_offset_indices=local_bottom_vector_repeat_indices.+local_bottom_vector_offset,
                          local_bottom_vector_periodic_pairs=local_bottom_vector_periodic_pairs,
                          local_bottom_vector_offset_periodic_pairs,
-                         level_shared_comm=shared_comm)
+                         level_shared_comm=shared_comm, distributed=distributed_level,
+                         block_distributed_comm, block_gather_comm)
     end
 end
 
@@ -1471,7 +1480,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     level_shared_comm = shared_comm
     level_shared_comm_size = shared_comm_size
     block_distributed_comm = MPI.COMM_SELF
-    block_gather_comm = MPI.COMM_SELF
     # When variable_dimensions has duplicate indices, we can re-use a single LevelInfo for
     # each of the duplicates.
     duplicate_var_first_position = Tuple(findfirst(variable_dimensions .== (vdim,))
@@ -1483,6 +1491,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             # corresponding dimension. Need to merge two (or more) groups of processes and
             # gather the matrix/vector onto the root shared-memory block of the new
             # groups.
+
+            distributed_level = true
 
             # Reduce `nrank` as necessary so that each dimension in level_dimensions is
             # big enough to contain the corresponding size from block_sizes.
@@ -1502,6 +1512,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                     distributed_block_colour, 0)
             gather_colour = old_block_distributed_comm_rank == 0 ? distributed_block_colour : nothing
             block_gather_comm = MPI.Comm_split(distributed_comm, gather_colour, 0)
+        else
+            distributed_level = false
+            block_gather_comm = MPI.COMM_SELF
         end
         nblock = [(d.nelement_block + bs - 1) ÷ bs
                   for (d, bs) ∈ zip(level_dimensions, block_sizes)]
@@ -1579,7 +1592,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                               local_bottom_vector_repeat_offset_indices=level_info_to_copy.local_bottom_vector_repeat_indices.+local_bottom_vector_offset,
                               local_bottom_vector_periodic_pairs=level_info_to_copy.local_bottom_vector_periodic_pairs,
                               local_bottom_vector_offset_periodic_pairs,
-                              level_shared_comm=shared_comm)
+                              level_shared_comm,
+                              distributed=level_info_to_copy.distributed,
+                              block_distributed_comm, block_gather_comm)
             else
                 this_level_info = get_level_info_for_variable(
                                       dims, this_var_dims, this_var_level_indices,
@@ -1587,7 +1602,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                       global_offset, local_offset,
                                       local_bottom_vector_offset, level==1,
                                       level==n_levels, distributed_comm,
-                                      level_shared_comm)
+                                      level_shared_comm, distributed_level,
+                                      block_distributed_comm, block_gather_comm)
             end
             this_level_info_list[ivar] = this_level_info
             global_offset += total_global_size[ivar]
@@ -1939,8 +1955,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
-        distributed_level = false
-
         this_level_schur_solver =
             MPIStaticCondensationParallel(Val(Nvar),
                                           sum(li.global_size for li ∈ this_level_info),
@@ -1956,8 +1970,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_periodic_pairs,
                                           this_u_buffer, this_v_buffer, this_y_buffer,
                                           any(li.has_periodic for li ∈ this_level_info),
-                                          level_synchronize_shared, distributed_level,
-                                          timer)
+                                          level_synchronize_shared,
+                                          this_level_info[1].distributed,
+                                          this_level_info[1].block_distributed_comm,
+                                          this_level_info[1].block_gather_comm, timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.
