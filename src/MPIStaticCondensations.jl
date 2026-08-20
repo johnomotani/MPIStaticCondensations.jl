@@ -1624,6 +1624,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     schur_complement_buffer_info_list = []
     final_sc_solver_is_mumps = false
     final_level = n_levels
+    first_distributed_level = findfirst(li[1].distributed for li ∈ level_info_list)
+    if first_distributed_level === nothing
+        first_distributed_level = n_levels + 1
+    end
     for (level, (li, lai)) ∈ enumerate(zip(level_info_list[1:end-2],
                                            level_allocate_shared_int_list[1:end-2]))
         first_sc_info =
@@ -1674,7 +1678,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
         push!(schur_complement_buffer_info_list, sc_info)
 
-        if level < n_levels && sum(sci.nzval_length for sci ∈ sc_info) / (sum(sci.m for sci ∈ sc_info[:,1]) * sum(sci.n for sci ∈ sc_info[1,:])) > mumps_fill_in_threshold
+        if level < first_distributed_level - 1 && sum(sci.nzval_length for sci ∈ sc_info) / (sum(sci.m for sci ∈ sc_info[:,1]) * sum(sci.n for sci ∈ sc_info[1,:])) > mumps_fill_in_threshold
             final_sc_solver_is_mumps = true
             final_level = level + 1
             break
@@ -1683,48 +1687,40 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     schur_complement_nnz_list = [sum(var_block_sc.nzval_length for var_block_sc ∈ sc)
                                  for sc ∈ schur_complement_buffer_info_list]
-    odd_buffer_size = Ref(maximum(schur_complement_nnz_list[1:2:end]; init=0))
-    even_buffer_size = Ref(maximum(schur_complement_nnz_list[2:2:end]; init=0))
+    odd_buffer_size = maximum(schur_complement_nnz_list[1:2:end]; init=0)
+    even_buffer_size = maximum(schur_complement_nnz_list[2:2:end]; init=0)
+    dense_buffer_sizes = zeros(ind_type, 0)
     if final_level > 1 && !final_sc_solver_is_mumps
-        if level_info_list[end-1][1].level_shared_comm != MPI.COMM_NULL
-            nbuff = sum(length(li.bottom_vector_indices) for li ∈ level_info_list[end-1])
-            if n_levels % 2 == 0
-                odd_buffer_size[] = max(odd_buffer_size[], nbuff^2)
-            else
-                even_buffer_size[] = max(even_buffer_size[], nbuff^2)
+        for level ∈ first_distributed_level-2:n_levels-1
+            if level_info_list[level][1].level_shared_comm != MPI.COMM_NULL
+                nbuff = sum(length(li.bottom_vector_indices) for li ∈ level_info_list[level])
+                push!(dense_buffer_sizes, nbuff)
+                if level % 2 == 0
+                    even_buffer_size = max(even_buffer_size, nbuff^2)
+                else
+                    odd_buffer_size = max(odd_buffer_size, nbuff^2)
+                end
             end
         end
     end
-    MPI.Allreduce!(odd_buffer_size, max, shared_comm)
-    MPI.Allreduce!(even_buffer_size, max, shared_comm)
-    if odd_buffer_size[] > 0
-        odd_buffer = allocate_shared_float(odd_buffer_size[])
+    MPI.Barrier(shared_comm)
+    if odd_buffer_size > 0
+        odd_buffer = allocate_shared_float(odd_buffer_size)
     else
         odd_buffer = zeros(data_type, 0)
     end
-    if even_buffer_size[] > 0
-        even_buffer = allocate_shared_float(even_buffer_size[])
+    if even_buffer_size > 0
+        even_buffer = allocate_shared_float(even_buffer_size)
     else
         even_buffer = zeros(data_type, 0)
     end
-    schur_complement_buffer_list =
+    sparse_schur_complement_buffer_list =
         [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
          for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
-    if final_level > 1 && !final_sc_solver_is_mumps
-        if level_info_list[final_level-1][1].level_shared_comm != MPI.COMM_NULL
-            if final_level % 2 == 0
-                second_last_buffer = odd_buffer
-            else
-                second_last_buffer = even_buffer
-            end
-            second_last_schur_complement_buffer =
-                reshape(@view(second_last_buffer[1:nbuff^2]), nbuff, nbuff)
-        else
-            second_last_schur_complement_buffer = nothing
-        end
-    else
-        second_last_schur_complement_buffer = nothing
-    end
+    dense_schur_complement_buffer_list =
+        [reshape(@view(((first_distributed_level + i - 1)%2 == 0 ? even_buffer : odd_buffer)[1:nbuff^2]),
+                 nbuff, nbuff)
+         for (i, nbuff) ∈ enumerate(dense_buffer_sizes)]
 
     # Create lowest level schur complement solver.
     # Use MUMPS if `mumps_fill_in_threshold` was exceeded.  Otherwise, use a parallelized
@@ -1737,7 +1733,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             level_synchronize_shared = synchronize_shared
         end
         this_level_sc =
-            get_mumps_solver(dimensions, schur_complement_buffer_list[end], comm,
+            get_mumps_solver(dimensions, sparse_schur_complement_buffer_list[end], comm,
                              level_synchronize_shared, timer)
     elseif level_info_list[end][1].level_shared_comm != MPI.COMM_NULL
         last_level_info = level_info_list[end]
@@ -1873,8 +1869,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             end
             this_level_sc =
                 BlockedSchurComplementSolver(dimensions, level, this_level_info,
-                                             schur_complement_buffer_list,
-                                             second_last_schur_complement_buffer,
+                                             sparse_schur_complement_buffer_list,
+                                             dense_schur_complement_buffer_list,
                                              this_level_schur_solver, use_shared_blocks,
                                              level_sparse_C_blocks,
                                              this_level_shared_comm,
@@ -1884,7 +1880,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              block_allocate_shared_float,
                                              block_allocate_shared_int,
                                              right_multiplication_buffer_storage,
-                                             C_dense_buffer_storage, check_lu)
+                                             C_dense_buffer_storage, check_lu, data_type)
         end
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)

@@ -26,13 +26,13 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
 
     function BlockedSchurComplementSolver(
                  dimensions::Vector{<:Dimension}, level::Integer, level_info,
-                 schur_complement_buffer_list, second_last_schur_complement_buffer,
-                 schur_complement_solver, use_shared_blocks::Bool,
-                 sparse_C_blocks::Bool, shared_comm, synchronize_shared::Fsync,
-                 allocate_shared_float::Faf, block_synchronize_shared::Fbsync,
-                 block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
-                 right_multiplication_buffer_storage, C_dense_buffer_storage,
-                 check_lu::Bool) where {Fsync,Faf,Fbsync,Fbaf,Fbai}
+                 sparse_schur_complement_buffer_list, dense_schur_complement_buffer_list,
+                 schur_complement_solver, use_shared_blocks::Bool, sparse_C_blocks::Bool,
+                 shared_comm, synchronize_shared::Fsync, allocate_shared_float::Faf,
+                 block_synchronize_shared::Fbsync, block_allocate_shared_float::Fbaf,
+                 block_allocate_shared_int::Fbai, right_multiplication_buffer_storage,
+                 C_dense_buffer_storage, check_lu::Bool,
+                 data_type::Type) where {Fsync,Faf,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
             # This process should do no work
@@ -43,7 +43,7 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             null_schur_complement_solver = MPIStaticCondensationNull{Float64}()
             null_Ainv_dot_u = nothing
             null_timer = nothing
-            return new{Float64,typeof(null_A_factorization),typeof(null_B),typeof(null_C),typeof(null_schur_complement),typeof(null_schur_complement_solver),typeof(null_Ainv_dot_u),Fsync,typeof(null_timer)}(
+            return new{data_type,typeof(null_A_factorization),typeof(null_B),typeof(null_C),typeof(null_schur_complement),typeof(null_schur_complement_solver),typeof(null_Ainv_dot_u),Fsync,typeof(null_timer)}(
                    null_A_factorization, null_B, null_C, null_schur_complement,
                    null_schur_complement_solver, null_Ainv_dot_u,
                    synchronize_shared, null_timer)
@@ -66,23 +66,22 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             block_shared_comm_size = MPI.Comm_size(block_shared_comm)
         end
 
-        if level ≤ length(schur_complement_buffer_list)
-            this_sc_buffer = schur_complement_buffer_list[level]
+        if level ≤ length(sparse_schur_complement_buffer_list)
+            this_sc_buffer = sparse_schur_complement_buffer_list[level]
             schur_complement = BlockS(this_sc_buffer,
                                       Tuple(li.local_bottom_vector_indices for li ∈ level_info),
                                       shared_comm, allocate_shared_float)
-            data_type = eltype(schur_complement.matrix[1][1])
         else
-            schur_complement = BlockDenseS(second_last_schur_complement_buffer,
+            dense_level_count = level - length(sparse_schur_complement_buffer_list)
+            schur_complement = BlockDenseS(dense_schur_complement_buffer_list[dense_level_count],
                                            Tuple(li.local_bottom_vector_indices for li ∈ level_info),
                                            shared_comm, allocate_shared_float)
-            data_type = eltype(schur_complement.matrix)
         end
 
         if level == 1 || !sparse_C_blocks
             matrix_template = nothing
         else
-            matrix_template = schur_complement_buffer_list[level-1]
+            matrix_template = sparse_schur_complement_buffer_list[level-1]
         end
 
         nbottom = sum(length(li.local_bottom_vector_indices) for li ∈ level_info)
