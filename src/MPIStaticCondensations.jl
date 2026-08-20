@@ -486,7 +486,7 @@ include("blocked_schur_complement.jl")
 # Function with no methods that we can import in the MUMPS extension.
 function get_mumps_solver end
 
-struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Tgfr,Tgb<:MPI.VBuffer,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     nvar::Val{Nvar}
     n::Ti
     schur_complement_solver::Tsolver
@@ -510,6 +510,11 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     block_gather_comm::MPI.Comm
     block_gather_comm_rank::Ti
     block_gather_comm_size::Ti
+    vector_gather_from_ranges::Tgfr
+    vector_gather_to_ranges::Vector{Vector{Ti}}
+    vector_reduce_from_ranges::Vector{Vector{Ti}}
+    vector_reduce_to_ranges::Vector{Vector{Ti}}
+    vector_gather_buffer::Tgb
     timer::Ttimer
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
@@ -644,6 +649,38 @@ function get_hypercube_position(flat_iblock::Integer, nblock)
     return get_hypercube_position(iblock, nblock)
 end
 
+"""
+    find_positions(all_inds, ind_subset)
+
+Find the position of each element of `ind_subset` within `all_inds`. Assumes `all_inds`
+has no repeated entries, and both `all_inds` and `ind_subset` are sorted.
+"""
+function find_positions(all_inds, ind_subset)
+    if !allunique(all_inds)
+        error("all_inds must not have repeated entries.")
+    end
+    if !issorted(all_inds)
+        error("all_inds must be sorted.")
+    end
+    if !issorted(ind_subset)
+        error("ind_subset must be sorted.")
+    end
+
+    positions = eltype(all_inds)[]
+    subset_counter = 1
+    for (pos, all_i) ∈ enumerate(all_inds)
+        if all_i == ind_subset[subset_counter]
+            push!(positions, pos)
+            subset_counter += 1
+            if subset_counter > length(ind_subset)
+                break
+            end
+        end
+    end
+
+    return positions
+end
+
 struct FakeComm
     rank::Int64
     size::Int64
@@ -662,6 +699,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     nblock::Vector{Ti}
     global_size::Ti
     global_offset::Ti
+    local_size::Ti
     local_offset::Ti
     global_bottom_vector_size::Ti
     local_bottom_vector_offset::Ti
@@ -697,6 +735,7 @@ MPI.Barrier(comm::FakeComm) = nothing
     distributed::Bool
     block_distributed_comm::Tcomm
     block_gather_comm::Tcomm
+    gather_subblock_inds::Vector{Vector{Ti}}
 end
 
 # Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
@@ -722,9 +761,9 @@ function get_level_info_for_variable(
             # This processor does no work on this level, so just fill level_info with dummy
             # values.
             return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
-                             global_offset=0, local_offset=0, global_bottom_vector_size=0,
-                             local_bottom_vector_offset=0, top_vector_indices=Ti[],
-                             top_vector_offset_indices=Ti[],
+                             global_offset=0, local_size=0, local_offset=0,
+                             global_bottom_vector_size=0, local_bottom_vector_offset=0,
+                             top_vector_indices=Ti[], top_vector_offset_indices=Ti[],
                              local_top_vector_indices=Ti[],
                              local_top_vector_offset_indices=Ti[],
                              local_top_vector_a_block_indices=Vector{Ti}[],
@@ -747,11 +786,18 @@ function get_level_info_for_variable(
                              local_bottom_vector_periodic_pairs=zeros(Ti,2,0),
                              local_bottom_vector_offset_periodic_pairs=zeros(Ti,2,0),
                              level_shared_comm=shared_comm, distributed=distributed_level,
-                             block_distributed_comm, block_gather_comm)
+                             block_distributed_comm, block_gather_comm,
+                             gather_subblock_inds=Vector{Ti}[])
         end
 
         other_dimensions = setdiff(1:length(dimensions), variable_dimensions)
         this_var_block_sizes = block_sizes[variable_dimensions]
+
+        if any(d.nrank > 1 for d ∈ dimensions[other_dimensions])
+            error("Dimensions that are not shared by all variables cannot be "
+                  * "MPI-distributed. Found nrank>1 for at least one of "
+                  * "other_dimensions=$other_dimensions.")
+        end
 
         # Divide the grid into blocks where the number of elements in a block in each
         # dimension is given by `block_sizes`.
@@ -1233,12 +1279,34 @@ function get_level_info_for_variable(
             end
         end
 
+        local_size = length(local_top_vector_indices) + length(local_bottom_vector_indices)
+
         local_bottom_vector_offset_periodic_pairs = copy(local_bottom_vector_periodic_pairs)
         local_bottom_vector_offset_periodic_pairs[1,:] .+= local_bottom_vector_offset
         local_bottom_vector_offset_periodic_pairs[2,:] .+= local_offset
 
+        if MPI.Comm_size(block_gather_comm) > 1
+            all_global_offset_indices = level_indices .+ global_offset
+            if MPI.Comm_rank(block_gather_comm) == 0
+                gather_subblock_n_list = MPI.Gather(length(level_indices), block_gather_comm; root=0)
+                gather_subblock_all_inds = zeros(Ti, sum(gather_subblock_n_list))
+                MPI.Gatherv!(level_indices,
+                             MPI.VBuffer(gather_subblock_inds, gather_subblock_n_list),
+                             block_gather_comm; root=0)
+                offsets = cumsum(vcat(0, gather_subblock_n_list[1:end-1]))
+                gather_subblock_inds = [gather_subblock_all_inds[offset+1:offset+n]
+                                        for (offset, n) ∈ zip(offsets, gather_subblock_n_list)]
+            else
+                MPI.Gather(length(level_indices), block_gather_comm; root=0)
+                MPI.Gatherv!(level_indices, nothing, block_gather_comm; root=0)
+                gather_subblock_inds = Vector{Ti}[]
+            end
+        else
+            gather_subblock_inds = Vector{Ti}[]
+        end
+
         return LevelInfo(; has_periodic, block_sizes, nblock, global_size, global_offset,
-                         local_offset, global_bottom_vector_size,
+                         local_size, local_offset, global_bottom_vector_size,
                          local_bottom_vector_offset,
                          top_vector_indices=global_top_vector_indices,
                          top_vector_offset_indices=global_top_vector_indices.+global_offset,
@@ -1265,7 +1333,7 @@ function get_level_info_for_variable(
                          local_bottom_vector_periodic_pairs=local_bottom_vector_periodic_pairs,
                          local_bottom_vector_offset_periodic_pairs,
                          level_shared_comm=shared_comm, distributed=distributed_level,
-                         block_distributed_comm, block_gather_comm)
+                         block_distributed_comm, block_gather_comm, gather_subblock_inds)
     end
 end
 
@@ -1567,7 +1635,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                               block_sizes=level_info_to_copy.block_sizes,
                               nblock=level_info_to_copy.nblock,
                               global_size=level_info_to_copy.global_size, global_offset,
-                              local_offset,
+                              local_size=level_info_to_copy.local_size, local_offset,
                               global_bottom_vector_size=level_info_to_copy.global_bottom_vector_size,
                               local_bottom_vector_offset,
                               top_vector_indices=level_info_to_copy.top_vector_indices,
@@ -1953,14 +2021,75 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
+        # Set up info for gathering/scattering that is needed when using distributed-MPI
+        # parallelism.
         block_gather_comm = this_level_info[1].block_gather_comm
-        if block_gather_comm != MPI.COMM_NULL
+        block_gather_comm_size = MPI.Comm_size(block_gather_comm)
+        if block_gather_comm_size > 1
             block_gather_comm_rank = MPI.Comm_rank(block_gather_comm)
             block_gather_comm_size = MPI.Comm_size(block_gather_comm)
+            local_vector_size = sum(li.local_size for li ∈ this_level_info)
+            if false && block_gather_comm_size == 2 && gather_dims == [length(dimensions)]
+                # When there are only two blocks being gathered together, there are no
+                # overlaps of the grid between remote blocks (because there is only one
+                # remote block). When the dimension that separates the blocks being
+                # gathered is the right-most dimension, the parts of the vector being
+                # gathered can be received directly into a contiguous part of the
+                # gathered vector, and parts of the matrix being gathered can be received
+                # into simple views of the gathered matrix (both of these because grid
+                # points at the same position in the right-most dimension are grouped
+                # together into a contiguous block in the stored vector). When both of
+                # these conditions are true, we can use an optimised communication
+                # pattern.
+                gather_no_multiple_overlap = true
+                vector_gather_buffer = zeros(data_type, 0)
+            else
+                gather_no_multiple_overlap = false
+                points_per_proc = (local_vector_size + level_shared_comm_size - 1) ÷ level_shared_comm_size
+                if block_gather_comm_rank == 0
+                    vector_gather_from_ranges = [collect(level_shared_comm_rank*points_per_proc+1:min((level_shared_comm_rank+1)*points_per_proc,local_vector_size))]
+                    gather_subblock_inds = [vcat((li.gather_subblock_inds[i]
+                                                  for li ∈ this_level_info)...)
+                                            for i ∈ 1:block_gather_comm_size]
+                    vector_gather_counts = [length(sbi) for sbi ∈ gather_subblock_inds[2:end]]
+                    vector_gather_buffer =
+                        MPI.VBuffer(zeros(data_type, sum(vector_gather_counts)),
+                                    vector_gather_counts)
+                    gathered_block_inds = sort!(union(gather_subblock_inds...))
+                    vector_gather_to_ranges = [find_positions(gathered_block_inds, gather_subblock_inds[1])]
+                    vector_reduce_from_ranges = [ind_type[]]
+                    vector_reduce_to_ranges = [ind_type[]]
+                    offset = 0
+                    gathered_so_far = gather_subblock_inds[1]
+                    for (remote_subblock, sbi) ∈ zip(2:block_gather_comm_size, gather_subblock_inds[2:end])
+                        overlap_inds = intersect(gathered_so_far, sbi)
+                        unique_inds = setdiff(sbi, overlap_inds)
+                        gathered_so_far = sort!(union(gathered_so_far, unique_inds))
+                        push!(vector_gather_from_ranges, find_positions(sbi, unique_inds) .+ offset)
+                        push!(vector_gather_to_ranges, find_positions(gathered_block_inds, unique_inds))
+                        push!(vector_reduce_from_ranges, find_positions(sbi, overlap_inds) .+ offset)
+                        push!(vector_reduce_to_ranges, find_positions(gathered_block_inds, overlap_inds))
+                        offset += length(sbi)
+                    end
+                else
+                    vector_gather_from_ranges = level_shared_comm_rank*points_per_proc+1:min((level_shared_comm_rank+1)*points_per_proc,local_vector_size)
+                    vector_gather_buffer = MPI.VBuffer(zeros(data_type, 0), ind_type[])
+                    vector_gather_to_ranges = Vector{ind_type}[]
+                    vector_reduce_from_ranges = Vector{ind_type}[]
+                    vector_reduce_to_ranges = Vector{ind_type}[]
+                end
+            end
         else
             block_gather_comm_rank = -1
             block_gather_comm_size = 0
+            vector_gather_from_ranges = 1:0
+            vector_gather_to_ranges = Vector{ind_type}[]
+            vector_reduce_to_ranges = Vector{ind_type}[]
+            vector_reduce_from_ranges = Vector{ind_type}[]
+            gather_no_multiple_overlap = true
+            vector_gather_buffer = MPI.VBuffer(zeros(data_type, 0), ind_type[])
         end
+
         this_level_schur_solver =
             MPIStaticCondensationParallel(Val(Nvar),
                                           sum(li.global_size for li ∈ this_level_info),
@@ -1980,7 +2109,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_level_info[1].distributed,
                                           this_level_info[1].block_distributed_comm,
                                           block_gather_comm, block_gather_comm_rank,
-                                          block_gather_comm_size, timer)
+                                          block_gather_comm_size,
+                                          vector_gather_from_ranges,
+                                          vector_gather_to_ranges,
+                                          vector_reduce_from_ranges,
+                                          vector_reduce_to_ranges, vector_gather_buffer,
+                                          timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.

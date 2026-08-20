@@ -126,9 +126,6 @@ function gather_rhs_vector!(solver::MPIStaticCondensationParallel, U_in::Abstrac
             end
         else
             vector_gather_buffer = solver.vector_gather_buffer
-            if !isa(vector_gather_buffer, MPI.VBuffer)
-                error("wrong type!!!!")
-            end
             temp_Igatherv!(MPI.IN_PLACE, vector_gather_buffer, block_gather_comm,
                            comm_reqs[1]; root=0)
             for (i1, i2) ∈ zip(vector_gather_to_ranges[1], vector_gather_from_ranges[1])
