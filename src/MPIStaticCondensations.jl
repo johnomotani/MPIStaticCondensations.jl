@@ -505,6 +505,7 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     y_buffer::Tbuff
     has_periodic::Bool
     synchronize_shared::Tsync
+    distributed::Bool
     timer::Ttimer
 end
 Base.size(Alu::MPIStaticCondensationParallel) = (Alu.n, Alu.n)
@@ -828,7 +829,7 @@ function get_level_info_for_variable(
         end
 
         # Get interior indices of the blocks that should be inverted by this processor.
-        nelement_block_list = [ind_type((d.nelement + d.nrank - 1) ÷ d.nrank) for d ∈ dimensions]
+        nelement_block_list = [Ti((d.nelement + d.nrank - 1) ÷ d.nrank) for d ∈ dimensions]
         nblocks_list = [(nelement + bs - 1) ÷ bs
                         for (nelement, bs) ∈ zip(nelement_block_list, block_sizes)]
         total_nblocks = prod(nblocks_list)
@@ -1742,7 +1743,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 last_block_synchronize_shared = () -> MPI.Barrier(last_level_info[1].block_shared_comm)
             end
 
-            if !all(nblock_list[length(level_info_list)] .== 1)
+            if block_sizes_list[end] != nelement_list
                 # In principle we could have multiple blocks on the last level, but we
                 # would need a more complicated setup for the `fake_level_info` below to
                 # support that. It does not seem likely that it is a useful feature
@@ -1938,6 +1939,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
+        distributed_level = false
+
         this_level_schur_solver =
             MPIStaticCondensationParallel(Val(Nvar),
                                           sum(li.global_size for li ∈ this_level_info),
@@ -1953,7 +1956,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_periodic_pairs,
                                           this_u_buffer, this_v_buffer, this_y_buffer,
                                           any(li.has_periodic for li ∈ this_level_info),
-                                          level_synchronize_shared, timer)
+                                          level_synchronize_shared, distributed_level,
+                                          timer)
     end
     # The level-1 MPIStaticCondensationParallel is not a 'Schur complement solver', but
     # the full matrix solver.
