@@ -20,11 +20,17 @@ function load_data(filename; count_shared_blocks=true)
     file = CSV.File(filename; delim=" ", header=false, comment="#")
     for row in file
         nproc, n_shared, ndim, total_size, tsetup, tlu, tsolve, nelement_list, ngrid_list,
-            periodic_list, remove_boundaries_list, sparse_C_blocks,
+            dense_boundaries_list, periodic_list, remove_boundaries_list, sparse_C_blocks,
             mumps_fill_in_threshold, block_sizes_heuristic = row
 
         key = join([nelement_list, ngrid_list], ",")
-        other_parameters = join([sparse_C_blocks, mumps_fill_in_threshold, block_sizes_heuristic], ";")
+        if occursin("MPIStaticCondensations", filename)
+            other_parameters = join([dense_boundaries_list, periodic_list, sparse_C_blocks,
+                                     mumps_fill_in_threshold, block_sizes_heuristic], ";")
+        else
+            # Skip parameters that are only relevant to MPIStaticCondensations.
+            other_parameters = join([dense_boundaries_list, periodic_list], ";")
+        end
         if count_shared_blocks
             shared_collect_label = nproc ÷ n_shared
         else
@@ -93,7 +99,7 @@ function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing
             if label === nothing
                 this_label = "other_parameters=$op"
             else
-                this_label = label
+                this_label = label * " other_parameters=$op"
             end
             this_label *= " shared_collect_label=$shared_collect_label"
             kwargs = Dict{Symbol,Any}()
