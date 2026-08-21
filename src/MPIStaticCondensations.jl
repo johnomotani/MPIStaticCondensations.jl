@@ -742,14 +742,14 @@ MPI.Barrier(comm::FakeComm) = nothing
     gather_subblock_inds::Vector{Vector{Ti}}
 end
 
-# Use `FakeComm` values for comm/distributed_comm/shared_comm to skip the comm splitting,
-# for testing of the index generation.
+# Use `FakeComm` values for comm/level_distributed_comm/shared_comm to skip the comm
+# splitting, for testing of the index generation.
 function get_level_info_for_variable(
              dimensions::Vector{<:Dimension}, variable_dimensions::AbstractVector{Ti},
              level_indices::Vector{Ti}, block_sizes::Vector{Ti}, nblock::Vector{Ti},
              global_size::Ti, global_offset::Ti, local_offset::Ti,
              local_bottom_vector_offset::Ti, is_top_level::Bool, is_bottom_level::Bool,
-             distributed_comm::Union{MPI.Comm,FakeComm},
+             level_distributed_comm::Union{MPI.Comm,FakeComm},
              shared_comm::Union{MPI.Comm,FakeComm}, distributed_level::Bool,
              block_distributed_comm::Union{MPI.Comm,FakeComm},
              block_gather_comm::Union{MPI.Comm,FakeComm}) where Ti <: Integer
@@ -767,17 +767,26 @@ function get_level_info_for_variable(
                       * "block_gather_comm==MPI.COMM_NULL.")
             end
         else
-            if MPI.Comm_rank(block_gather_comm) == 0
-                level_indices_lengths = MPI.Gather(length(level_indices), block_gather_comm; root=0)
-                gathered_level_indices = zeros(Ti, sum(level_indices_lengths))
-                MPI.Gatherv!(level_indices,
-                             MPI.VBuffer(gathered_level_indices, level_indices_lengths),
-                             block_gather_comm; root=0)
-                level_indices = sort!(unique(gathered_level_indices))
+            if MPI.Comm_size(block_gather_comm) > 1
+                if MPI.Comm_rank(block_gather_comm) == 0
+                    gather_subblock_n_list = MPI.Gather(length(level_indices), block_gather_comm; root=0)
+                    gather_subblock_all_inds = zeros(Ti, sum(gather_subblock_n_list))
+                    MPI.Gatherv!(level_indices,
+                                 MPI.VBuffer(gather_subblock_all_inds,
+                                             gather_subblock_n_list),
+                                 block_gather_comm; root=0)
+                    offsets = cumsum(vcat(0, gather_subblock_n_list[1:end-1]))
+                    gather_subblock_inds = [gather_subblock_all_inds[offset+1:offset+n]
+                                            for (offset, n) ∈ zip(offsets, gather_subblock_n_list)]
+                    level_indices = sort!(unique(vcat(gather_subblock_inds...)))
+                else
+                    MPI.Gather(length(level_indices), block_gather_comm; root=0)
+                    MPI.Gatherv!(level_indices, nothing, block_gather_comm; root=0)
+                    gather_subblock_inds = Vector{Ti}[]
+                    level_indices = Ti[]
+                end
             else
-                MPI.Gather(length(level_indices), block_gather_comm; root=0)
-                MPI.Gatherv!(level_indices, nothing, block_gather_comm; root=0)
-                level_indices = Ti[]
+                gather_subblock_inds = Vector{Ti}[]
             end
         end
 
@@ -1116,7 +1125,7 @@ function get_level_info_for_variable(
         # shared-memory blocks of processes, so we don't have to worry about double-counting.
         top_vector_size = Ref(length(interior_indices))
         if shared_comm_rank == 0
-            MPI.Allreduce!(top_vector_size, +, distributed_comm)
+            MPI.Allreduce!(top_vector_size, +, level_distributed_comm)
         end
         MPI.Bcast!(top_vector_size, shared_comm; root=0)
         global_bottom_vector_size = global_size - top_vector_size[]
@@ -1308,25 +1317,6 @@ function get_level_info_for_variable(
         local_bottom_vector_offset_periodic_pairs = copy(local_bottom_vector_periodic_pairs)
         local_bottom_vector_offset_periodic_pairs[1,:] .+= local_bottom_vector_offset
         local_bottom_vector_offset_periodic_pairs[2,:] .+= local_offset
-
-        if MPI.Comm_size(block_gather_comm) > 1
-            if MPI.Comm_rank(block_gather_comm) == 0
-                gather_subblock_n_list = MPI.Gather(length(level_indices), block_gather_comm; root=0)
-                gather_subblock_all_inds = zeros(Ti, sum(gather_subblock_n_list))
-                MPI.Gatherv!(level_indices,
-                             MPI.VBuffer(gather_subblock_inds, gather_subblock_n_list),
-                             block_gather_comm; root=0)
-                offsets = cumsum(vcat(0, gather_subblock_n_list[1:end-1]))
-                gather_subblock_inds = [gather_subblock_all_inds[offset+1:offset+n]
-                                        for (offset, n) ∈ zip(offsets, gather_subblock_n_list)]
-            else
-                MPI.Gather(length(level_indices), block_gather_comm; root=0)
-                MPI.Gatherv!(level_indices, nothing, block_gather_comm; root=0)
-                gather_subblock_inds = Vector{Ti}[]
-            end
-        else
-            gather_subblock_inds = Vector{Ti}[]
-        end
 
         return LevelInfo(; has_periodic, block_sizes, nblock, global_size, global_offset,
                          local_size, local_offset, global_bottom_vector_size,
@@ -1578,6 +1568,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     duplicate_var_first_position = Tuple(findfirst(variable_dimensions .== (vdim,))
                                          for vdim ∈ variable_dimensions)
     level_dimensions = dimensions
+    level_distributed_comm = MPI.Comm_dup(distributed_comm)
     for (level, block_sizes) ∈ enumerate(block_sizes_list)
         if any(block_sizes .> [(d.nelement + d.nrank - 1) ÷ d.nrank for d ∈ level_dimensions])
             # At least one block size is bigger than the locally-owned part of the
@@ -1591,13 +1582,20 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
             # Reduce `nrank` as necessary so that each dimension in level_dimensions is
             # big enough to contain the corresponding size from block_sizes.
+            new_nrank_list = [min(d.nrank, (d.nelement + bs - 1) ÷ bs)
+                              for (d, bs) ∈ zip(level_dimensions, block_sizes)]
+            nrank_reduction_factor_list = [(d.nrank + new_nrank - 1) ÷ new_nrank
+                                           for (d, new_nrank) ∈ zip(level_dimensions, new_nrank_list)]
+            new_irank_list = [d.irank ÷ nrank_reduction_factor
+                              for (d, nrank_reduction_factor)
+                              ∈ zip(level_dimensions, nrank_reduction_factor_list)]
             level_dimensions = [Dimension(; name=d.name, nelement=d.nelement,
-                                          ngrid=d.ngrid,
-                                          nrank=min(d.nrank, (d.nelement + bs - 1) ÷ bs),
-                                          irank=d.irank, periodic=d.periodic,
+                                          ngrid=d.ngrid, nrank=new_nrank, irank=new_irank,
+                                          periodic=d.periodic,
                                           dense_boundaries=d.dense_boundaries,
                                           remove_boundaries=(d.periodic || d.remove_boundaries))
-                                for (d, bs) ∈ zip(level_dimensions, block_sizes)]
+                                for (d, new_nrank, new_irank)
+                                ∈ zip(level_dimensions, new_nrank_list, new_irank_list)]
             old_block_distributed_comm_rank = MPI.Comm_rank(block_distributed_comm)
             full_distributed_block_colour = 0
             for d ∈ reverse(level_dimensions)
@@ -1639,6 +1637,16 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             distributed_level = false
             block_gather_comm = MPI.COMM_SELF
         end
+
+        if block_gather_comm == MPI.COMM_NULL
+            distributed_colour = nothing
+        else
+            distributed_colour = MPI.Comm_rank(block_gather_comm) == 0 ? 0 : nothing
+        end
+        old_level_distributed_comm = level_distributed_comm
+        level_distributed_comm = MPI.Comm_split(old_level_distributed_comm, distributed_colour, 0)
+        MPI.free(old_level_distributed_comm)
+
         nblock = [(d.nelement_block + bs - 1) ÷ bs
                   for (d, bs) ∈ zip(level_dimensions, block_sizes)]
         local_nblock = [(d.nelement_local + bs - 1) ÷ bs
@@ -1725,7 +1733,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                       block_sizes, nblock, this_var_level_global_size,
                                       global_offset, local_offset,
                                       local_bottom_vector_offset, level==1,
-                                      level==n_levels, distributed_comm,
+                                      level==n_levels, level_distributed_comm,
                                       level_shared_comm, distributed_level,
                                       block_distributed_comm, block_gather_comm)
             end
@@ -1738,6 +1746,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_indices = Tuple(li.bottom_vector_indices for li ∈ level_info_list[level])
         level_global_size = [li.global_bottom_vector_size for li ∈ this_level_info_list]
     end
+    MPI.free(level_distributed_comm)
 
     level_allocate_shared_float_list =
         [(args...) -> allocate_shared_float(args...; comm=li[1].level_shared_comm)
