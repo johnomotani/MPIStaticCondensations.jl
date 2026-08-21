@@ -483,6 +483,10 @@ include("block_B.jl")
 include("block_diagonal_solvers.jl")
 include("blocked_schur_complement.jl")
 
+struct PassThroughSchurComplementSolver{TSF}
+    schur_complement_solver::TSF
+end
+
 # Function with no methods that we can import in the MUMPS extension.
 function get_mumps_solver end
 
@@ -1773,6 +1777,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         push!(schur_complement_buffer_info_list, sc_info)
 
         if level < first_distributed_level - 1 && sum(sci.nzval_length for sci ∈ sc_info) / (sum(sci.m for sci ∈ sc_info[:,1]) * sum(sci.n for sci ∈ sc_info[1,:])) > mumps_fill_in_threshold
+            if !(MPI.Comm_size(li[1].block_distributed_comm) == MPI.Comm_size(comm) ÷ shared_comm_size)
+                error("Cannot use MUMPS as final level solver: `block_distributed_comm`s "
+                      * "does not include all processes, so not all processes in `comm` "
+                      * "would call MUMPS, which the current setup requires they do.")
+            end
             final_sc_solver_is_mumps = true
             final_level = level + 1
             break
@@ -1829,7 +1838,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_sc =
             get_mumps_solver(dimensions, sparse_schur_complement_buffer_list[end], comm,
                              level_synchronize_shared, timer)
-    elseif level_info_list[end][1].level_shared_comm != MPI.COMM_NULL
+    elseif (level_info_list[end][1].level_shared_comm != MPI.COMM_NULL
+            && (!level_info_list[end][1].distributed
+                || level_info_list[end][1].block_distributed_comm != MPI.COMM_NULL))
         last_level_info = level_info_list[end]
         # Always use 'shared memory' solver on last level
         if last_level_info[1].block_shared_comm != MPI.COMM_NULL
@@ -1909,7 +1920,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     right_multiplication_buffer_storage = zeros(data_type, 0)
     C_dense_buffer_storage = zeros(data_type, 0)
     for (level, this_level_info) ∈ reverse(collect(enumerate(level_info_list[1:final_level])))
-        if this_level_info[1].level_shared_comm == MPI.COMM_NULL
+        if (this_level_info[1].level_shared_comm == MPI.COMM_NULL
+                || this_level_info[1].block_distributed_comm == MPI.COMM_NULL)
             this_level_schur_solver = MPIStaticCondensationNull{data_type}()
             continue
         end
@@ -1918,6 +1930,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_allocate_shared_int = level_allocate_shared_int_list[level]
         this_level_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_level_comm_rank = MPI.Comm_rank(this_level_shared_comm)
+        block_gather_comm = this_level_info[1].block_gather_comm
+        block_gather_comm_rank = MPI.Comm_rank(block_gather_comm)
+        block_gather_comm_size = MPI.Comm_size(block_gather_comm)
         if level < final_level
             if reduce_proc_count_with_blocks || synchronize_shared === nothing
                 level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
@@ -1961,20 +1976,44 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 block_size_change = prod(block_sizes_list[level] .÷ block_sizes_list[level-1])
                 level_sparse_C_blocks = block_size_change > 2 && sparse_C_blocks
             end
-            this_level_sc =
-                BlockedSchurComplementSolver(dimensions, level, this_level_info,
-                                             sparse_schur_complement_buffer_list,
-                                             dense_schur_complement_buffer_list,
-                                             this_level_schur_solver, use_shared_blocks,
-                                             level_sparse_C_blocks,
-                                             this_level_shared_comm,
-                                             level_synchronize_shared,
-                                             level_allocate_shared_float,
-                                             block_synchronize_shared,
-                                             block_allocate_shared_float,
-                                             block_allocate_shared_int,
-                                             right_multiplication_buffer_storage,
-                                             C_dense_buffer_storage, check_lu, data_type)
+
+            distributed_level = this_level_info[1].distributed
+            if distributed_level && block_gather_comm_size > 1 && block_gather_comm_rank > 0
+                # This process is gathered from, but does not participate in solve after
+                # that.
+                if !(this_level_schur_solver === nothing
+                         || isa(this_level_schur_solver, MPIStaticCondensationNull))
+                    error("this_lever_schur_solver=$this_lever_schur_solver, but should "
+                          * "not be an active solver.")
+                end
+                this_level_sc = nothing
+            elseif distributed_level && block_gather_comm_size == 1
+                # This process is a singleton at the end of a distributed-split dimension.
+                # It continues to participate in the solve, but has no work to do at this
+                # level.
+                if (this_level_schur_solver === nothing
+                        || isa(this_level_schur_solver, MPIStaticCondensationNull))
+                    error("this_lever_schur_solver=$this_lever_schur_solver, but should "
+                          * "be an active solver.")
+                end
+                this_level_sc = PassThroughSchurComplementSolver(this_level_schur_solver)
+            else
+                this_level_sc =
+                    BlockedSchurComplementSolver(dimensions, level, this_level_info,
+                                                 sparse_schur_complement_buffer_list,
+                                                 dense_schur_complement_buffer_list,
+                                                 this_level_schur_solver,
+                                                 use_shared_blocks, level_sparse_C_blocks,
+                                                 this_level_shared_comm,
+                                                 level_synchronize_shared,
+                                                 level_allocate_shared_float,
+                                                 block_synchronize_shared,
+                                                 block_allocate_shared_float,
+                                                 block_allocate_shared_int,
+                                                 right_multiplication_buffer_storage,
+                                                 C_dense_buffer_storage, check_lu,
+                                                 data_type)
+            end
         end
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
@@ -2047,11 +2086,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
         # Set up info for gathering/scattering that is needed when using distributed-MPI
         # parallelism.
-        block_gather_comm = this_level_info[1].block_gather_comm
-        block_gather_comm_size = MPI.Comm_size(block_gather_comm)
         if block_gather_comm_size > 1
-            block_gather_comm_rank = MPI.Comm_rank(block_gather_comm)
-            block_gather_comm_size = MPI.Comm_size(block_gather_comm)
             local_vector_size = sum(li.local_size for li ∈ this_level_info)
             if false && block_gather_comm_size == 2 && gather_dims == [length(dimensions)]
                 # When there are only two blocks being gathered together, there are no
@@ -2322,7 +2357,7 @@ end
 
 function lu!(solver::MPIStaticCondensationParallel{Nvar}, A_in) where Nvar
     @inbounds begin
-        if solver.distributed
+        if solver.distributed && solver.block_gather_comm_size > 1
             gather_matrix!(solver, A_in)
             A = solver.matrix_buffer
         else
@@ -2381,7 +2416,7 @@ function ldiv!(X_out::AbstractVector{T}, solver::MPIStaticCondensationParallel{N
             y = solver.y_buffer
             v = solver.v_buffer
 
-            if solver.distributed
+            if solver.distributed && solver.block_gather_comm_size > 1
                 gather_rhs_vector!(solver, U_in)
                 U = solver.vector_buffer
                 X = solver.vector_buffer
@@ -2458,7 +2493,7 @@ function ldiv!(X_out::AbstractVector{T}, solver::MPIStaticCondensationParallel{N
                 end
             end
 
-            if solver.distributed
+            if solver.distributed && solver.block_gather_comm_size > 1
                 scatter_solution_vector!(solver, X_out)
             end
         end
@@ -2485,6 +2520,16 @@ function ldiv!(solver::MPIStaticCondensation{T}, U::AbstractMatrix{T}) where T
         end
     end
     return nothing
+end
+
+@inline function lu!(solver::PassThroughSchurComplementSolver, A)
+    return lu!(solver.schur_complement_solver, A)
+end
+@inline function ldiv!(X, solver::PassThroughSchurComplementSolver, U)
+    return ldiv!(X, solver.schur_complement_solver, U)
+end
+@inline function ldiv!(solver::PassThroughSchurComplementSolver, U)
+    return ldiv!(solver.schur_complement_solver, U)
 end
 
 function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)

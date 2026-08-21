@@ -161,7 +161,7 @@ end
 function scatter_solution_vector!(solver::MPIStaticCondensationParallel,
                                   X_out::AbstractVector)
     block_gather_comm = solver.block_gather_comm
-    if block_gathe_comm == MPI.COMM_NULL
+    if block_gather_comm == MPI.COMM_NULL
         return nothing
     end
     block_gather_comm_rank = solver.block_gather_comm_rank
