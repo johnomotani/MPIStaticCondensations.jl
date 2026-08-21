@@ -1290,7 +1290,6 @@ function get_level_info_for_variable(
         local_bottom_vector_offset_periodic_pairs[2,:] .+= local_offset
 
         if MPI.Comm_size(block_gather_comm) > 1
-            all_global_offset_indices = level_indices .+ global_offset
             if MPI.Comm_rank(block_gather_comm) == 0
                 gather_subblock_n_list = MPI.Gather(length(level_indices), block_gather_comm; root=0)
                 gather_subblock_all_inds = zeros(Ti, sum(gather_subblock_n_list))
@@ -1692,7 +1691,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                               local_bottom_vector_offset_periodic_pairs,
                               level_shared_comm,
                               distributed=level_info_to_copy.distributed,
-                              block_distributed_comm, block_gather_comm)
+                              block_distributed_comm, block_gather_comm,
+                              gather_subblock_inds=level_info_to_copy.gather_subblock_inds)
             else
                 this_level_info = get_level_info_for_variable(
                                       dims, this_var_dims, this_var_level_indices,
@@ -2107,7 +2107,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 points_per_proc = (local_vector_size + level_shared_comm_size - 1) ÷ level_shared_comm_size
                 if block_gather_comm_rank == 0
                     vector_gather_from_ranges = [collect(level_shared_comm_rank*points_per_proc+1:min((level_shared_comm_rank+1)*points_per_proc,local_vector_size))]
-                    gather_subblock_inds = [vcat((li.gather_subblock_inds[i]
+                    gather_subblock_inds = [vcat((li.gather_subblock_inds[i] .+ li.global_offset
                                                   for li ∈ this_level_info)...)
                                             for i ∈ 1:block_gather_comm_size]
                     vector_gather_counts = [length(sbi) for sbi ∈ gather_subblock_inds[2:end]]
