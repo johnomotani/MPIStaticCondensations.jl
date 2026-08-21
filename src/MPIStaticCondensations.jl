@@ -1599,14 +1599,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           remove_boundaries=(d.periodic || d.remove_boundaries))
                                 for (d, bs) ∈ zip(level_dimensions, block_sizes)]
             old_block_distributed_comm_rank = MPI.Comm_rank(block_distributed_comm)
-            distributed_block_colour = 0
+            full_distributed_block_colour = 0
             for d ∈ reverse(level_dimensions)
-                distributed_block_colour = distributed_block_colour * d.nrank + d.irank
+                full_distributed_block_colour = full_distributed_block_colour * d.nrank + d.irank
             end
-            block_distributed_comm = MPI.Comm_split(distributed_comm,
-                                                    distributed_block_colour, 0)
-            gather_colour = old_block_distributed_comm_rank == 0 ? distributed_block_colour : nothing
-
+            gather_colour = old_block_distributed_comm_rank == 0 ? full_distributed_block_colour : nothing
 
             # Try to make ranks that own boundaries in the dimensions being gathered the
             # root rank of block_gather_comm, because if dense_boundaries=true for the
@@ -1627,8 +1624,17 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 # communicator.
                 gather_key = 2
             end
-
             block_gather_comm = MPI.Comm_split(distributed_comm, gather_colour, 0)
+
+            if true
+                if block_gather_comm == MPI.COMM_NULL
+                    distributed_block_colour = nothing
+                else
+                    distributed_block_colour = MPI.Comm_rank(block_gather_comm) == 0 ? full_distributed_block_colour : nothing
+                end
+            end
+            block_distributed_comm = MPI.Comm_split(distributed_comm,
+                                                    distributed_block_colour, 0)
         else
             distributed_level = false
             block_gather_comm = MPI.COMM_SELF
