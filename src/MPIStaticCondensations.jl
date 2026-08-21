@@ -761,7 +761,27 @@ function get_level_info_for_variable(
         this_var_dims = dimensions[variable_dimensions]
         has_periodic = any(d.periodic for d ∈ this_var_dims)
 
-        if shared_comm == MPI.COMM_NULL
+        if block_gather_comm == MPI.COMM_NULL
+            if !isempty(level_indices)
+                error("Should not be any level_indices on processes where "
+                      * "block_gather_comm==MPI.COMM_NULL.")
+            end
+        else
+            if MPI.Comm_rank(block_gather_comm) == 0
+                level_indices_lengths = MPI.Gather(length(level_indices), block_gather_comm; root=0)
+                gathered_level_indices = zeros(Ti, sum(level_indices_lengths))
+                MPI.Gatherv!(level_indices,
+                             MPI.VBuffer(gathered_level_indices, level_indices_lengths),
+                             block_gather_comm; root=0)
+                level_indices = sort!(unique(gathered_level_indices))
+            else
+                MPI.Gather(length(level_indices), block_gather_comm; root=0)
+                MPI.Gatherv!(level_indices, nothing, block_gather_comm; root=0)
+                level_indices = Ti[]
+            end
+        end
+
+        if shared_comm == MPI.COMM_NULL || block_distributed_comm == MPI.COMM_NULL
             # This processor does no work on this level, so just fill level_info with dummy
             # values.
             return LevelInfo(; has_periodic, block_sizes, nblock, global_size=0,
