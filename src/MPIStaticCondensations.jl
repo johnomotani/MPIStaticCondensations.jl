@@ -1564,6 +1564,8 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
             distributed_level = true
 
+            old_level_dimensions = copy(level_dimensions)
+
             # Reduce `nrank` as necessary so that each dimension in level_dimensions is
             # big enough to contain the corresponding size from block_sizes.
             level_dimensions = [Dimension(; name=d.name, nelement=d.nelement,
@@ -1581,6 +1583,28 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             block_distributed_comm = MPI.Comm_split(distributed_comm,
                                                     distributed_block_colour, 0)
             gather_colour = old_block_distributed_comm_rank == 0 ? distributed_block_colour : nothing
+
+
+            # Try to make ranks that own boundaries in the dimensions being gathered the
+            # root rank of block_gather_comm, because if dense_boundaries=true for the
+            # dimension being gathered, they might own more entries than other ranks, so
+            # this ordering might reduce the amount of communication.
+            if any(old_d.nrank == d.nrank || old_d.irank == 0
+                   for (old_d, d) ∈ zip(old_level_dimensions, level_dimensions))
+                # First rank in some gathered dimension, so has lower boundary in that
+                # dimension.
+                gather_key = 0
+            elseif any(old_d.nrank == d.nrank || old_d.irank == old_d.nrank - 1
+                       for (old_d, d) ∈ zip(old_level_dimensions, level_dimensions))
+                # Last rank in some gathered dimension, so has upper boundary in that
+                # dimension.
+                gather_key = 1
+            else
+                # Does not have a boundary in any gathered dimension, so no priority in
+                # communicator.
+                gather_key = 2
+            end
+
             block_gather_comm = MPI.Comm_split(distributed_comm, gather_colour, 0)
         else
             distributed_level = false
