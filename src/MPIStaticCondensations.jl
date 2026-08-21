@@ -1516,7 +1516,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                 end
             end
         else
-            if bs_next == nelement_block_list
+            if bs == nelement_block_list
                 # Next level is distributed.
                 next_level_is_distributed = true
             else
@@ -1526,12 +1526,12 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                           * "size is equal to nelement_local or nelement. "
                           * "Got block_sizes_list=$block_sizes_list.")
                 end
-            end
-            if any(bs_next .> nelement_block_list)
-                error("Some block size is greater than nelement_block, but there has not "
-                      * "been a level where all block sizes are equal to nelement_block. "
-                      * "nelement_block=$nelement_block, "
-                      * "block_sizes_list=$block_sizes_list.")
+                if any(bs_next .> nelement_block_list)
+                    error("Some block size is greater than nelement_block, but there has not "
+                          * "been a level where all block sizes are equal to nelement_block. "
+                          * "nelement_block_list=$nelement_block_list, "
+                          * "block_sizes_list=$block_sizes_list.")
+                end
             end
         end
     end
@@ -1794,8 +1794,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     even_buffer_size = maximum(schur_complement_nnz_list[2:2:end]; init=0)
     dense_buffer_sizes = zeros(ind_type, 0)
     if final_level > 1 && !final_sc_solver_is_mumps
-        for level ∈ first_distributed_level-2:n_levels-1
-            if level_info_list[level][1].level_shared_comm != MPI.COMM_NULL
+        for level ∈ max(first_distributed_level-2,1):n_levels-1
+            if (level_info_list[level][1].level_shared_comm != MPI.COMM_NULL
+                    && MPI.Comm_rank(level_info_list[level][1].block_gather_comm) == 0)
                 nbuff = sum(length(li.bottom_vector_indices) for li ∈ level_info_list[level])
                 push!(dense_buffer_sizes, nbuff)
                 if level % 2 == 0
@@ -1821,7 +1822,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         [get_shared_sparse_buffer(bi, i % 2 == 0 ? even_buffer : odd_buffer)
          for (i, bi) ∈ enumerate(schur_complement_buffer_info_list)]
     dense_schur_complement_buffer_list =
-        [reshape(@view(((first_distributed_level + i - 1)%2 == 0 ? even_buffer : odd_buffer)[1:nbuff^2]),
+        [reshape(@view(((first_distributed_level + i)%2 == 0 ? even_buffer : odd_buffer)[1:nbuff^2]),
                  nbuff, nbuff)
          for (i, nbuff) ∈ enumerate(dense_buffer_sizes)]
 
