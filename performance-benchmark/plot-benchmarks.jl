@@ -128,6 +128,70 @@ function plot_scaling!(ax, params, all_results; label=nothing, linestyle=nothing
     return nothing
 end
 
+function plot_speedup!(ax, params, all_results, all_results_MUMPS; label=nothing, linestyle=nothing)
+    if params ∉ keys(all_results) || params ∉ keys(all_results_MUMPS)
+        # Don't have a result for these parameters, so skip.
+        return nothing
+    end
+    results = all_results[params]
+    results_MUMPS = all_results_MUMPS[params]
+
+    other_parameters_list = collect(keys(results))
+    other_parameters_MUMPS_list = collect(keys(results_MUMPS))
+
+    for op_MUMPS ∈ other_parameters_MUMPS_list
+        level_results_MUMPS = results_MUMPS[op_MUMPS]
+        shared_collect_label_MUMPS_list = collect(keys(level_results_MUMPS))
+        sort!(shared_collect_label_MUMPS_list)
+        reference_data = level_results_MUMPS[shared_collect_label_MUMPS_list[1]]
+        reference_nproc = sort!(collect(keys(reference_data)))
+        reference_data_array = [reference_data[nproc] for nproc ∈ reference_nproc]
+        reference = [minimum(@view(reference_data_array[1:i]))
+                     for i ∈ 1:length(reference_data_array)]
+        for op ∈ other_parameters_list
+            if op_MUMPS != op[1:min(length(op_MUMPS),end)]
+                # Want to compare speedup to MUMPS for same 'other parameters'.
+                continue
+            end
+            level_results = results[op]
+            shared_collect_label_list = collect(keys(level_results))
+            sort!(shared_collect_label_list)
+            for shared_collect_label ∈ shared_collect_label_list
+                nsb_results = level_results[shared_collect_label]
+                speedups = reference ./ [get(nsb_results, n, NaN) for n ∈ reference_nproc]
+                this_label = "other_parameters=$op shared_collect_label=$shared_collect_label"
+                kwargs = Dict{Symbol,Any}()
+                kwargs[:label] = this_label
+                kwargs[:inspector_label] = (self,i,p) -> "$(self.label[])\nnproc=$(p[1]), speedup=$(p[2])"
+                if length(reference_nproc) == 1
+                    scatter!(reference_nproc, speedups; kwargs...)
+                else
+                    lines!(reference_nproc, speedups; kwargs...)
+                end
+            end
+        end
+
+        # Also plot the MUMPS results.
+        for shared_collect_label ∈ shared_collect_label_MUMPS_list
+            nsb_results = level_results_MUMPS[shared_collect_label]
+            speedups = reference ./ [get(nsb_results, n, NaN) for n ∈ reference_nproc]
+            this_label = "MUMPS other_parameters=$op_MUMPS shared_collect_label=$shared_collect_label"
+            kwargs = Dict{Symbol,Any}()
+            kwargs[:label] = this_label
+            kwargs[:inspector_label] = (self,i,p) -> "$(self.label[])\nnproc=$(p[1]), speedup=$(p[2])"
+            if length(reference_nproc) == 1
+                scatter!(reference_nproc, speedups; linestyle=:dash, kwargs...)
+            else
+                lines!(reference_nproc, speedups; linestyle=:dash, kwargs...)
+            end
+        end
+    end
+
+    ylims!(ax, 0, nothing)
+
+    return nothing
+end
+
 function plot_serial_reference!(ax, params, results)
     if params ∉ keys(results)
         # Don't have an UMFPACK result for these parameters, so skip.
@@ -219,6 +283,35 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
         else
             Legend(solve_fig[2,1], solve_ax; tellwidth=false, tellheight=true)
             save(joinpath(results_directory, "solve-$label.png"), solve_fig)
+        end
+
+        if lu_dict !== nothing && MUMPS_lu_dict !== nothing
+            lu_speedup_fig = Figure()
+            lu_speedup_ax = Axis(lu_speedup_fig[1,1]; xscale=log2, title="$p lu speedup",
+                                 xlabel="# procs", ylabel="speedup")
+            plot_speedup!(lu_speedup_ax, p, lu_dict, MUMPS_lu_dict)
+            if interactive_plot
+                DataInspector(lu_speedup_fig; datainspector_kwargs...)
+                display(backend.Screen(), lu_speedup_fig)
+            else
+                Legend(lu_speedup_fig[2,1], lu_speedup_ax; tellwidth=false, tellheight=true)
+                save(joinpath(results_directory, "lu-speedup-$label.png"), lu_speedup_fig)
+            end
+        end
+
+        if solve_dict !== nothing && MUMPS_solve_dict !== nothing
+            solve_speedup_fig = Figure()
+            solve_speedup_ax = Axis(solve_speedup_fig[1,1]; xscale=log2,
+                                    title="$p solve speedup", xlabel="# procs",
+                                    ylabel="speedup")
+            plot_speedup!(solve_speedup_ax, p, solve_dict, MUMPS_solve_dict)
+            if interactive_plot
+                DataInspector(solve_speedup_fig; datainspector_kwargs...)
+                display(backend.Screen(), solve_speedup_fig)
+            else
+                Legend(solve_speedup_fig[2,1], solve_speedup_ax; tellwidth=false, tellheight=true)
+                save(joinpath(results_directory, "solve-speedup-$label.png"), solve_speedup_fig)
+            end
         end
     end
 end
