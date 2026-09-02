@@ -445,7 +445,7 @@ include("blocked_schur_complement.jl")
 # Function with no methods that we can import in the MUMPS extension.
 function get_mumps_solver end
 
-struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
+struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{MPISchurComplement{Tf},BlockedSchurComplementSolver{Tf},MPIStaticCondensation{Tf}},Tranget,Trangept,Trangeb,Trangebs,Tdbr,Tdbb,Tbuff,Tsync,Ttimer<:Union{Nothing,TimerOutput}} <: MPIStaticCondensation{Tf}
     nvar::Val{Nvar}
     n::Ti
     schur_complement_solver::Tsolver
@@ -459,6 +459,8 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     this_shared_local_bottom_sub_selection_no_overlap_indices::Trangeb
     this_shared_local_bottom_vector_repeat_indices::Trangeb
     this_shared_local_bottom_periodic_pairs::Matrix{Ti}
+    dense_boundaries_ranges::Tdbr
+    dense_boundaries_buffers::Tdbb
     u_buffer::Tbuff
     v_buffer::Tbuff
     y_buffer::Tbuff
@@ -1835,6 +1837,30 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
+        if n_levels == 1
+            # Only one level, so only one element - no need to handle dense buffers.
+            this_dense_boundaries_ranges = nothing
+            this_dense_boundaries_buffers = nothing
+        elseif level == 1
+            this_dense_boundaries_ranges = dense_boundaries_ranges
+            this_dense_boundaries_buffers = dense_boundaries_buffers
+        elseif level == n_levels
+            this_dense_boundaries_buffers = dense_boundaries_buffers
+
+            global_inds = [li.bottom_vector_indices for li ∈ level_info_list[level-1]]
+            offsets = [li.local_offset for li ∈ this_level_info]
+            # Need to get ranges within this, last level's (dense) matrix.
+            # Indices of points in dense boundaries are always still present in the
+            # indices at the bottom level, so don't need to check whether indices are
+            # present.
+            this_dense_boundaries_ranges =
+                [searchsortedfirst(first(r),global_inds)+offset:searchsortedfirst(last(r),global_inds)+offset
+                 for (r, gi, offset) ∈ zip(dense_boundaries_ranges, global_inds, offsets)]
+        else
+            this_dense_boundaries_ranges = nothing
+            this_dense_boundaries_buffers = nothing
+        end
+
         this_level_schur_solver =
             MPIStaticCondensationParallel(Val(Nvar),
                                           sum(li.global_size for li ∈ this_level_info),
@@ -1848,7 +1874,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_sub_selection_no_overlap_offset_indices,
                                           this_shared_local_bottom_vector_repeat_offset_indices,
                                           this_shared_local_bottom_periodic_pairs,
-                                          this_u_buffer, this_v_buffer, this_y_buffer,
+                                          this_dense_boundaries_ranges,
+                                          this_dense_boundaries_buffers, this_u_buffer,
+                                          this_v_buffer, this_y_buffer,
                                           any(li.has_periodic for li ∈ this_level_info),
                                           level_synchronize_shared, timer)
     end
