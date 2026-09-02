@@ -1697,6 +1697,45 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         this_level_sc = MPIStaticCondensationNull{data_type}()
     end
 
+    if any(d.dense_boundaries
+           && (d.irank == 0 || d.irank == d.nrank - 1) for d ∈ dimensions)
+        function get_dense_boundaries_ranges(idim, ivar)
+            if !dimensions[idim].dense_boundaries
+                error("In get_dense_boundaries_ranges(), "
+                      * "dimensions[idim].dense_boundaries should always be true.")
+            end
+            dense_dim = dimensions[idim]
+            dense_dim_n = dense_dim.n
+            vdims = variable_dimensions[idim]
+            this_var_idim = searchsortedfirst(vdims, idim)
+            db_ranges = UnitRange{ind_type}[]
+            nb = prod(d.n for d ∈ dimensions[vdims[1:idim-1]])
+            if idim ∈ vdims
+                offset_step_size = prod(d.n_local for d ∈ dimensions[vdims[1:idim-1]])
+                for count in 1:prod(d.n_local for d ∈ dimensions[vdims[idim:end]]; init=1)
+                end
+            else
+                offset_step_size = prod(d.n_local for d ∈ dimensions[vdims[1:idim]])
+                for count in 1:prod(d.n_local for d ∈ dimensions[vdims[idim+1:end]]; init=1)
+                    offset = (count - 1) * offset_step_size
+                    if dense_dim.irank == 0
+                        push!(db_ranges, offset+1:offset+nb)
+                    end
+                    if dense_dim.irank == dense_dim.nrank - 1 && dense_dim_n > 1
+                        push!(db_ranges, offset+(dense_dim_n-1)*nb+1:offset+dense_dim_n*nb)
+                    end
+                end
+            end
+            return db_ranges
+        end
+        dense_boundaries_ranges = [get_dense_boundaries_ranges(idim, ivar)
+                                   for ivar ∈ 1:Nvar, idim ∈ 1:nd
+                                   if dimensions[idim].dense_boundaries]
+    else
+        dense_boundaries_ranges = nothing
+        dense_boundaries_buffers = nothing
+    end
+
     this_level_schur_solver = nothing
     right_multiplication_buffer_storage = zeros(data_type, 0)
     C_dense_buffer_storage = zeros(data_type, 0)
@@ -1837,7 +1876,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
 
-        if n_levels == 1
+        if dense_boundaries_ranges === nothing
+            this_dense_boundaries_ranges = nothing
+            this_dense_boundaries_buffers = nothing
+        elseif n_levels == 1
             # Only one level, so only one element - no need to handle dense buffers.
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_buffers = nothing
