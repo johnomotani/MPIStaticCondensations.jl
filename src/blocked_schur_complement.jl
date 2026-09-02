@@ -32,6 +32,8 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
                  allocate_shared_float::Faf, block_synchronize_shared::Fbsync,
                  block_allocate_shared_float::Fbaf, block_allocate_shared_int::Fbai,
                  right_multiplication_buffer_storage, C_dense_buffer_storage,
+                 dense_boundaries_ranges, dense_boundaries_col_ranges,
+                 dense_boundaries_row_ranges,
                  check_lu::Bool) where {Fsync,Faf,Fbsync,Fbaf,Fbai}
 
         if shared_comm == MPI.COMM_NULL
@@ -70,12 +72,20 @@ struct BlockedSchurComplementSolver{Tf<:AbstractFloat,TA,TB,TC,TS,TSF,TAiu,Tsync
             this_sc_buffer = schur_complement_buffer_list[level]
             schur_complement = BlockS(this_sc_buffer,
                                       Tuple(li.local_bottom_vector_indices for li ∈ level_info),
-                                      shared_comm, allocate_shared_float)
+                                      Tuple(li.bottom_vector_indices for li ∈ level_info),
+                                      shared_comm, dense_boundaries_ranges,
+                                      dense_boundaries_col_ranges,
+                                      dense_boundaries_row_ranges, allocate_shared_float,
+                                      synchronize_shared)
             data_type = eltype(schur_complement.matrix[1][1])
         else
             schur_complement = BlockDenseS(second_last_schur_complement_buffer,
                                            Tuple(li.local_bottom_vector_indices for li ∈ level_info),
-                                           shared_comm, allocate_shared_float)
+                                           Tuple(li.bottom_vector_indices for li ∈ level_info),
+                                           shared_comm, dense_boundaries_ranges,
+                                           dense_boundaries_col_ranges,
+                                           dense_boundaries_row_ranges,
+                                           allocate_shared_float, synchronize_shared)
             data_type = eltype(schur_complement.matrix)
         end
 

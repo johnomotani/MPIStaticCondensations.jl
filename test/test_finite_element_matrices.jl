@@ -14,7 +14,8 @@ include("utils.jl")
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, sparse_stencils::Bool, block_sizes_heuristic,
                      reduce_proc_count_with_blocks::Bool, sparse_C_blocks::Bool,
-                     mumps_fill_in_threshold::AbstractFloat, tol::AbstractFloat)
+                     mumps_fill_in_threshold::AbstractFloat,
+                     reduce_dense_boundaries_memory::Bool, tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -35,8 +36,9 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         @test_throws "reduce_proc_count_with_blocks=true is not compatible with using a MUMPS solver for the lowest level." begin
             mpi_static_condensation(dimensions; block_sizes_heuristic,
                                     reduce_proc_count_with_blocks, sparse_C_blocks,
-                                    mumps_fill_in_threshold, comm, distributed_comm,
-                                    shared_comm, allocate_shared_float,
+                                    mumps_fill_in_threshold,
+                                    reduce_dense_boundaries_memory, comm,
+                                    distributed_comm, shared_comm, allocate_shared_float,
                                     allocate_shared_int, check_lu=true)
         end
         cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
@@ -46,7 +48,21 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
         @test_throws "MPIStaticCondensationMUMPS does not currently support periodicity." begin
             mpi_static_condensation(dimensions;
                                     block_sizes_heuristic, reduce_proc_count_with_blocks,
-                                    sparse_C_blocks, mumps_fill_in_threshold, comm,
+                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                    reduce_dense_boundaries_memory, comm,
+                                    distributed_comm, shared_comm, allocate_shared_float,
+                                    allocate_shared_int, check_lu=true)
+        end
+        cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
+        return nothing
+    end
+    if reduce_dense_boundaries_memory && mumps_fill_in_threshold < 1.0 && any(d.dense_boundaries for d ∈ dimensions)
+        @test_throws ("MPIStaticCondensationMUMPS does not currently support "
+                      * "reduce_dense_boundaries_memory.") begin
+            mpi_static_condensation(dimensions;
+                                    block_sizes_heuristic, reduce_proc_count_with_blocks,
+                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                    reduce_dense_boundaries_memory, comm,
                                     distributed_comm, shared_comm, allocate_shared_float,
                                     allocate_shared_int, check_lu=true)
         end
@@ -55,9 +71,10 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
     end
     Alu = mpi_static_condensation(dimensions;
                                   block_sizes_heuristic, reduce_proc_count_with_blocks,
-                                  sparse_C_blocks, mumps_fill_in_threshold, comm,
-                                  distributed_comm, shared_comm, allocate_shared_float,
-                                  allocate_shared_int, check_lu=true)
+                                  sparse_C_blocks, mumps_fill_in_threshold,
+                                  reduce_dense_boundaries_memory, comm, distributed_comm,
+                                  shared_comm, allocate_shared_float, allocate_shared_int,
+                                  check_lu=true)
 
     lu!(Alu, local_matrix)
 
@@ -159,17 +176,22 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
             println("* n_sh=$n_shared, ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks")
         end
 
-        @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
+        @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, rdbm=$reduce_dense_boundaries_memory, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
                 periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
                 dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),)),
+                reduce_dense_boundaries_memory ∈ (true, false),
                 block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ (1.0, 0.1)
+            if !any(dense_boundaries_list) && reduce_dense_boundaries_memory === false
+                # Option has no effect when there are no dense boundaries, so skip.
+                continue
+            end
             #if rank == 0
-            #    println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
+            #    println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, rdbm=$reduce_dense_boundaries_memory, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
             #end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
@@ -181,7 +203,8 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
 
             test_matrix(dimensions, n_shared, this_seed, sparse_stencils,
                         block_sizes_heuristic, reduce_proc_count_with_blocks,
-                        sparse_C_blocks, mumps_fill_in_threshold, tol)
+                        sparse_C_blocks, mumps_fill_in_threshold,
+                        reduce_dense_boundaries_memory, tol)
             this_seed += 1
         end
     end
