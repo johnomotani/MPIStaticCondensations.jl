@@ -461,6 +461,7 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     this_shared_local_bottom_periodic_pairs::Matrix{Ti}
     dense_boundaries_ranges::Tdbr
     dense_boundaries_partial_ranges::Tdbr
+    dense_boundaries_offsets::Vector{Ti}
     dense_boundaries_buffers::Tdbb
     u_buffer::Tbuff
     v_buffer::Tbuff
@@ -1755,6 +1756,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             offsets = cumsum(vcat(0, range_lengths[1:end-1]))
             partial_ranges = [intersect(full_r, local_entries .- offset)
                               for (full_r, offset) ∈ zip(full_ranges, offsets)]
+            filter!(!isempty, partial_ranges)
             return partial_ranges
         end
         dense_boundaries_partial_ranges = [get_dense_boundaries_partial_range(r)
@@ -1762,10 +1764,17 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
         buffer_sizes = [sum(sum(length(r) for r ∈ var_dbr) for var_dbr ∈ dbr)
                         for dbr ∈ eachcol(dense_boundaries_ranges)]
+        dense_boundaries_offsets = cumsum(vcat(ind_type(0), buffer_sizes[1:end-1]))
         dense_boundaries_buffers = [allocate_shared_float(bs, bs) for bs ∈ buffer_sizes]
+        if shared_comm_rank == 0
+            for b ∈ dense_boundaries_buffers
+                b .= 0.0
+            end
+        end
     else
         dense_boundaries_ranges = nothing
         dense_boundaries_partial_ranges = nothing
+        dense_boundaries_partial_offsets = nothing
         dense_boundaries_buffers = nothing
     end
 
@@ -1912,17 +1921,21 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         if dense_boundaries_ranges === nothing
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_partial_ranges = nothing
+            this_dense_boundaries_offsets = ind_type[]
             this_dense_boundaries_buffers = nothing
         elseif n_levels == 1
             # Only one level, so only one element - no need to handle dense buffers.
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_partial_ranges = nothing
+            this_dense_boundaries_offsets = ind_type[]
             this_dense_boundaries_buffers = nothing
         elseif level == 1
             this_dense_boundaries_ranges = dense_boundaries_ranges
             this_dense_boundaries_partial_ranges = dense_boundaries_partial_ranges
+            this_dense_boundaries_offsets = dense_boundaries_offsets
             this_dense_boundaries_buffers = dense_boundaries_buffers
         elseif level == n_levels
+            this_dense_boundaries_offsets = dense_boundaries_offsets
             this_dense_boundaries_buffers = dense_boundaries_buffers
 
             local_inds = [li.local_bottom_vector_indices for li ∈ level_info_list[level-1]]
@@ -1940,6 +1953,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         else
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_partial_ranges = nothing
+            this_dense_boundaries_offsets = ind_type[]
             this_dense_boundaries_buffers = nothing
         end
 
@@ -1958,6 +1972,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           this_shared_local_bottom_periodic_pairs,
                                           this_dense_boundaries_ranges,
                                           this_dense_boundaries_partial_ranges,
+                                          this_dense_boundaries_offsets,
                                           this_dense_boundaries_buffers, this_u_buffer,
                                           this_v_buffer, this_y_buffer,
                                           any(li.has_periodic for li ∈ this_level_info),
@@ -2169,6 +2184,40 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
             if isa(A, AbstractMatrix) && Nvar == 1
                 lu!(solver, ((A,),))
             else
+                if solver.dense_boundaries_ranges !== nothing
+                    @sc_timeit solver.timer "Static condensation lu! $(size(solver)) copy dense boundaries" begin
+                        for (ranges, partial_ranges, offsets, buffer) ∈
+                                zip(eachcol(solver.dense_boundaries_ranges),
+                                    eachcol(solver.dense_boundaries_partial_ranges),
+                                    solver.dense_boundaries_offsets,
+                                    solver.dense_boundaries_buffers)
+                            for (jvar, col_range, col_offset) ∈ zip(1:Nvar, partial_ranges, offsets)
+                                for (ivar, row_range, row_offset) ∈ zip(1:Nvar, ranges, offsets)
+                                    var_A = A[ivar,jvar]
+                                    colptr = var_A.colptr
+                                    rowval = var_A.rowval
+                                    nzval = var_A.nzval
+                                    row_start = first(row_range)
+                                    row_end = last(row_range)
+                                    for j ∈ col_range
+                                        buffer_j = j + col_offset
+                                        col_start = colptr[j]
+                                        col_end = colptr[j+1] - 1
+                                        first_flat_i = searchsortedfirst(@view(rowval[col_start:col_end]), row_start) + col_start - 1
+                                        for flat_i ∈ first_flat_i:col_end
+                                            i = rowval[flat_i]
+                                            if i > row_end
+                                                break
+                                            end
+                                            buffer_i = i + row_offset
+                                            buffer[buffer_i,buffer_j] = nzval[flat_i]
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
                 @sc_timeit solver.timer "Static condensation lu! $(size(solver))" begin
                     lu!(schur_complement_solver, A)
                 end
