@@ -27,12 +27,17 @@ struct BlockS{Nvar,Ti,Tm,Trange,Tdbr,Tsync}
                                      for nrow ∈ n_flat)
         end
 
-        dense_boundaries_ranges =
-            [searchsortedfirst(first(r),li):searchsortedfirst(last(r),li)
-             for (r, li) ∈ zip(full_dense_boundaries_ranges, local_bottom_vector_indices)]
-        dense_boundaries_partial_ranges =
-            [searchsortedfirst(first(r),li):searchsortedfirst(last(r),li)
-             for (r, li) ∈ zip(full_dense_boundaries_partial_ranges, local_bottom_vector_indices)]
+        if full_dense_boundaries_ranges !== nothing
+            dense_boundaries_ranges =
+                [[searchsortedfirst(li,first(r)):searchsortedfirst(li,last(r)) for r ∈ dbr]
+                 for (dbr, li) ∈ zip(full_dense_boundaries_ranges, local_bottom_vector_indices)]
+            dense_boundaries_partial_ranges =
+                [[searchsortedfirst(li,first(r)):searchsortedfirst(li,last(r)) for r ∈ dbr]
+                 for (dbr, li) ∈ zip(full_dense_boundaries_partial_ranges, local_bottom_vector_indices)]
+        else
+            dense_boundaries_ranges = nothing
+            dense_boundaries_partial_ranges = nothing
+        end
 
         return new{Nvar,Ti,Tm,Tind,typeof(dense_boundaries_ranges),Tsync}(
                    matrix, local_bottom_vector_indices, column_ranges_partial,
@@ -71,14 +76,19 @@ struct BlockDenseS{Nvar,Ti,Tm,Tind,Tdbr,Tsync}
         partial_indices = Tuple(inds[pr] for (inds, pr) ∈ zip(local_bottom_vector_indices,
                                                               partial_ranges_without_offset))
 
-        dense_boundaries_ranges =
-            [searchsortedfirst(first(r),li)+offset:searchsortedfirst(last(r),li)+offset
-             for (r, li, offset) ∈ zip(full_dense_boundaries_ranges,
-                                       local_bottom_vector_indices, block_range_offsets)]
-        dense_boundaries_partial_ranges =
-            [searchsortedfirst(first(r),li)+offset:searchsortedfirst(last(r),li)+offset
-             for (r, li, offset) ∈ zip(full_dense_boundaries_partial_ranges,
-                                       local_bottom_vector_indices, block_range_offsets)]
+        if full_dense_boundaries_ranges !== nothing
+            dense_boundaries_ranges =
+                [[searchsortedfirst(li,first(r))+offset:searchsortedfirst(li,last(r))+offset for r ∈ dbr]
+                 for (dbr, li, offset) ∈ zip(full_dense_boundaries_ranges,
+                                           local_bottom_vector_indices, block_range_offsets)]
+            dense_boundaries_partial_ranges =
+                [[searchsortedfirst(li,first(r))+offset:searchsortedfirst(li,last(r))+offset for r ∈ dbr]
+                 for (dbr, li, offset) ∈ zip(full_dense_boundaries_partial_ranges,
+                                           local_bottom_vector_indices, block_range_offsets)]
+        else
+            dense_boundaries_ranges = nothing
+            dense_boundaries_partial_ranges = nothing
+        end
 
         return new{Nvar,Ti,Tm,Tind,typeof(dense_boundaries_ranges),Tsync}(
                    matrix, local_bottom_vector_indices, ranges, partial_indices,
@@ -95,7 +105,6 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
         sc_matrix = schur_complement.matrix
         indices = schur_complement.indices
         column_ranges_partial = schur_complement.column_ranges_partial
-        dense_boundaries_ranges = schur_complement.dense_boundaries_ranges
         for (vcol, ci, cr) ∈ zip(1:Nvar, indices, column_ranges_partial), (vrow, ri) ∈ zip(1:Nvar, indices)
             sc_matrix_variable_block = sc_matrix[vrow][vcol]
             A_variable_block = full_A[vrow][vcol]
@@ -212,6 +221,7 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
             end
         end
 
+        dense_boundaries_ranges = schur_complement.dense_boundaries_ranges
         if dense_boundaries_ranges !== nothing
             # 'Dense boundaries' entries are already stored in another buffer, so
             # need to zero them out here. As the entries to be handled are those
@@ -346,6 +356,7 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
             end
         end
 
+        dense_boundaries_ranges = schur_complement.dense_boundaries_ranges
         if dense_boundaries_ranges !== nothing
             # 'Dense boundaries' entries are already stored in another buffer, so
             # need to zero them out here. As the entries to be handled are those

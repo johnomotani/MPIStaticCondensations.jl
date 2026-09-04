@@ -154,7 +154,8 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
                     add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list,
                                   row_indices, block_inds, inner_inds,
                                   rowind + row_offset + row_inner - 1, row_count, stencil,
-                                  row_dimension_indices, column_dimension_indices)
+                                  row_dimension_indices, column_dimension_indices,
+                                  include_dense_boundaries)
                 end
                 return nothing
             else
@@ -163,7 +164,7 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
                                      row_indices, block_inds, inner_inds,
                                      rowind + row_offset + row_inner - 1, row_count,
                                      stencil, row_dimension_indices,
-                                     column_dimension_indices)
+                                     column_dimension_indices, include_dense_boundaries)
             end
         end
 
@@ -174,7 +175,8 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
                 add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list,
                               row_indices, block_inds, inner_inds,
                               rowind + row_offset + row_inner - 1, row_count, stencil,
-                              row_dimension_indices, column_dimension_indices)
+                              row_dimension_indices, column_dimension_indices,
+                              include_dense_boundaries)
             end
         end
         row_offset = (iblock - 1) * block_npoints
@@ -200,7 +202,8 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
             # point.
             add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list, row_indices,
                           block_inds, inner_inds, rowind + row_offset, row_count, stencil,
-                          row_dimension_indices, column_dimension_indices)
+                          row_dimension_indices, column_dimension_indices,
+                          include_dense_boundaries)
         else
             for row_inner ∈ block_start:block_npoints+1
                 if row_offset + row_inner > row_end
@@ -211,7 +214,8 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
                 add_row_inds!(rv, idim - 1, dimensions, block_sizes, nblock_list,
                               row_indices, block_inds, inner_inds,
                               rowind + row_offset + row_inner - 1, row_count, stencil,
-                              row_dimension_indices, column_dimension_indices)
+                              row_dimension_indices, column_dimension_indices,
+                              include_dense_boundaries)
             end
         end
         if include_dense_boundaries && d.dense_boundaries && is_last_point
