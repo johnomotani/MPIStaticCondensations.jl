@@ -1809,6 +1809,51 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         level_allocate_shared_int = level_allocate_shared_int_list[level]
         this_level_comm_size = MPI.Comm_size(this_level_shared_comm)
         this_level_comm_rank = MPI.Comm_rank(this_level_shared_comm)
+
+        if dense_boundaries_ranges === nothing
+            this_dense_boundaries_ranges = nothing
+            this_dense_boundaries_partial_ranges = nothing
+            this_dense_boundaries_partial_buffer_ranges = nothing
+            this_dense_boundaries_offsets = ind_type[]
+            this_dense_boundaries_buffers = nothing
+        elseif n_levels == 1
+            # Only one level, so only one element - no need to handle dense buffers.
+            this_dense_boundaries_ranges = nothing
+            this_dense_boundaries_partial_ranges = nothing
+            this_dense_boundaries_partial_buffer_ranges = nothing
+            this_dense_boundaries_offsets = ind_type[]
+            this_dense_boundaries_buffers = nothing
+        elseif level == 1
+            this_dense_boundaries_ranges = dense_boundaries_ranges
+            this_dense_boundaries_partial_ranges = dense_boundaries_partial_ranges
+            this_dense_boundaries_partial_buffer_ranges = dense_boundaries_partial_buffer_ranges
+            this_dense_boundaries_offsets = dense_boundaries_offsets
+            this_dense_boundaries_buffers = dense_boundaries_buffers
+        elseif level == n_levels
+            this_dense_boundaries_offsets = dense_boundaries_offsets
+            this_dense_boundaries_buffers = dense_boundaries_buffers
+
+            local_inds = [li.local_bottom_vector_indices for li ∈ level_info_list[level-1]]
+            offsets = [li.local_offset for li ∈ this_level_info]
+            # Need to get ranges within this, last level's (dense) matrix.
+            # Indices of points in dense boundaries are always still present in the
+            # indices at the bottom level, so don't need to check whether indices are
+            # present.
+            this_dense_boundaries_ranges =
+                [searchsortedfirst(first(r),li)+offset:searchsortedfirst(last(r),li)+offset
+                 for (r, li, offset) ∈ zip(dense_boundaries_ranges, local_inds, offsets)]
+            this_dense_boundaries_partial_ranges =
+                [searchsortedfirst(first(r),li)+offset:searchsortedfirst(last(r),li)+offset
+                 for (r, li, offset) ∈ zip(dense_boundaries_partial_ranges, local_inds, offsets)]
+            this_dense_boundaries_partial_buffer_ranges = dense_boundaries_partial_buffer_ranges
+        else
+            this_dense_boundaries_ranges = nothing
+            this_dense_boundaries_partial_ranges = nothing
+            this_dense_boundaries_partial_buffer_ranges = nothing
+            this_dense_boundaries_offsets = ind_type[]
+            this_dense_boundaries_buffers = nothing
+        end
+
         if level < final_level
             if reduce_proc_count_with_blocks || synchronize_shared === nothing
                 level_synchronize_shared = () -> MPI.Barrier(this_level_shared_comm)
@@ -1865,7 +1910,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                              block_allocate_shared_float,
                                              block_allocate_shared_int,
                                              right_multiplication_buffer_storage,
-                                             C_dense_buffer_storage, check_lu)
+                                             C_dense_buffer_storage,
+                                             this_dense_boundaries_ranges,
+                                             this_dense_boundaries_partial_ranges,
+                                             check_lu)
         end
         level_shared_comm_rank = MPI.Comm_rank(this_level_shared_comm)
         level_shared_comm_size = MPI.Comm_size(this_level_shared_comm)
@@ -1935,50 +1983,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             end
         end
         this_shared_local_bottom_periodic_pairs = local_bottom_vector_periodic_pairs[:,this_proc_pairs_inds]
-
-        if dense_boundaries_ranges === nothing
-            this_dense_boundaries_ranges = nothing
-            this_dense_boundaries_partial_ranges = nothing
-            this_dense_boundaries_partial_buffer_ranges = nothing
-            this_dense_boundaries_offsets = ind_type[]
-            this_dense_boundaries_buffers = nothing
-        elseif n_levels == 1
-            # Only one level, so only one element - no need to handle dense buffers.
-            this_dense_boundaries_ranges = nothing
-            this_dense_boundaries_partial_ranges = nothing
-            this_dense_boundaries_partial_buffer_ranges = nothing
-            this_dense_boundaries_offsets = ind_type[]
-            this_dense_boundaries_buffers = nothing
-        elseif level == 1
-            this_dense_boundaries_ranges = dense_boundaries_ranges
-            this_dense_boundaries_partial_ranges = dense_boundaries_partial_ranges
-            this_dense_boundaries_partial_buffer_ranges = dense_boundaries_partial_buffer_ranges
-            this_dense_boundaries_offsets = dense_boundaries_offsets
-            this_dense_boundaries_buffers = dense_boundaries_buffers
-        elseif level == n_levels
-            this_dense_boundaries_offsets = dense_boundaries_offsets
-            this_dense_boundaries_buffers = dense_boundaries_buffers
-
-            local_inds = [li.local_bottom_vector_indices for li ∈ level_info_list[level-1]]
-            offsets = [li.local_offset for li ∈ this_level_info]
-            # Need to get ranges within this, last level's (dense) matrix.
-            # Indices of points in dense boundaries are always still present in the
-            # indices at the bottom level, so don't need to check whether indices are
-            # present.
-            this_dense_boundaries_ranges =
-                [searchsortedfirst(first(r),local_inds)+offset:searchsortedfirst(last(r),local_inds)+offset
-                 for (r, gi, offset) ∈ zip(dense_boundaries_ranges, local_inds, offsets)]
-            this_dense_boundaries_partial_ranges =
-                [searchsortedfirst(first(r),local_inds)+offset:searchsortedfirst(last(r),local_inds)+offset
-                 for (r, gi, offset) ∈ zip(dense_boundaries_partial_ranges, local_inds, offsets)]
-            this_dense_boundaries_partial_buffer_ranges = dense_boundaries_partial_buffer_ranges
-        else
-            this_dense_boundaries_ranges = nothing
-            this_dense_boundaries_partial_ranges = nothing
-            this_dense_boundaries_partial_buffer_ranges = nothing
-            this_dense_boundaries_offsets = ind_type[]
-            this_dense_boundaries_buffers = nothing
-        end
 
         this_level_schur_solver =
             MPIStaticCondensationParallel(Val(Nvar),
