@@ -1705,6 +1705,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
 
     if any(d.dense_boundaries
            && (d.irank == 0 || d.irank == d.nrank - 1) for d ∈ dimensions)
+        # The 'dense boundaries' entries are not needed until the lowest level, so we copy
+        # them into a separate buffer before running the top level, and then add them back
+        # into the lowest level matrix. This is more efficient than storing/copying them
+        # at every level.
         function get_dense_boundaries_ranges_inner(outer_cartinds, outer_dims, nb,
                                                    has_first_point,
                                                    has_distinct_last_point)
@@ -2192,6 +2196,8 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                 this_A = A
 
                 if dense_boundaries_buffers !== nothing
+                    # Add 'dense boundaries' matrix entries, that were removed from the
+                    # matrix at the top level, back into this lowest-level matrix.
                     @sc_timeit solver.timer "Static condensation lu! $(size(A)) copy dense boundaries" begin
                         for (ranges, partial_ranges, partial_buffer_ranges, offsets, buffer) ∈
                                 zip(eachcol(solver.dense_boundaries_ranges),
@@ -2226,6 +2232,11 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                 lu!(solver, ((A,),))
             else
                 if solver.dense_boundaries_ranges !== nothing
+                    # At the top level (this is the only level where
+                    # dense_boundaries_ranges!==nothing), we copy the 'dense boundaries'
+                    # entries into a separate buffer, as they are not needed until the
+                    # lowest level, so it is more efficient not to store/copy them at
+                    # every level.
                     @sc_timeit solver.timer "Static condensation lu! $(size(solver)) copy dense boundaries" begin
                         for (ranges, partial_ranges, partial_buffer_ranges, offsets, buffer) ∈
                                 zip(eachcol(solver.dense_boundaries_ranges),
