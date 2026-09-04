@@ -1516,7 +1516,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                           li[1].block_sizes, li[1].bottom_vector_indices,
                                           li[1].bottom_vector_indices,
                                           variable_dimensions[1], variable_dimensions[1];
-                                          ind_type)
+                                          include_dense_boundaries=false, ind_type)
         sc_info = Matrix{typeof(first_sc_info)}(undef, Nvar, Nvar)
         sc_info[1,1] = first_sc_info
         for ivar ∈ 2:Nvar
@@ -1530,7 +1530,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                   li[ivar].bottom_vector_indices,
                                                   li[1].bottom_vector_indices,
                                                   variable_dimensions[ivar],
-                                                  variable_dimensions[1]; ind_type)
+                                                  variable_dimensions[1];
+                                                  include_dense_boundaries=false,
+                                                  ind_type)
             end
         end
         for jvar ∈ 2:Nvar
@@ -1551,6 +1553,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                                           li[jvar].bottom_vector_indices,
                                                           variable_dimensions[ivar],
                                                           variable_dimensions[jvar];
+                                                          include_dense_boundaries=false,
                                                           ind_type)
                     end
                 end

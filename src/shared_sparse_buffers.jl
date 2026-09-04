@@ -87,7 +87,8 @@ end
 
 function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indices,
                        block_inds, inner_inds, rowind, row_count, stencil,
-                       row_dimension_indices, column_dimension_indices)
+                       row_dimension_indices, column_dimension_indices,
+                       include_dense_boundaries)
     @inbounds begin
         if stencil ∉ ("point", "element")
             # The main stencil type is "element". "point" is handled by a special case.
@@ -177,7 +178,7 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
             end
         end
         row_offset = (iblock - 1) * block_npoints
-        if d.dense_boundaries && is_first_point
+        if include_dense_boundaries && d.dense_boundaries && is_first_point
             # This is the first or last point in a dimension that should have 'dense
             # boundaries'.
             block_start = 2
@@ -186,12 +187,12 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
         else
             block_start = 1
         end
-        if d.dense_boundaries && is_last_point
+        if include_dense_boundaries && d.dense_boundaries && is_last_point
             row_end = dn - 1
         else
             row_end = dn
         end
-        if iblock > nblock && d.dense_boundaries
+        if include_dense_boundaries && iblock > nblock && d.dense_boundaries
             # Have added all points already.
         elseif iblock > nblock
             # Creating entries for the last grid point, this is 'really'
@@ -213,7 +214,7 @@ function add_row_inds!(rv, idim, dimensions, block_sizes, nblock_list, row_indic
                               row_dimension_indices, column_dimension_indices)
             end
         end
-        if d.dense_boundaries && is_last_point
+        if include_dense_boundaries && d.dense_boundaries && is_last_point
             add_all_row_inds!(rv, idim - 1, dimensions, row_indices, rowind + dn - 1,
                               row_count, row_dimension_indices)
         end
@@ -228,7 +229,7 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                                        column_indices::Union{Vector{<:Integer},Nothing}=nothing,
                                        row_dimensions::Union{UnitRange{<:Integer},Vector{<:Integer},Nothing}=nothing,
                                        column_dimensions::Union{UnitRange{<:Integer},Vector{<:Integer},Nothing}=nothing;
-                                       stencil::String="element",
+                                       include_dense_boundaries::Bool=true, stencil::String="element",
                                        ind_type::Type=Int64) where F
     @inbounds begin
         point_stencil = (stencil == "point")
@@ -421,7 +422,8 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
                     row_count[] = 1
                     add_row_inds!(col_rv, length(dimensions), dimensions, block_sizes,
                                   nblock_list, row_indices, block_inds, inner_inds, 0,
-                                  row_count, stencil, row_dimensions, column_dimensions)
+                                  row_count, stencil, row_dimensions, column_dimensions,
+                                  include_dense_boundaries)
                     if !point_stencil
                         rv_lookup[col_eq] = (col_rv, icol)
                     end
