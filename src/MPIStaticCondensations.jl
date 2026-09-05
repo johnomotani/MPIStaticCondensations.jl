@@ -462,7 +462,7 @@ struct MPIStaticCondensationParallel{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<
     dense_boundaries_ranges::Tdbr
     dense_boundaries_partial_ranges::Tdbr
     dense_boundaries_partial_buffer_ranges::Tdbr
-    dense_boundaries_offsets::Vector{Ti}
+    dense_boundaries_offsets::Matrix{Ti}
     dense_boundaries_buffers::Tdbb
     u_buffer::Tbuff
     v_buffer::Tbuff
@@ -1797,10 +1797,11 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             [get_dense_boundaries_partial_range(r, shared_comm_rank, shared_comm_size, true)
              for r ∈ dense_boundaries_ranges]
 
-        buffer_sizes = [sum(sum(length(r) for r ∈ var_dbr; init=0) for var_dbr ∈ dbr; init=0)
+        buffer_sizes = [(sum(length(r[1]) for r ∈ dbr), length(dbr[1]))
                         for dbr ∈ eachcol(dense_boundaries_ranges)]
-        dense_boundaries_offsets = cumsum(vcat(ind_type(0), buffer_sizes[1:end-1]))
-        dense_boundaries_buffers = [allocate_shared_float(bs, bs) for bs ∈ buffer_sizes]
+        dense_boundaries_offsets = hcat([cumsum(vcat(0, [length(r[1]) for r ∈ dbr[1:end-1]]))
+                                         for dbr ∈ eachcol(dense_boundaries_ranges)]...)
+        dense_boundaries_buffers = [allocate_shared_float(bs[1], bs[1], bs[2]) for bs ∈ buffer_sizes]
         if shared_comm_rank == 0
             for b ∈ dense_boundaries_buffers
                 b .= 0.0
@@ -1832,14 +1833,14 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_partial_ranges = nothing
             this_dense_boundaries_partial_buffer_ranges = nothing
-            this_dense_boundaries_offsets = ind_type[]
+            this_dense_boundaries_offsets = zeros(ind_type, 0, 0)
             this_dense_boundaries_buffers = nothing
         elseif n_levels == 1
             # Only one level, so only one element - no need to handle dense buffers.
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_partial_ranges = nothing
             this_dense_boundaries_partial_buffer_ranges = nothing
-            this_dense_boundaries_offsets = ind_type[]
+            this_dense_boundaries_offsets = zeros(ind_type, 0, 0)
             this_dense_boundaries_buffers = nothing
         elseif level == 1
             this_dense_boundaries_ranges = dense_boundaries_ranges
@@ -1868,7 +1869,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_dense_boundaries_ranges = nothing
             this_dense_boundaries_partial_ranges = nothing
             this_dense_boundaries_partial_buffer_ranges = nothing
-            this_dense_boundaries_offsets = ind_type[]
+            this_dense_boundaries_offsets = zeros(ind_type, 0, 0)
             this_dense_boundaries_buffers = nothing
         end
 
@@ -2230,10 +2231,12 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                                     dense_boundaries_buffers)
                             for (col_ranges, col_buffer_ranges, col_offset) ∈ zip(partial_ranges, partial_buffer_ranges, offsets)
                                 for (row_ranges, row_offset) ∈ zip(ranges, offsets)
-                                    for (cr, cbr) ∈ zip(col_ranges, col_buffer_ranges), rr ∈ row_ranges
+                                    for (count, (cr, cbr, rr)) ∈ enumerate(zip(col_ranges,
+                                                                               col_buffer_ranges,
+                                                                               row_ranges))
                                         for (j, buffer_j) ∈ zip(cr, cbr .+ col_offset)
                                             for (i, buffer_i) ∈ zip(rr, row_offset+1:row_offset+length(rr))
-                                                this_A[i,j] += buffer[buffer_i,buffer_j]
+                                                this_A[i,j] += buffer[buffer_i,buffer_j,count]
                                             end
                                         end
                                     end
@@ -2275,7 +2278,9 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                                     colptr = var_A.colptr
                                     rowval = var_A.rowval
                                     nzval = var_A.nzval
-                                    for (cr, cbr) ∈ zip(col_ranges, col_buffer_ranges), rr ∈ row_ranges
+                                    for (count, (cr, cbr, rr)) ∈ enumerate(zip(col_ranges,
+                                                                               col_buffer_ranges,
+                                                                               row_ranges))
                                         row_start = first(rr)
                                         row_end = last(rr)
                                         for (j, buffer_j) ∈ zip(cr, cbr .+ col_offset)
@@ -2288,7 +2293,7 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                                                     break
                                                 end
                                                 buffer_i = i - row_start + 1 + row_offset
-                                                buffer[buffer_i,buffer_j] = nzval[flat_i]
+                                                buffer[buffer_i,buffer_j,count] = nzval[flat_i]
                                             end
                                         end
                                     end
