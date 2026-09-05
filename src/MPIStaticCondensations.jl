@@ -1855,18 +1855,18 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
             this_dense_boundaries_offsets = dense_boundaries_offsets
             this_dense_boundaries_buffers = dense_boundaries_buffers
 
-            local_inds = [li.local_bottom_vector_indices for li ∈ level_info_list[level-1]]
+            global_inds = [li.bottom_vector_indices for li ∈ level_info_list[level-1]]
             offsets = [li.local_offset for li ∈ this_level_info]
             # Need to get ranges within this, last level's (dense) matrix.
             # Indices of points in dense boundaries are always still present in the
             # indices at the bottom level, so don't need to check whether indices are
             # present.
             this_dense_boundaries_ranges =
-                [[searchsortedfirst(li,first(r))+offset:searchsortedfirst(li,last(r))+offset for r ∈ dbr]
-                 for (dbr, li, offset) ∈ zip(dense_boundaries_ranges, local_inds, offsets)]
+                [[searchsortedfirst(gi,first(r))+offset:searchsortedfirst(gi,last(r))+offset for r ∈ dbr]
+                 for (dbr, gi, offset) ∈ zip(dense_boundaries_ranges, global_inds, offsets)]
             this_dense_boundaries_partial_ranges =
-                [[searchsortedfirst(li,first(r))+offset:searchsortedfirst(li,last(r))+offset for r ∈ dbr]
-                 for (dbr, li, offset) ∈ zip(dense_boundaries_partial_ranges, local_inds, offsets)]
+                [[searchsortedfirst(gi,first(r))+offset:searchsortedfirst(gi,last(r))+offset for r ∈ dbr]
+                 for (dbr, gi, offset) ∈ zip(dense_boundaries_partial_ranges, global_inds, offsets)]
             this_dense_boundaries_partial_buffer_ranges = dense_boundaries_partial_buffer_ranges
         else
             this_dense_boundaries_ranges = nothing

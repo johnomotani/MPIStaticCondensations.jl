@@ -239,21 +239,21 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                     for (vrow, row_ranges) ∈ zip(1:Nvar, ranges)
                         sc_matrix_variable_block = sc_matrix[vrow][vcol]
                         colptr = sc_matrix_variable_block.colptr
-                        rowval = sc_matrix_variable_block.rowval
+                        rowval_list = sc_matrix_variable_block.rowval_list
                         nzval = sc_matrix_variable_block.nzval
                         for cr ∈ col_ranges, rr ∈ row_ranges
                             row_start = first(rr)
                             row_end = last(rr)
                             for j ∈ cr
                                 col_start = colptr[j]
-                                col_end = colptr[j+1] - 1
-                                first_flat_i = searchsortedfirst(@view(rowval[col_start:col_end]), row_start) + col_start - 1
-                                for flat_i ∈ first_flat_i:col_end
-                                    i = rowval[flat_i]
+                                rv = rowval_list[j]
+                                first_row_i = searchsortedfirst(rv, row_start)
+                                for row_i ∈ first_row_i:length(rv)
+                                    i = rv[row_i]
                                     if i > row_end
                                         break
                                     end
-                                    nzval[flat_i] = 0.0
+                                    nzval[row_i+col_start-1] = 0.0
                                 end
                             end
                         end
