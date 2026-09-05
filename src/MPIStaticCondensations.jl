@@ -1255,7 +1255,7 @@ function get_dense_boundaries_ranges(idim, ivar, dimensions, variable_dimensions
     end
     dense_dim = dimensions[idim]
     dense_dim_n = dense_dim.n
-    vdims = variable_dimensions[idim]
+    vdims = variable_dimensions[ivar]
     this_var_idim = searchsortedfirst(vdims, idim)
     nb = prod(d.n for d ∈ dimensions[vdims[1:idim-1]]; init=1)
     if idim ∈ vdims
