@@ -1,11 +1,16 @@
-struct BlockS{Nvar,Ti,Tm,Trange}
+struct BlockS{Nvar,Ti,Tm,Trange,Tdbr,Tsync}
     matrix::NTuple{Nvar,NTuple{Nvar,Tm}}
     indices::NTuple{Nvar,Trange}
     column_ranges_partial::NTuple{Nvar,UnitRange{Ti}}
+    dense_boundaries_ranges::Tdbr
+    dense_boundaries_partial_ranges::Tdbr
+    synchronize_shared::Tsync
 
     function BlockS(matrix::NTuple{Nvar,NTuple{Nvar,Tm}},
                     local_bottom_vector_indices::NTuple{Nvar,Tind}, shared_comm,
-                    allocate_shared_float::F) where {Nvar,Tm,Tind,F}
+                    full_dense_boundaries_ranges, full_dense_boundaries_partial_ranges,
+                    allocate_shared_float::F,
+                    synchronize_shared::Tsync) where {Nvar,Tm,Tind,F,Tsync}
         Ti = eltype(local_bottom_vector_indices[1])
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -22,21 +27,39 @@ struct BlockS{Nvar,Ti,Tm,Trange}
                                      for nrow ∈ n_flat)
         end
 
-        return new{Nvar,Ti,Tm,Tind}(
-                   matrix, local_bottom_vector_indices, column_ranges_partial)
+        if full_dense_boundaries_ranges !== nothing
+            dense_boundaries_ranges =
+                [[searchsortedfirst(li,first(r)):searchsortedfirst(li,last(r)) for r ∈ dbr]
+                 for (dbr, li) ∈ zip(full_dense_boundaries_ranges, local_bottom_vector_indices)]
+            dense_boundaries_partial_ranges =
+                [[searchsortedfirst(li,first(r)):searchsortedfirst(li,last(r)) for r ∈ dbr]
+                 for (dbr, li) ∈ zip(full_dense_boundaries_partial_ranges, local_bottom_vector_indices)]
+        else
+            dense_boundaries_ranges = nothing
+            dense_boundaries_partial_ranges = nothing
+        end
+
+        return new{Nvar,Ti,Tm,Tind,typeof(dense_boundaries_ranges),Tsync}(
+                   matrix, local_bottom_vector_indices, column_ranges_partial,
+                   dense_boundaries_ranges, dense_boundaries_partial_ranges,
+                   synchronize_shared)
     end
 end
 
-struct BlockDenseS{Nvar,Ti,Tm,Tind}
+struct BlockDenseS{Nvar,Ti,Tm,Tind,Tdbr,Tsync}
     matrix::Tm
     indices::NTuple{Nvar,Tind}
     ranges::NTuple{Nvar,UnitRange{Ti}}
     partial_indices::NTuple{Nvar,Tind}
     partial_ranges::NTuple{Nvar,UnitRange{Ti}}
+    dense_boundaries_ranges::Tdbr
+    dense_boundaries_partial_ranges::Tdbr
+    synchronize_shared::Tsync
 
     function BlockDenseS(matrix::Tm, local_bottom_vector_indices::NTuple{Nvar,Tind},
-                         shared_comm,
-                         allocate_shared_float::F) where {Nvar,Tm<:AbstractMatrix,Tind,F}
+                         shared_comm, full_dense_boundaries_ranges,
+                         full_dense_boundaries_partial_ranges, allocate_shared_float::F,
+                         synchronize_shared::Tsync) where {Nvar,Tm<:AbstractMatrix,Tind,F,Tsync}
         Ti = eltype(local_bottom_vector_indices[1])
         shared_comm_size = MPI.Comm_size(shared_comm)
         shared_comm_rank = MPI.Comm_rank(shared_comm)
@@ -53,9 +76,24 @@ struct BlockDenseS{Nvar,Ti,Tm,Tind}
         partial_indices = Tuple(inds[pr] for (inds, pr) ∈ zip(local_bottom_vector_indices,
                                                               partial_ranges_without_offset))
 
-        return new{Nvar,Ti,Tm,Tind}(
+        if full_dense_boundaries_ranges !== nothing
+            dense_boundaries_ranges =
+                [[searchsortedfirst(li,first(r))+offset:searchsortedfirst(li,last(r))+offset for r ∈ dbr]
+                 for (dbr, li, offset) ∈ zip(full_dense_boundaries_ranges,
+                                           local_bottom_vector_indices, block_range_offsets)]
+            dense_boundaries_partial_ranges =
+                [[searchsortedfirst(li,first(r))+offset:searchsortedfirst(li,last(r))+offset for r ∈ dbr]
+                 for (dbr, li, offset) ∈ zip(full_dense_boundaries_partial_ranges,
+                                           local_bottom_vector_indices, block_range_offsets)]
+        else
+            dense_boundaries_ranges = nothing
+            dense_boundaries_partial_ranges = nothing
+        end
+
+        return new{Nvar,Ti,Tm,Tind,typeof(dense_boundaries_ranges),Tsync}(
                    matrix, local_bottom_vector_indices, ranges, partial_indices,
-                   partial_ranges)
+                   partial_ranges, dense_boundaries_ranges,
+                   dense_boundaries_partial_ranges, synchronize_shared)
     end
 end
 
@@ -182,6 +220,47 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
                       * "($(typeof(sc_matrix_variable_block))).")
             end
         end
+
+        dense_boundaries_ranges = schur_complement.dense_boundaries_ranges
+        if dense_boundaries_ranges !== nothing
+            # 'Dense boundaries' entries are already stored in another buffer, so
+            # need to zero them out here. As the entries to be handled are those
+            # where both row and column are within the 'dense boundary' (and those
+            # are not all of the entries in a given row/column) it is not possible
+            # to skip the entries by modifying the `indices` (modifying `indices`
+            # would skip entries where either row or column is within the skipped
+            # range). It is simpler (possibly even more efficient?) to zero out
+            # the 'dense boundaries' entries here.
+            schur_complement.synchronize_shared()
+            for (ranges, partial_ranges) ∈
+                    zip(eachcol(dense_boundaries_ranges),
+                        eachcol(schur_complement.dense_boundaries_partial_ranges))
+                for (vcol, col_ranges) ∈ zip(1:Nvar, partial_ranges)
+                    for (vrow, row_ranges) ∈ zip(1:Nvar, ranges)
+                        sc_matrix_variable_block = sc_matrix[vrow][vcol]
+                        colptr = sc_matrix_variable_block.colptr
+                        rowval_list = sc_matrix_variable_block.rowval_list
+                        nzval = sc_matrix_variable_block.nzval
+                        for cr ∈ col_ranges, rr ∈ row_ranges
+                            row_start = first(rr)
+                            row_end = last(rr)
+                            for j ∈ cr
+                                col_start = colptr[j]
+                                rv = rowval_list[j]
+                                first_row_i = searchsortedfirst(rv, row_start)
+                                for row_i ∈ first_row_i:length(rv)
+                                    i = rv[row_i]
+                                    if i > row_end
+                                        break
+                                    end
+                                    nzval[row_i+col_start-1] = 0.0
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
         return nothing
     end
 end
@@ -274,6 +353,28 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
                 end
             else
                 error("Unsupported type '$(typeof(A_variable_block))' for `A_variable_block`.")
+            end
+        end
+
+        dense_boundaries_ranges = schur_complement.dense_boundaries_ranges
+        if dense_boundaries_ranges !== nothing
+            # 'Dense boundaries' entries are already stored in another buffer, so
+            # need to zero them out here. As the entries to be handled are those
+            # where both row and column are within the 'dense boundary' (and those
+            # are not all of the entries in a given row/column) it is not possible
+            # to skip the entries by modifying the `indices` (modifying `indices`
+            # would skip entries where either row or column is within the skipped
+            # range). It is simpler (possibly even more efficient?) to zero out
+            # the 'dense boundaries' entries here.
+            schur_complement.synchronize_shared()
+            for (ranges, partial_ranges) ∈
+                    zip(eachcol(dense_boundaries_ranges),
+                        eachcol(schur_complement.dense_boundaries_partial_ranges))
+                for col_ranges ∈ partial_ranges, row_ranges ∈ ranges
+                    for cr ∈ col_ranges, rr ∈ row_ranges
+                        sc_matrix[rr,cr] .= 0.0
+                    end
+                end
             end
         end
         return nothing

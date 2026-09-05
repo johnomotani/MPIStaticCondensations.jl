@@ -62,6 +62,17 @@ function test_multivariable_matrix(
         cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
         return nothing
     end
+    if mumps_fill_in_threshold < 1.0 && any(d.dense_boundaries for d ∈ dimensions)
+        @test_throws "MPIStaticCondensationMUMPS does not currently support dense_boundaries." begin
+            mpi_static_condensation(dimensions; variable_dimensions,
+                                    block_sizes_heuristic, reduce_proc_count_with_blocks,
+                                    sparse_C_blocks, mumps_fill_in_threshold, comm,
+                                    distributed_comm, shared_comm, allocate_shared_float,
+                                    allocate_shared_int, check_lu=true)
+        end
+        cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
+        return nothing
+    end
     Alu = mpi_static_condensation(dimensions; variable_dimensions, block_sizes_heuristic,
                                   reduce_proc_count_with_blocks, sparse_C_blocks,
                                   mumps_fill_in_threshold, comm, distributed_comm,

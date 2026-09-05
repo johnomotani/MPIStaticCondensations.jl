@@ -27,33 +27,39 @@ struct BenchmarkParams{Tvdims<:Tuple}
     variable_dimensions::Tvdims
     stencil_matrix::Union{Matrix{String},Nothing}
     sparse_stencils::Bool
+    dense_boundaries_list::Vector{Bool}
     periodic_list::Vector{Bool}
-    remove_boundaries_list::Vector{Bool}
+    remove_boundaries_list::Vector{Union{Bool,Nothing}}
     sparse_C_blocks::Bool
     mumps_fill_in_threshold::Float64
     block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}}}
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
                              variable_dimensions=(nothing,), stencil_matrix=nothing,
-                             periodic_list=nothing, remove_boundaries_list=nothing,
-                             sparse_C_blocks=false, mumps_fill_in_threshold=1.0,
+                             dense_boundaries_list=nothing, periodic_list=nothing,
+                             remove_boundaries_list=nothing, sparse_C_blocks=false,
+                             mumps_fill_in_threshold=1.0,
                              block_sizes_heuristic=MPIStaticCondensations.FastSlow())
         n = length(nelement_list)
+        if dense_boundaries_list === nothing
+            dense_boundaries_list = fill(false, n)
+        end
         if periodic_list === nothing
             periodic_list = fill(false, n)
         end
         if remove_boundaries_list === nothing
-            remove_boundaries_list = fill(false, n)
+            remove_boundaries_list = fill(nothing, n)
         end
 
-        if !(length(nelement_list) == length(ngrid_list) == length(periodic_list) == length(remove_boundaries_list))
+        if !(length(nelement_list) == length(ngrid_list) == length(dense_boundaries_list) == length(periodic_list) == length(remove_boundaries_list))
             error("length of all parameter lists must be the same")
         end
 
         return new{typeof(variable_dimensions)}(
                    nelement_list, ngrid_list, variable_dimensions, stencil_matrix,
-                   sparse_stencils, periodic_list, remove_boundaries_list,
-                   sparse_C_blocks, mumps_fill_in_threshold, block_sizes_heuristic)
+                   sparse_stencils, dense_boundaries_list, periodic_list,
+                   remove_boundaries_list, sparse_C_blocks, mumps_fill_in_threshold,
+                   block_sizes_heuristic)
     end
 end
 
@@ -176,12 +182,12 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
     end
     nrank_list[end] = distributed_nproc
     irank_list = get_iranks(nrank_list, distributed_rank)
-    dimensions = [create_dimension(; name="d$i", nelement, ngrid, nrank, irank, periodic,
-                                   remove_boundaries)
-                  for (i, (nelement, ngrid, irank, nrank, periodic, remove_boundaries))
+    dimensions = [create_dimension(; name="d$i", nelement, ngrid, nrank, irank,
+                                   dense_boundaries, periodic, remove_boundaries)
+                  for (i, (nelement, ngrid, irank, nrank, dense_boundaries, periodic, remove_boundaries))
                   ∈ enumerate(zip(params.nelement_list, params.ngrid_list, irank_list,
-                                  nrank_list, params.periodic_list,
-                                  params.remove_boundaries_list))]
+                                  nrank_list, params.dense_boundaries_list,
+                                  params.periodic_list, params.remove_boundaries_list))]
 
     # First run ensures solver is compiled for these parameters. Do not save these timings
     # as we do not want to measure compilation time.
@@ -283,7 +289,7 @@ function run_benchmark(run_solver::T, params, seed, label, n_shared, use_shared,
                 end
             end
             open(joinpath(run_dir, "benchmarks_$label.txt"), "a") do io
-                println(io, "$nproc $ns $ndim $total_size $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list)) $(params.sparse_C_blocks) $(params.mumps_fill_in_threshold) $(vec2string(params.block_sizes_heuristic))")
+                println(io, "$nproc $ns $ndim $total_size $mean_setup $mean_lu $mean_solve $(vec2string(params.nelement_list)) $(vec2string(params.ngrid_list)) $(vec2string(params.dense_boundaries_list)) $(vec2string(params.periodic_list)) $(vec2string(params.remove_boundaries_list)) $(params.sparse_C_blocks) $(params.mumps_fill_in_threshold) $(vec2string(params.block_sizes_heuristic))")
             end
         end
     end
