@@ -1424,6 +1424,9 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         if any(d.periodic for d ∈ dimensions)
             error("MPIStaticCondensationMUMPS does not currently support periodicity.")
         end
+        if any(d.dense_boundaries for d ∈ dimensions)
+            error("MPIStaticCondensationMUMPS does not currently support dense_boundaries.")
+        end
     end
 
     nd = length(dimensions)
