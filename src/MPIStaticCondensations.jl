@@ -2228,11 +2228,13 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                                     eachcol(solver.dense_boundaries_partial_buffer_ranges),
                                     solver.dense_boundaries_offsets,
                                     dense_boundaries_buffers)
-                            for (col_range, col_buffer_range, col_offset) ∈ zip(partial_ranges, partial_buffer_ranges, offsets)
-                                for (row_range, row_offset) ∈ zip(ranges, offsets)
-                                    for (j, buffer_j) ∈ zip(col_range, col_buffer_range .+ col_offset)
-                                        for (i, buffer_i) ∈ zip(row_range, row_offset+1:row_offset+length(row_range))
-                                            this_A[i,j] += buffer[buffer_i,buffer_j]
+                            for (col_ranges, col_buffer_ranges, col_offset) ∈ zip(partial_ranges, partial_buffer_ranges, offsets)
+                                for (row_ranges, row_offset) ∈ zip(ranges, offsets)
+                                    for (cr, cbr) ∈ zip(col_ranges, col_buffer_ranges), rr ∈ row_ranges
+                                        for (j, buffer_j) ∈ zip(cr, cbr .+ col_offset)
+                                            for (i, buffer_i) ∈ zip(rr, row_offset+1:row_offset+length(rr))
+                                                this_A[i,j] += buffer[buffer_i,buffer_j]
+                                            end
                                         end
                                     end
                                 end
@@ -2267,25 +2269,27 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
                                     eachcol(solver.dense_boundaries_partial_buffer_ranges),
                                     solver.dense_boundaries_offsets,
                                     solver.dense_boundaries_buffers)
-                            for (jvar, col_range, col_buffer_range, col_offset) ∈ zip(1:Nvar, partial_ranges, partial_buffer_ranges, offsets)
-                                for (ivar, row_range, row_offset) ∈ zip(1:Nvar, ranges, offsets)
+                            for (jvar, col_ranges, col_buffer_ranges, col_offset) ∈ zip(1:Nvar, partial_ranges, partial_buffer_ranges, offsets)
+                                for (ivar, row_ranges, row_offset) ∈ zip(1:Nvar, ranges, offsets)
                                     var_A = A[ivar][jvar]
                                     colptr = var_A.colptr
                                     rowval = var_A.rowval
                                     nzval = var_A.nzval
-                                    row_start = first(row_range)
-                                    row_end = last(row_range)
-                                    for (j, buffer_j) ∈ zip(col_range, col_buffer_range .+ col_offset)
-                                        col_start = colptr[j]
-                                        col_end = colptr[j+1] - 1
-                                        first_flat_i = searchsortedfirst(@view(rowval[col_start:col_end]), row_start) + col_start - 1
-                                        for flat_i ∈ first_flat_i:col_end
-                                            i = rowval[flat_i]
-                                            if i > row_end
-                                                break
+                                    for (cr, cbr) ∈ zip(col_ranges, col_buffer_ranges), rr ∈ row_ranges
+                                        row_start = first(rr)
+                                        row_end = last(rr)
+                                        for (j, buffer_j) ∈ zip(cr, cbr .+ col_offset)
+                                            col_start = colptr[j]
+                                            col_end = colptr[j+1] - 1
+                                            first_flat_i = searchsortedfirst(@view(rowval[col_start:col_end]), row_start) + col_start - 1
+                                            for flat_i ∈ first_flat_i:col_end
+                                                i = rowval[flat_i]
+                                                if i > row_end
+                                                    break
+                                                end
+                                                buffer_i = i - row_start + 1 + row_offset
+                                                buffer[buffer_i,buffer_j] = nzval[flat_i]
                                             end
-                                            buffer_i = i - row_start + 1 + row_offset
-                                            buffer[buffer_i,buffer_j] = nzval[flat_i]
                                         end
                                     end
                                 end

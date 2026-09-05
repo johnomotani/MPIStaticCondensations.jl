@@ -232,19 +232,19 @@ function add_D_to_schur_complement!(schur_complement::BlockS{Nvar},
             # range). It is simpler (possibly even more efficient?) to zero out
             # the 'dense boundaries' entries here.
             schur_complement.synchronize_shared()
-            @sc_timeit solver.timer "Remove dense boundaries entries from D" begin
-                for (ranges, partial_ranges) ∈
-                        zip(eachcol(dense_boundaries_ranges),
-                            eachcol(schur_complement.dense_boundaries_partial_ranges))
-                    for (vcol, col_range) ∈ zip(1:Nvar, partial_ranges)
-                        for (vrow, row_range) ∈ zip(1:Nvar, ranges)
-                            sc_matrix_variable_block = sc_matrix[vrow][vcol]
-                            colptr = sc_matrix_variable_block.colptr
-                            rowval = sc_matrix_variable_block.rowval
-                            nzval = sc_matrix_variable_block.nzval
-                            row_start = first(row_range)
-                            row_end = last(row_range)
-                            for j ∈ col_range
+            for (ranges, partial_ranges) ∈
+                    zip(eachcol(dense_boundaries_ranges),
+                        eachcol(schur_complement.dense_boundaries_partial_ranges))
+                for (vcol, col_ranges) ∈ zip(1:Nvar, partial_ranges)
+                    for (vrow, row_ranges) ∈ zip(1:Nvar, ranges)
+                        sc_matrix_variable_block = sc_matrix[vrow][vcol]
+                        colptr = sc_matrix_variable_block.colptr
+                        rowval = sc_matrix_variable_block.rowval
+                        nzval = sc_matrix_variable_block.nzval
+                        for cr ∈ col_ranges, rr ∈ row_ranges
+                            row_start = first(rr)
+                            row_end = last(rr)
+                            for j ∈ cr
                                 col_start = colptr[j]
                                 col_end = colptr[j+1] - 1
                                 first_flat_i = searchsortedfirst(@view(rowval[col_start:col_end]), row_start) + col_start - 1
@@ -367,12 +367,12 @@ function add_D_to_schur_complement!(schur_complement::BlockDenseS{Nvar},
             # range). It is simpler (possibly even more efficient?) to zero out
             # the 'dense boundaries' entries here.
             schur_complement.synchronize_shared()
-            @sc_timeit solver.timer "Remove dense boundaries entries from D" begin
-                for (ranges, partial_ranges) ∈
-                        zip(eachcol(dense_boundaries_ranges),
-                            eachcol(schur_complement.dense_boundaries_partial_ranges))
-                    for col_range ∈ partial_ranges, row_range ∈ ranges
-                        sc_matrix[row_range,col_range] .= 0.0
+            for (ranges, partial_ranges) ∈
+                    zip(eachcol(dense_boundaries_ranges),
+                        eachcol(schur_complement.dense_boundaries_partial_ranges))
+                for col_ranges ∈ partial_ranges, row_ranges ∈ ranges
+                    for cr ∈ col_ranges, rr ∈ row_ranges
+                        sc_matrix[rr,cr] .= 0.0
                     end
                 end
             end
