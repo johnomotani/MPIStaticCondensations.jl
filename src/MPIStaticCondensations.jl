@@ -1430,7 +1430,7 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  mumps_fill_in_threshold::Number=1.0,
                                  reduce_dense_boundaries_memory::Bool=true,
                                  comm::MPI.Comm=MPI.COMM_WORLD,
-                                 distributed_comm::Union{MPI.Comm,Nothing}=missing,
+                                 distributed_comm::Union{MPI.Comm,Nothing,Missing}=missing,
                                  shared_comm::MPI.Comm=MPI.COMM_SELF,
                                  allocate_shared_float::F1=nothing,
                                  allocate_shared_int::F2=nothing,
