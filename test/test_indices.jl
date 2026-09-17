@@ -15,7 +15,8 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
                         remove_boundaries_list, nrank_list, irank_list, n_shared, irank;
                         variable_dimensions=nothing,
                         dense_boundaries_list=fill(false, length(remove_boundaries_list)),
-                        global_offset=0, local_offset=0, local_bottom_vector_offset=0)
+                        global_offset=0, local_offset=0, local_bottom_vector_offset=0,
+                        local_bottom_vector_resolved_repeats_offset=0)
     total_nrank = prod(nrank_list) * n_shared
 
     if !isa(ngrid_list, AbstractVector)
@@ -68,6 +69,7 @@ function get_level_info(ngrid_list, nelement_list, block_sizes_list, periodic_li
         li = get_level_info_for_variable(dims, variable_dimensions, level_indices, bs,
                                          nblock, this_global_size, global_offset,
                                          local_offset, local_bottom_vector_offset,
+                                         local_bottom_vector_resolved_repeats_offset,
                                          level==1, level==n_levels, distributed_comm,
                                          shared_comm)
         push!(level_info, li)
@@ -99,9 +101,11 @@ function test_split_indices_1d_1proc_remove_boundaries()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [3]
+            @test li[1].global_size == 7
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].top_vector_offset_indices == [2, 4, 6]
             @test li[1].local_top_vector_indices == [2, 4, 6]
@@ -116,18 +120,27 @@ function test_split_indices_1d_1proc_remove_boundaries()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 5, 7]
+            @test li[1].bottom_vector_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5, 7]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:4
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 4
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
             @test li[2].top_vector_indices == [3]
             @test li[2].top_vector_offset_indices == [3]
             @test li[2].local_top_vector_indices == [2]
@@ -142,36 +155,52 @@ function test_split_indices_1d_1proc_remove_boundaries()
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
             @test li[2].bottom_vector_indices == [1, 5, 7]
+            @test li[2].bottom_vector_offset_indices == [1, 5, 7]
             @test li[2].local_bottom_vector_indices == [1, 3, 4]
+            @test li[2].local_bottom_vector_offset_indices == [1, 3, 4]
             @test li[2].local_bottom_vector_no_overlap_indices == [1, 3, 4]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1, 3, 4]
             @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].has_periodic === false
             @test li[3].block_sizes == [3]
             @test li[3].nblock == [1]
+            @test li[3].global_size == 3
             @test li[3].global_offset == 0
             @test li[3].local_offset == 0
             @test li[3].local_bottom_vector_offset == 0
-            @test li[3].top_vector_indices == [5]
-            @test li[3].top_vector_offset_indices == [5]
-            @test li[3].local_top_vector_indices == [2]
-            @test li[3].local_top_vector_offset_indices == [2]
+            @test li[3].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[3].top_vector_indices == []
+            @test li[3].top_vector_offset_indices == []
+            @test li[3].local_top_vector_indices == []
+            @test li[3].local_top_vector_offset_indices == []
             @test li[3].iblock_list == [1;;]
-            @test li[3].local_top_vector_a_block_indices == [[2]]
-            @test li[3].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[3].local_top_vector_a_block_indices == [[]]
+            @test li[3].local_top_vector_a_block_offset_indices == [[]]
             @test li[3].a_block_off_diagonal_indices == [[1, 3]]
-            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[1, 2]]
-            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2]]
+            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[1, 3]]
+            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 3]]
             @test li[3].n_subgroups == 1
             @test li[3].subgroup_i == 0
             @test li[3].subgroup_size == 1
-            @test li[3].bottom_vector_indices == [1, 7]
-            @test li[3].local_bottom_vector_indices == [1, 3]
-            @test li[3].local_bottom_vector_no_overlap_indices == [1, 3]
-            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[3].bottom_vector_indices == [1, 5, 7]
+            @test li[3].bottom_vector_offset_indices == [1, 5, 7]
+            @test li[3].local_bottom_vector_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_offset_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_no_overlap_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_no_overlap_offset_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[3].local_bottom_vector_repeat_indices == []
+            @test li[3].local_bottom_vector_repeat_offset_indices == []
             @test li[3].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -192,6 +221,7 @@ function test_split_indices_1d_1proc_check_offsets()
     global_offset = 100
     local_offset = 200
     local_bottom_vector_offset = 300
+    local_bottom_vector_resolved_repeats_offset = 400
 
     nelement_list = [3]
     periodic_list = [true]
@@ -210,13 +240,16 @@ function test_split_indices_1d_1proc_check_offsets()
             li, _ = get_level_info(ngrid, nelement_list, block_sizes_list, periodic_list,
                                    remove_boundaries_list, [nrank÷n_shared],
                                    [irank÷n_shared], n_shared, irank; global_offset,
-                                   local_offset, local_bottom_vector_offset)
+                                   local_offset, local_bottom_vector_offset,
+                                   local_bottom_vector_resolved_repeats_offset)
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [3]
+            @test li[1].global_size == 7
             @test li[1].global_offset == 100
             @test li[1].local_offset == 200
             @test li[1].local_bottom_vector_offset == 300
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 400
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].top_vector_offset_indices == [102, 104, 106]
             @test li[1].local_top_vector_indices == [2, 4, 6]
@@ -231,18 +264,27 @@ function test_split_indices_1d_1proc_check_offsets()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 5, 7]
+            @test li[1].bottom_vector_offset_indices == [101, 103, 105, 107]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7]
+            @test li[1].local_bottom_vector_offset_indices == [201, 203, 205, 207]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [201, 203, 205]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 301:303
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 401:403
             @test li[1].local_bottom_vector_repeat_indices == [4]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [304]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 4
             @test li[2].global_offset == 100
             @test li[2].local_offset == 200
             @test li[2].local_bottom_vector_offset == 300
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 400
             @test li[2].top_vector_indices == [3]
             @test li[2].top_vector_offset_indices == [103]
             @test li[2].local_top_vector_indices == [2]
@@ -257,36 +299,52 @@ function test_split_indices_1d_1proc_check_offsets()
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
             @test li[2].bottom_vector_indices == [1, 5, 7]
+            @test li[2].bottom_vector_offset_indices == [101, 105, 107]
             @test li[2].local_bottom_vector_indices == [1, 3, 4]
+            @test li[2].local_bottom_vector_offset_indices == [201, 203, 204]
             @test li[2].local_bottom_vector_no_overlap_indices == [1, 3, 4]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [201, 203, 204]
             @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 301:303
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 401:403
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].has_periodic === true
             @test li[3].block_sizes == [3]
             @test li[3].nblock == [1]
+            @test li[3].global_size == 3
             @test li[3].global_offset == 100
             @test li[3].local_offset == 200
             @test li[3].local_bottom_vector_offset == 300
-            @test li[3].top_vector_indices == [5]
-            @test li[3].top_vector_offset_indices == [105]
-            @test li[3].local_top_vector_indices == [2]
-            @test li[3].local_top_vector_offset_indices == [202]
+            @test li[3].local_bottom_vector_resolved_repeats_offset == 400
+            @test li[3].top_vector_indices == []
+            @test li[3].top_vector_offset_indices == []
+            @test li[3].local_top_vector_indices == []
+            @test li[3].local_top_vector_offset_indices == []
             @test li[3].iblock_list == [1;;]
-            @test li[3].local_top_vector_a_block_indices == [[2]]
-            @test li[3].local_top_vector_a_block_offset_indices == [[202]]
+            @test li[3].local_top_vector_a_block_indices == [[]]
+            @test li[3].local_top_vector_a_block_offset_indices == [[]]
             @test li[3].a_block_off_diagonal_indices == [[1]]
             @test li[3].a_block_off_diagonal_bottom_vector_indices == [[1]]
             @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[301]]
             @test li[3].n_subgroups == 1
             @test li[3].subgroup_i == 0
             @test li[3].subgroup_size == 1
-            @test li[3].bottom_vector_indices == [1, 1]
-            @test li[3].local_bottom_vector_indices == [1, 3]
-            @test li[3].local_bottom_vector_no_overlap_indices == [1]
-            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[3].bottom_vector_indices == [1, 5, 1]
+            @test li[3].bottom_vector_offset_indices == [101, 105, 101]
+            @test li[3].local_bottom_vector_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_offset_indices == [201, 202, 203]
+            @test li[3].local_bottom_vector_no_overlap_indices == [1, 2]
+            @test li[3].local_bottom_vector_no_overlap_offset_indices == [201, 202]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_offset_indices == [301, 302]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_indices == [1, 2]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [401, 402]
             @test li[3].local_bottom_vector_repeat_indices == []
+            @test li[3].local_bottom_vector_repeat_offset_indices == []
             @test li[3].local_bottom_vector_periodic_pairs == [1; 3;;]
             @test li[3].local_bottom_vector_offset_periodic_pairs == [301; 203;;]
         end
@@ -316,29 +374,38 @@ function test_split_indices_1d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [1]
+            @test li[1].global_size == 3
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
-            @test li[1].top_vector_indices == [2]
-            @test li[1].top_vector_offset_indices == [2]
-            @test li[1].local_top_vector_indices == [2]
-            @test li[1].local_top_vector_offset_indices == [2]
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[1].top_vector_indices == []
+            @test li[1].top_vector_offset_indices == []
+            @test li[1].local_top_vector_indices == []
+            @test li[1].local_top_vector_offset_indices == []
             @test li[1].iblock_list == [1;;]
-            @test li[1].local_top_vector_a_block_indices == [[2]]
-            @test li[1].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[1].local_top_vector_a_block_indices == [[]]
+            @test li[1].local_top_vector_a_block_offset_indices == [[]]
             @test li[1].a_block_off_diagonal_indices == [[1]]
             @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1]]
             @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
             @test li[1].n_subgroups == 1
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
-            @test li[1].bottom_vector_indices == [1, 1]
-            @test li[1].local_bottom_vector_indices == [1, 3]
-            @test li[1].local_bottom_vector_no_overlap_indices == [1]
-            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1]
-            @test li[1].local_bottom_vector_repeat_indices == [2]
-            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
-            @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[1].bottom_vector_indices == [1, 2, 1]
+            @test li[1].bottom_vector_offset_indices == [1, 2, 1]
+            @test li[1].local_bottom_vector_indices == [1, 2, 3]
+            @test li[1].local_bottom_vector_offset_indices == [1, 2, 3]
+            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 2]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2]
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == [1, 2]
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1, 2]
+            @test li[1].local_bottom_vector_repeat_indices == [3]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [3]
+            @test li[1].local_bottom_vector_periodic_pairs == [1; 3;;]
+            @test li[1].local_bottom_vector_offset_periodic_pairs == [1; 3;;]
         end
     end
 
@@ -362,9 +429,11 @@ function test_split_indices_1d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [3]
+            @test li[1].global_size == 7
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [2, 4, 6]
             @test li[1].top_vector_offset_indices == [2, 4, 6]
             @test li[1].local_top_vector_indices == [2, 4, 6]
@@ -379,18 +448,27 @@ function test_split_indices_1d_1proc_periodic()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 5, 7]
+            @test li[1].bottom_vector_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3, 5]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == [4]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [4]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 4
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
             @test li[2].top_vector_indices == [3]
             @test li[2].top_vector_offset_indices == [3]
             @test li[2].local_top_vector_indices == [2]
@@ -405,36 +483,52 @@ function test_split_indices_1d_1proc_periodic()
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
             @test li[2].bottom_vector_indices == [1, 5, 7]
+            @test li[2].bottom_vector_offset_indices == [1, 5, 7]
             @test li[2].local_bottom_vector_indices == [1, 3, 4]
+            @test li[2].local_bottom_vector_offset_indices == [1, 3, 4]
             @test li[2].local_bottom_vector_no_overlap_indices == [1, 3, 4]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1, 3, 4]
             @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].has_periodic === true
             @test li[3].block_sizes == [3]
             @test li[3].nblock == [1]
+            @test li[3].global_size == 3
             @test li[3].global_offset == 0
             @test li[3].local_offset == 0
             @test li[3].local_bottom_vector_offset == 0
-            @test li[3].top_vector_indices == [5]
-            @test li[3].top_vector_offset_indices == [5]
-            @test li[3].local_top_vector_indices == [2]
-            @test li[3].local_top_vector_offset_indices == [2]
+            @test li[3].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[3].top_vector_indices == []
+            @test li[3].top_vector_offset_indices == []
+            @test li[3].local_top_vector_indices == []
+            @test li[3].local_top_vector_offset_indices == []
             @test li[3].iblock_list == [1;;]
-            @test li[3].local_top_vector_a_block_indices == [[2]]
-            @test li[3].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[3].local_top_vector_a_block_indices == [[]]
+            @test li[3].local_top_vector_a_block_offset_indices == [[]]
             @test li[3].a_block_off_diagonal_indices == [[1]]
             @test li[3].a_block_off_diagonal_bottom_vector_indices == [[1]]
             @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
             @test li[3].n_subgroups == 1
             @test li[3].subgroup_i == 0
             @test li[3].subgroup_size == 1
-            @test li[3].bottom_vector_indices == [1, 1]
-            @test li[3].local_bottom_vector_indices == [1, 3]
-            @test li[3].local_bottom_vector_no_overlap_indices == [1]
-            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[3].bottom_vector_indices == [1, 5, 1]
+            @test li[3].bottom_vector_offset_indices == [1, 5, 1]
+            @test li[3].local_bottom_vector_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_offset_indices == [1, 2, 3]
+            @test li[3].local_bottom_vector_no_overlap_indices == [1, 2]
+            @test li[3].local_bottom_vector_no_overlap_offset_indices == [1, 2]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_indices == [1, 2]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1, 2]
             @test li[3].local_bottom_vector_repeat_indices == []
+            @test li[3].local_bottom_vector_repeat_offset_indices == []
             @test li[3].local_bottom_vector_periodic_pairs == [1; 3;;]
             @test li[3].local_bottom_vector_offset_periodic_pairs == [1; 3;;]
         end
@@ -465,9 +559,11 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == block_sizes_list[1]
             @test li[1].nblock == [4, 1]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6, 8:9)
@@ -482,18 +578,27 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 5, 7]
+            @test li[1].bottom_vector_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_indices == [3, 5, 7]
+            @test li[1].local_bottom_vector_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 5, 7]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == block_sizes_list[2]
             @test li[2].nblock == [2, 1]
+            @test li[2].global_size == 3
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
             @test li[2].top_vector_indices == [3, 7]
             @test li[2].top_vector_offset_indices == [3, 7]
             @test li[2].local_top_vector_indices == [1, 3]
@@ -508,36 +613,52 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
             @test li[2].bottom_vector_indices == [5]
+            @test li[2].bottom_vector_offset_indices == [5]
             @test li[2].local_bottom_vector_indices == [2]
+            @test li[2].local_bottom_vector_offset_indices == [2]
             @test li[2].local_bottom_vector_no_overlap_indices == [2]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [2]
             @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].has_periodic === false
             @test li[3].block_sizes == block_sizes_list[3]
             @test li[3].nblock == [1, 1]
+            @test li[3].global_size == 1
             @test li[3].global_offset == 0
             @test li[3].local_offset == 0
             @test li[3].local_bottom_vector_offset == 0
-            @test li[3].top_vector_indices == [5]
-            @test li[3].top_vector_offset_indices == [5]
-            @test li[3].local_top_vector_indices == [1]
-            @test li[3].local_top_vector_offset_indices == [1]
+            @test li[3].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[3].top_vector_indices == []
+            @test li[3].top_vector_offset_indices == []
+            @test li[3].local_top_vector_indices == []
+            @test li[3].local_top_vector_offset_indices == []
             @test li[3].iblock_list == [1; 1;;]
-            @test li[3].local_top_vector_a_block_indices == [[1]]
-            @test li[3].local_top_vector_a_block_offset_indices == [[1]]
-            @test li[3].a_block_off_diagonal_indices == [[]]
-            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[]]
-            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
+            @test li[3].local_top_vector_a_block_indices == [[]]
+            @test li[3].local_top_vector_a_block_offset_indices == [[]]
+            @test li[3].a_block_off_diagonal_indices == [[1]]
+            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[1]]
+            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
             @test li[3].n_subgroups == 1
             @test li[3].subgroup_i == 0
             @test li[3].subgroup_size == 1
-            @test li[3].bottom_vector_indices == []
-            @test li[3].local_bottom_vector_indices == []
-            @test li[3].local_bottom_vector_no_overlap_indices == []
-            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[3].bottom_vector_indices == [5]
+            @test li[3].bottom_vector_offset_indices == [5]
+            @test li[3].local_bottom_vector_indices == [1]
+            @test li[3].local_bottom_vector_offset_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_offset_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[3].local_bottom_vector_repeat_indices == []
+            @test li[3].local_bottom_vector_repeat_offset_indices == []
             @test li[3].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -554,9 +675,11 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == block_sizes_list[1]
             @test li[1].nblock == [4, 2]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == []
             @test li[1].top_vector_offset_indices == []
             @test li[1].local_top_vector_indices == []
@@ -571,18 +694,27 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == 1:9
+            @test li[1].bottom_vector_offset_indices == 1:9
             @test li[1].local_bottom_vector_indices == 1:9
+            @test li[1].local_bottom_vector_offset_indices == 1:9
             @test li[1].local_bottom_vector_no_overlap_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == 1:9
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:9
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:9
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:9
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == block_sizes_list[2]
             @test li[2].nblock == [2, 1]
+            @test li[2].global_size == 9
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
             @test li[2].top_vector_indices == vcat(1:4, 6:9)
             @test li[2].top_vector_offset_indices == vcat(1:4, 6:9)
             @test li[2].local_top_vector_indices == vcat(1:4, 6:9)
@@ -597,36 +729,52 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
             @test li[2].bottom_vector_indices == [5]
+            @test li[2].bottom_vector_offset_indices == [5]
             @test li[2].local_bottom_vector_indices == [5]
+            @test li[2].local_bottom_vector_offset_indices == [5]
             @test li[2].local_bottom_vector_no_overlap_indices == [5]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [5]
             @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].has_periodic === false
             @test li[3].block_sizes == block_sizes_list[3]
             @test li[3].nblock == [1, 1]
+            @test li[3].global_size == 1
             @test li[3].global_offset == 0
             @test li[3].local_offset == 0
             @test li[3].local_bottom_vector_offset == 0
-            @test li[3].top_vector_indices == [5]
-            @test li[3].top_vector_offset_indices == [5]
-            @test li[3].local_top_vector_indices == [1]
-            @test li[3].local_top_vector_offset_indices == [1]
+            @test li[3].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[3].top_vector_indices == []
+            @test li[3].top_vector_offset_indices == []
+            @test li[3].local_top_vector_indices == []
+            @test li[3].local_top_vector_offset_indices == []
             @test li[3].iblock_list == [1; 1;;]
-            @test li[3].local_top_vector_a_block_indices == [[1]]
-            @test li[3].local_top_vector_a_block_offset_indices == [[1]]
-            @test li[3].a_block_off_diagonal_indices == [[]]
-            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[]]
-            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
+            @test li[3].local_top_vector_a_block_indices == [[]]
+            @test li[3].local_top_vector_a_block_offset_indices == [[]]
+            @test li[3].a_block_off_diagonal_indices == [[1]]
+            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[1]]
+            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
             @test li[3].n_subgroups == 1
             @test li[3].subgroup_i == 0
             @test li[3].subgroup_size == 1
-            @test li[3].bottom_vector_indices == []
-            @test li[3].local_bottom_vector_indices == []
-            @test li[3].local_bottom_vector_no_overlap_indices == []
-            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[3].bottom_vector_indices == [5]
+            @test li[3].bottom_vector_offset_indices == [5]
+            @test li[3].local_bottom_vector_indices == [1]
+            @test li[3].local_bottom_vector_offset_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_offset_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[3].local_bottom_vector_repeat_indices == []
+            @test li[3].local_bottom_vector_repeat_offset_indices == []
             @test li[3].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -643,9 +791,11 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == block_sizes_list[1]
             @test li[1].nblock == [4, 2]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == []
             @test li[1].top_vector_offset_indices == []
             @test li[1].local_top_vector_indices == []
@@ -660,18 +810,27 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == 1:9
+            @test li[1].bottom_vector_offset_indices == 1:9
             @test li[1].local_bottom_vector_indices == 1:9
+            @test li[1].local_bottom_vector_offset_indices == 1:9
             @test li[1].local_bottom_vector_no_overlap_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == 1:9
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:9
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:9
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:9
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == block_sizes_list[2]
             @test li[2].nblock == [2, 2]
+            @test li[2].global_size == 9
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
             @test li[2].top_vector_indices == []
             @test li[2].top_vector_offset_indices == []
             @test li[2].local_top_vector_indices == []
@@ -686,36 +845,52 @@ function test_split_indices_1d_1proc_other_dims()
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
             @test li[2].bottom_vector_indices == 1:9
+            @test li[2].bottom_vector_offset_indices == 1:9
             @test li[2].local_bottom_vector_indices == 1:9
+            @test li[2].local_bottom_vector_offset_indices == 1:9
             @test li[2].local_bottom_vector_no_overlap_indices == 1:9
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:9
             @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:9
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:9
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:9
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:9
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].has_periodic === false
             @test li[3].block_sizes == block_sizes_list[3]
             @test li[3].nblock == [1, 1]
+            @test li[3].global_size == 9
             @test li[3].global_offset == 0
             @test li[3].local_offset == 0
             @test li[3].local_bottom_vector_offset == 0
-            @test li[3].top_vector_indices == 1:9
-            @test li[3].top_vector_offset_indices == 1:9
-            @test li[3].local_top_vector_indices == 1:9
-            @test li[3].local_top_vector_offset_indices == 1:9
+            @test li[3].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[3].top_vector_indices == []
+            @test li[3].top_vector_offset_indices == []
+            @test li[3].local_top_vector_indices == []
+            @test li[3].local_top_vector_offset_indices == []
             @test li[3].iblock_list == [1; 1;;]
-            @test li[3].local_top_vector_a_block_indices == [1:9]
-            @test li[3].local_top_vector_a_block_offset_indices == [1:9]
-            @test li[3].a_block_off_diagonal_indices == [[]]
-            @test li[3].a_block_off_diagonal_bottom_vector_indices == [[]]
-            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
+            @test li[3].local_top_vector_a_block_indices == [[]]
+            @test li[3].local_top_vector_a_block_offset_indices == [[]]
+            @test li[3].a_block_off_diagonal_indices == [1:9]
+            @test li[3].a_block_off_diagonal_bottom_vector_indices == [1:9]
+            @test li[3].a_block_off_diagonal_bottom_vector_offset_indices == [1:9]
             @test li[3].n_subgroups == 1
             @test li[3].subgroup_i == 0
             @test li[3].subgroup_size == 1
-            @test li[3].bottom_vector_indices == []
-            @test li[3].local_bottom_vector_indices == []
-            @test li[3].local_bottom_vector_no_overlap_indices == []
-            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[3].bottom_vector_indices == 1:9
+            @test li[3].bottom_vector_offset_indices == 1:9
+            @test li[3].local_bottom_vector_indices == 1:9
+            @test li[3].local_bottom_vector_offset_indices == 1:9
+            @test li[3].local_bottom_vector_no_overlap_indices == 1:9
+            @test li[3].local_bottom_vector_no_overlap_offset_indices == 1:9
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_indices == 1:9
+            @test li[3].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:9
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:9
+            @test li[3].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:9
             @test li[3].local_bottom_vector_repeat_indices == []
+            @test li[3].local_bottom_vector_repeat_offset_indices == []
             @test li[3].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[3].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -746,9 +921,11 @@ function test_split_indices_1d_2proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4)
             @test li[1].local_top_vector_indices == vcat(1:2, 4)
@@ -763,36 +940,52 @@ function test_split_indices_1d_2proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 5]
+            @test li[1].bottom_vector_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_indices == [3, 5]
+            @test li[1].local_bottom_vector_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 6
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[2]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [3, 5]
+            @test li[2].bottom_vector_offset_indices == [3, 5]
+            @test li[2].local_bottom_vector_indices == [1, 2]
+            @test li[2].local_bottom_vector_offset_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1, 2]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1, 2]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -805,9 +998,11 @@ function test_split_indices_1d_2proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(6, 8:9)
             @test li[1].top_vector_offset_indices == vcat(6, 8:9)
             @test li[1].local_top_vector_indices == vcat(2, 4:5)
@@ -822,36 +1017,52 @@ function test_split_indices_1d_2proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [5, 7]
+            @test li[1].bottom_vector_offset_indices == [5, 7]
             @test li[1].local_bottom_vector_indices == [1, 3]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 6
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [7]
-            @test li[2].top_vector_offset_indices == [7]
-            @test li[2].local_top_vector_indices == [2]
-            @test li[2].local_top_vector_offset_indices == [2]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[2]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[1]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [1]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [5, 7]
+            @test li[2].bottom_vector_offset_indices == [5, 7]
+            @test li[2].local_bottom_vector_indices == [1, 2]
+            @test li[2].local_bottom_vector_offset_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1, 2]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1, 2]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -869,9 +1080,11 @@ function test_split_indices_1d_2proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [4]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6, 8:9)
@@ -886,36 +1099,52 @@ function test_split_indices_1d_2proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 5, 7]
+            @test li[1].bottom_vector_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_indices == [3, 5, 7]
+            @test li[1].local_bottom_vector_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 5, 7]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 3
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3, 7]
-            @test li[2].top_vector_offset_indices == [3, 7]
-            @test li[2].local_top_vector_indices == [1, 3]
-            @test li[2].local_top_vector_offset_indices == [1, 3]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[2]]
             @test li[2].n_subgroups == 2
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [3, 5, 7]
+            @test li[2].bottom_vector_offset_indices == [3, 5, 7]
+            @test li[2].local_bottom_vector_indices == 1:3
+            @test li[2].local_bottom_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -928,9 +1157,11 @@ function test_split_indices_1d_2proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [4]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4, 6, 8:9)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6, 8:9)
@@ -945,36 +1176,52 @@ function test_split_indices_1d_2proc()
             @test li[1].subgroup_i == 1
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 5, 7]
+            @test li[1].bottom_vector_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_indices == [3, 5, 7]
+            @test li[1].local_bottom_vector_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 5, 7]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 3
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3, 7]
-            @test li[2].top_vector_offset_indices == [3, 7]
-            @test li[2].local_top_vector_indices == [1, 3]
-            @test li[2].local_top_vector_offset_indices == [1, 3]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [2;;]
-            @test li[2].local_top_vector_a_block_indices == [[3]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[3]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[2]]
             @test li[2].n_subgroups == 2
             @test li[2].subgroup_i == 1
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [3, 5, 7]
+            @test li[2].bottom_vector_offset_indices == [3, 5, 7]
+            @test li[2].local_bottom_vector_indices == 1:3
+            @test li[2].local_bottom_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1000,9 +1247,11 @@ function test_split_indices_1d_2proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [3]
+            @test li[1].global_size == 7
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4, 6:7)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4, 6:7)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6:7)
@@ -1017,36 +1266,52 @@ function test_split_indices_1d_2proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 5]
+            @test li[1].bottom_vector_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_indices == [3, 5]
+            @test li[1].local_bottom_vector_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 2
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[2]]
             @test li[2].n_subgroups == 2
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [3, 5]
+            @test li[2].bottom_vector_offset_indices == [3, 5]
+            @test li[2].local_bottom_vector_indices == 1:2
+            @test li[2].local_bottom_vector_offset_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1059,9 +1324,11 @@ function test_split_indices_1d_2proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [3]
+            @test li[1].global_size == 7
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4, 6:7)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4, 6:7)
             @test li[1].local_top_vector_indices == vcat(1:2, 4, 6:7)
@@ -1076,36 +1343,52 @@ function test_split_indices_1d_2proc()
             @test li[1].subgroup_i == 1
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 5]
+            @test li[1].bottom_vector_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_indices == [3, 5]
+            @test li[1].local_bottom_vector_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 5]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 2
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [2;;]
             @test li[2].local_top_vector_a_block_indices == [[]]
             @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[2]]
             @test li[2].n_subgroups == 2
             @test li[2].subgroup_i == 1
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5]
-            @test li[2].local_bottom_vector_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_indices == [2]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [3, 5]
+            @test li[2].bottom_vector_offset_indices == [3, 5]
+            @test li[2].local_bottom_vector_indices == 1:2
+            @test li[2].local_bottom_vector_offset_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1135,9 +1418,11 @@ function test_split_indices_1d_4proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 5
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
@@ -1152,36 +1437,52 @@ function test_split_indices_1d_4proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 2
             @test li[1].bottom_vector_indices == [3]
+            @test li[1].bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:1
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 1
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 4
-            @test li[2].bottom_vector_indices == []
-            @test li[2].local_bottom_vector_indices == []
-            @test li[2].local_bottom_vector_no_overlap_indices == []
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == [3]
+            @test li[2].bottom_vector_offset_indices == [3]
+            @test li[2].local_bottom_vector_indices == [1]
+            @test li[2].local_bottom_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1194,9 +1495,11 @@ function test_split_indices_1d_4proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 5
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
@@ -1211,36 +1514,52 @@ function test_split_indices_1d_4proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 2
             @test li[1].bottom_vector_indices == [3]
+            @test li[1].bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:1
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 1
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 4
-            @test li[2].bottom_vector_indices == []
-            @test li[2].local_bottom_vector_indices == []
-            @test li[2].local_bottom_vector_no_overlap_indices == []
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == [3]
+            @test li[2].bottom_vector_offset_indices == [3]
+            @test li[2].local_bottom_vector_indices == [1]
+            @test li[2].local_bottom_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1253,9 +1572,11 @@ function test_split_indices_1d_4proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 5
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
@@ -1270,36 +1591,52 @@ function test_split_indices_1d_4proc()
             @test li[1].subgroup_i == 1
             @test li[1].subgroup_size == 2
             @test li[1].bottom_vector_indices == [3]
+            @test li[1].bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:1
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 1
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 4
-            @test li[2].bottom_vector_indices == []
-            @test li[2].local_bottom_vector_indices == []
-            @test li[2].local_bottom_vector_no_overlap_indices == []
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == [3]
+            @test li[2].bottom_vector_offset_indices == [3]
+            @test li[2].local_bottom_vector_indices == [1]
+            @test li[2].local_bottom_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1312,9 +1649,11 @@ function test_split_indices_1d_4proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 5
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:2, 4:5)
             @test li[1].top_vector_offset_indices == vcat(1:2, 4:5)
             @test li[1].local_top_vector_indices == vcat(1:2, 4:5)
@@ -1329,36 +1668,52 @@ function test_split_indices_1d_4proc()
             @test li[1].subgroup_i == 1
             @test li[1].subgroup_size == 2
             @test li[1].bottom_vector_indices == [3]
+            @test li[1].bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_indices == [3]
+            @test li[1].local_bottom_vector_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_indices == [3]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:1
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:1
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 1
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [1]
-            @test li[2].local_top_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 4
-            @test li[2].bottom_vector_indices == []
-            @test li[2].local_bottom_vector_indices == []
-            @test li[2].local_bottom_vector_no_overlap_indices == []
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == [3]
+            @test li[2].bottom_vector_offset_indices == [3]
+            @test li[2].local_bottom_vector_indices == [1]
+            @test li[2].local_bottom_vector_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == [1]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == [1]
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1388,9 +1743,11 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [2, 4]
             @test li[1].top_vector_offset_indices == [2, 4]
             @test li[1].local_top_vector_indices == [2, 4]
@@ -1405,36 +1762,52 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 5]
+            @test li[1].bottom_vector_offset_indices == [1, 3, 5]
             @test li[1].local_bottom_vector_indices == [1, 3, 5]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 5]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3, 5]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === true
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 7
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3]
-            @test li[2].top_vector_offset_indices == [3]
-            @test li[2].local_top_vector_indices == [2]
-            @test li[2].local_top_vector_offset_indices == [2]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[2]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[1, 3]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 3]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 3]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [1, 5]
-            @test li[2].local_bottom_vector_indices == [1, 3]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1, 3]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[2].bottom_vector_indices == [1, 3, 5]
+            @test li[2].bottom_vector_offset_indices == [1, 3, 5]
+            @test li[2].local_bottom_vector_indices == 1:3
+            @test li[2].local_bottom_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == [-1; -1;;]
             @test li[2].local_bottom_vector_offset_periodic_pairs == [-1; -1;;]
         end
@@ -1447,9 +1820,11 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [2]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [6, 8]
             @test li[1].top_vector_offset_indices == [6, 8]
             @test li[1].local_top_vector_indices == [2, 4]
@@ -1464,36 +1839,52 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [5, 7, 9]
+            @test li[1].bottom_vector_offset_indices == [5, 7, 9]
             @test li[1].local_bottom_vector_indices == [1, 3, 5]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 5]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[1].local_bottom_vector_repeat_indices == [3]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [3]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === true
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [1]
+            @test li[2].global_size == 7
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [7]
-            @test li[2].top_vector_offset_indices == [7]
-            @test li[2].local_top_vector_indices == [2]
-            @test li[2].local_top_vector_offset_indices == [2]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[2]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[1]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [5, 1]
-            @test li[2].local_bottom_vector_indices == [1, 3]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1]
+            @test li[2].bottom_vector_indices == [5, 7, 1]
+            @test li[2].bottom_vector_offset_indices == [5, 7, 1]
+            @test li[2].local_bottom_vector_indices == 1:3
+            @test li[2].local_bottom_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:2
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:2
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:2
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == [-1; -1;;]
             @test li[2].local_bottom_vector_offset_periodic_pairs == [-1; -1;;]
         end
@@ -1511,9 +1902,11 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [4]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [2, 4, 6, 8]
             @test li[1].top_vector_offset_indices == [2, 4, 6, 8]
             @test li[1].local_top_vector_indices == [2, 4, 6, 8]
@@ -1528,36 +1921,52 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[1].bottom_vector_offset_indices == [1, 3, 5, 7, 9]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 5, 7, 9]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5, 7]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:4
             @test li[1].local_bottom_vector_repeat_indices == [5]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [5]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === true
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 5
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3, 7]
-            @test li[2].top_vector_offset_indices == [3, 7]
-            @test li[2].local_top_vector_indices == [2, 4]
-            @test li[2].local_top_vector_offset_indices == [2, 4]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1;;]
-            @test li[2].local_top_vector_a_block_indices == [[2]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[2]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[1, 3]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 3]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 3]]
             @test li[2].n_subgroups == 2
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [1, 5, 1]
-            @test li[2].local_bottom_vector_indices == [1, 3, 5]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1, 3]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[2].bottom_vector_indices == [1, 3, 5, 7, 1]
+            @test li[2].bottom_vector_offset_indices == [1, 3, 5, 7, 1]
+            @test li[2].local_bottom_vector_indices == 1:5
+            @test li[2].local_bottom_vector_offset_indices == 1:5
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:4
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:4
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:4
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:4
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:4
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:4
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == [1; 5;;]
             @test li[2].local_bottom_vector_offset_periodic_pairs == [1; 5;;]
         end
@@ -1570,9 +1979,11 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1]
             @test li[1].nblock == [4]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [2, 4, 6, 8]
             @test li[1].top_vector_offset_indices == [2, 4, 6, 8]
             @test li[1].local_top_vector_indices == [2, 4, 6, 8]
@@ -1587,36 +1998,52 @@ function test_split_indices_1d_2proc_periodic()
             @test li[1].subgroup_i == 1
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[1].bottom_vector_offset_indices == [1, 3, 5, 7, 9]
             @test li[1].local_bottom_vector_indices == [1, 3, 5, 7, 9]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 5, 7, 9]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 3, 5, 7]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 3, 5, 7]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:4
             @test li[1].local_bottom_vector_repeat_indices == [5]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [5]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === true
             @test li[2].block_sizes == [2]
             @test li[2].nblock == [2]
+            @test li[2].global_size == 5
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3, 7]
-            @test li[2].top_vector_offset_indices == [3, 7]
-            @test li[2].local_top_vector_indices == [2, 4]
-            @test li[2].local_top_vector_offset_indices == [2, 4]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [2;;]
-            @test li[2].local_top_vector_a_block_indices == [[4]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[4]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[3]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[2]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[2]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[3]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[3]]
             @test li[2].n_subgroups == 2
             @test li[2].subgroup_i == 1
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [1, 5, 1]
-            @test li[2].local_bottom_vector_indices == [1, 3, 5]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1, 3]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:2
+            @test li[2].bottom_vector_indices == [1, 3, 5, 7, 1]
+            @test li[2].bottom_vector_offset_indices == [1, 3, 5, 7, 1]
+            @test li[2].local_bottom_vector_indices == 1:5
+            @test li[2].local_bottom_vector_offset_indices == 1:5
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:4
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:4
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:4
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:4
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:4
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:4
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == [1; 5;;]
             @test li[2].local_bottom_vector_offset_periodic_pairs == [1; 5;;]
         end
@@ -1655,9 +2082,11 @@ function test_split_indices_2d_1proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [2, 1]
+            @test li[1].global_size == 15
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]
             @test li[1].top_vector_offset_indices == [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]
             @test li[1].local_top_vector_indices == [1, 2, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15]
@@ -1672,36 +2101,52 @@ function test_split_indices_2d_1proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [3, 8, 13]
+            @test li[1].bottom_vector_offset_indices == [3, 8, 13]
             @test li[1].local_bottom_vector_indices == [3, 8, 13]
+            @test li[1].local_bottom_vector_offset_indices == [3, 8, 13]
             @test li[1].local_bottom_vector_no_overlap_indices == [3, 8, 13]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [3, 8, 13]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [2, 1]
             @test li[2].nblock == [1, 1]
+            @test li[2].global_size == 3
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [3, 8, 13]
-            @test li[2].top_vector_offset_indices == [3, 8, 13]
-            @test li[2].local_top_vector_indices == 1:3
-            @test li[2].local_top_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1; 1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1, 2, 3]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1, 2, 3]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == []
-            @test li[2].local_bottom_vector_indices == []
-            @test li[2].local_bottom_vector_no_overlap_indices == []
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == [3, 8, 13]
+            @test li[2].bottom_vector_offset_indices == [3, 8, 13]
+            @test li[2].local_bottom_vector_indices == 1:3
+            @test li[2].local_bottom_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1732,9 +2177,11 @@ function test_split_indices_2d_1proc()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 2]
+            @test li[1].global_size == 15
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == vcat(1:6, 10:15)
             @test li[1].top_vector_offset_indices == vcat(1:6, 10:15)
             @test li[1].local_top_vector_indices == vcat(1:6, 10:15)
@@ -1749,36 +2196,52 @@ function test_split_indices_2d_1proc()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == 7:9
+            @test li[1].bottom_vector_offset_indices == 7:9
             @test li[1].local_bottom_vector_indices == 7:9
+            @test li[1].local_bottom_vector_offset_indices == 7:9
             @test li[1].local_bottom_vector_no_overlap_indices == 7:9
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == 7:9
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === false
             @test li[2].block_sizes == [1, 2]
             @test li[2].nblock == [1, 1]
+            @test li[2].global_size == 3
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == 7:9
-            @test li[2].top_vector_offset_indices == 7:9
-            @test li[2].local_top_vector_indices == 1:3
-            @test li[2].local_top_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1; 1;;]
-            @test li[2].local_top_vector_a_block_indices == [[1, 2, 3]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[1, 2, 3]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_indices == [[]]
             @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == []
-            @test li[2].local_bottom_vector_indices == []
-            @test li[2].local_bottom_vector_no_overlap_indices == []
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == []
+            @test li[2].bottom_vector_indices == 7:9
+            @test li[2].bottom_vector_offset_indices == 7:9
+            @test li[2].local_bottom_vector_indices == 1:3
+            @test li[2].local_bottom_vector_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:3
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:3
             @test li[2].local_bottom_vector_repeat_indices == []
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
             @test li[2].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1813,27 +2276,36 @@ function test_split_indices_2d_1proc_remove_boundaries()
             @test li[1].has_periodic === false
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 1]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
-            @test li[1].top_vector_indices == [5]
-            @test li[1].top_vector_offset_indices == [5]
-            @test li[1].local_top_vector_indices == [5]
-            @test li[1].local_top_vector_offset_indices == [5]
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[1].top_vector_indices == []
+            @test li[1].top_vector_offset_indices == []
+            @test li[1].local_top_vector_indices == []
+            @test li[1].local_top_vector_offset_indices == []
             @test li[1].iblock_list == [1; 1;;]
-            @test li[1].local_top_vector_a_block_indices == [[5]]
-            @test li[1].local_top_vector_a_block_offset_indices == [[5]]
+            @test li[1].local_top_vector_a_block_indices == [[]]
+            @test li[1].local_top_vector_a_block_offset_indices == [[]]
             @test li[1].a_block_off_diagonal_indices == [[1, 2, 3, 4, 6, 7, 8, 9]]
-            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2, 3, 4, 5, 6, 7, 8]]
-            @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2, 3, 4, 5, 6, 7, 8]]
+            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2, 3, 4, 6, 7, 8, 9]]
+            @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2, 3, 4, 6, 7, 8, 9]]
             @test li[1].n_subgroups == 1
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
-            @test li[1].bottom_vector_indices == [1, 2, 3, 4, 6, 7, 8, 9]
-            @test li[1].local_bottom_vector_indices == [1, 2, 3, 4, 6, 7, 8, 9]
-            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 3, 4, 6, 7, 8, 9]
-            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:8
+            @test li[1].bottom_vector_indices == 1:9
+            @test li[1].bottom_vector_offset_indices == 1:9
+            @test li[1].local_bottom_vector_indices == 1:9
+            @test li[1].local_bottom_vector_offset_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:9
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:9
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:9
             @test li[1].local_bottom_vector_repeat_indices == []
+            @test li[1].local_bottom_vector_repeat_offset_indices == []
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
         end
@@ -1868,29 +2340,38 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 1]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
-            @test li[1].top_vector_indices == [2, 5, 8]
-            @test li[1].top_vector_offset_indices == [2, 5, 8]
-            @test li[1].local_top_vector_indices == [2, 5, 8]
-            @test li[1].local_top_vector_offset_indices == [2, 5, 8]
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[1].top_vector_indices == []
+            @test li[1].top_vector_offset_indices == []
+            @test li[1].local_top_vector_indices == []
+            @test li[1].local_top_vector_offset_indices == []
             @test li[1].iblock_list == [1; 1;;]
-            @test li[1].local_top_vector_a_block_indices == [[2, 5, 8]]
-            @test li[1].local_top_vector_a_block_offset_indices == [[2, 5, 8]]
+            @test li[1].local_top_vector_a_block_indices == [[]]
+            @test li[1].local_top_vector_a_block_offset_indices == [[]]
             @test li[1].a_block_off_diagonal_indices == [[1, 4, 7]]
-            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 3, 5]]
-            @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 3, 5]]
+            @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 4, 7]]
+            @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 4, 7]]
             @test li[1].n_subgroups == 1
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
-            @test li[1].bottom_vector_indices == [1, 1, 4, 4, 7, 7]
-            @test li[1].local_bottom_vector_indices == [1, 3, 4, 6, 7, 9]
-            @test li[1].local_bottom_vector_no_overlap_indices == [1, 4, 7]
-            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 3, 5]
-            @test li[1].local_bottom_vector_repeat_indices == [2, 4, 6]
-            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
-            @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[1].bottom_vector_indices == [1, 2, 1, 4, 5, 4, 7, 8, 7]
+            @test li[1].bottom_vector_offset_indices == [1, 2, 1, 4, 5, 4, 7, 8, 7]
+            @test li[1].local_bottom_vector_indices == 1:9
+            @test li[1].local_bottom_vector_offset_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 4, 5, 7, 8]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 2, 4, 5, 7, 8]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2, 4, 5, 7, 8]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2, 4, 5, 7, 8]
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:6
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:6
+            @test li[1].local_bottom_vector_repeat_indices == [3, 6, 9]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [3, 6, 9]
+            @test li[1].local_bottom_vector_periodic_pairs == [1 4 7; 3 6 9]
+            @test li[1].local_bottom_vector_offset_periodic_pairs == [1 4 7; 3 6 9]
         end
     end
 
@@ -1917,29 +2398,38 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 1]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
-            @test li[1].top_vector_indices == [4, 5, 6]
-            @test li[1].top_vector_offset_indices == [4, 5, 6]
-            @test li[1].local_top_vector_indices == [4, 5, 6]
-            @test li[1].local_top_vector_offset_indices == [4, 5, 6]
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[1].top_vector_indices == []
+            @test li[1].top_vector_offset_indices == []
+            @test li[1].local_top_vector_indices == []
+            @test li[1].local_top_vector_offset_indices == []
             @test li[1].iblock_list == [1; 1;;]
-            @test li[1].local_top_vector_a_block_indices == [[4, 5, 6]]
-            @test li[1].local_top_vector_a_block_offset_indices == [[4, 5, 6]]
+            @test li[1].local_top_vector_a_block_indices == [[]]
+            @test li[1].local_top_vector_a_block_offset_indices == [[]]
             @test li[1].a_block_off_diagonal_indices == [[1, 2, 3]]
             @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2, 3]]
             @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2, 3]]
             @test li[1].n_subgroups == 1
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
-            @test li[1].bottom_vector_indices == [1, 2, 3, 1, 2, 3]
-            @test li[1].local_bottom_vector_indices == [1, 2, 3, 7, 8, 9]
-            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 3]
-            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:3
-            @test li[1].local_bottom_vector_repeat_indices == [4, 5, 6]
-            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
-            @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[1].bottom_vector_indices == [1, 2, 3, 4, 5, 6, 1, 2, 3]
+            @test li[1].bottom_vector_offset_indices == [1, 2, 3, 4, 5, 6, 1, 2, 3]
+            @test li[1].local_bottom_vector_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            @test li[1].local_bottom_vector_offset_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 3, 4, 5, 6]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 2, 3, 4, 5, 6]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == 1:6
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == 1:6
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:6
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:6
+            @test li[1].local_bottom_vector_repeat_indices == [7, 8, 9]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [7, 8, 9]
+            @test li[1].local_bottom_vector_periodic_pairs == [1 2 3; 7 8 9]
+            @test li[1].local_bottom_vector_offset_periodic_pairs == [1 2 3; 7 8 9]
         end
     end
 
@@ -1966,29 +2456,38 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 1]
+            @test li[1].global_size == 9
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
-            @test li[1].top_vector_indices == [5]
-            @test li[1].top_vector_offset_indices == [5]
-            @test li[1].local_top_vector_indices == [5]
-            @test li[1].local_top_vector_offset_indices == [5]
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[1].top_vector_indices == []
+            @test li[1].top_vector_offset_indices == []
+            @test li[1].local_top_vector_indices == []
+            @test li[1].local_top_vector_offset_indices == []
             @test li[1].iblock_list == [1; 1;;]
-            @test li[1].local_top_vector_a_block_indices == [[5]]
-            @test li[1].local_top_vector_a_block_offset_indices == [[5]]
+            @test li[1].local_top_vector_a_block_indices == [[]]
+            @test li[1].local_top_vector_a_block_offset_indices == [[]]
             @test li[1].a_block_off_diagonal_indices == [[1, 2, 4]]
             @test li[1].a_block_off_diagonal_bottom_vector_indices == [[1, 2, 4]]
             @test li[1].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2, 4]]
             @test li[1].n_subgroups == 1
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
-            @test li[1].bottom_vector_indices == [1, 2, 1, 4, 4, 1, 2, 1]
-            @test li[1].local_bottom_vector_indices == [1, 2, 3, 4, 6, 7, 8, 9]
-            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 4]
-            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2, 4]
-            @test li[1].local_bottom_vector_repeat_indices == [3, 5, 6, 7, 8]
-            @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
-            @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
+            @test li[1].bottom_vector_indices == [1, 2, 1, 4, 5, 4, 1, 2, 1]
+            @test li[1].bottom_vector_offset_indices == [1, 2, 1, 4, 5, 4, 1, 2, 1]
+            @test li[1].local_bottom_vector_indices == 1:9
+            @test li[1].local_bottom_vector_offset_indices == 1:9
+            @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 4, 5]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 2, 4, 5]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2, 4, 5]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2, 4, 5]
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:4
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:4
+            @test li[1].local_bottom_vector_repeat_indices == [3, 6, 7, 8, 9]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [3, 6, 7, 8, 9]
+            @test li[1].local_bottom_vector_periodic_pairs == [1 1 1 2 4; 3 7 9 8 6]
+            @test li[1].local_bottom_vector_offset_periodic_pairs == [1 1 1 2 4; 3 7 9 8 6]
         end
     end
 
@@ -2017,9 +2516,11 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 2]
+            @test li[1].global_size == 15
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [2, 5, 11, 14]
             @test li[1].top_vector_offset_indices == [2, 5, 11, 14]
             @test li[1].local_top_vector_indices == [2, 5, 11, 14]
@@ -2034,38 +2535,54 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 3, 4, 6, 7, 8, 9, 10, 12, 13, 15]
+            @test li[1].bottom_vector_offset_indices == [1, 3, 4, 6, 7, 8, 9, 10, 12, 13, 15]
             @test li[1].local_bottom_vector_indices == [1, 3, 4, 6, 7, 8, 9, 10, 12, 13, 15]
+            @test li[1].local_bottom_vector_offset_indices == [1, 3, 4, 6, 7, 8, 9, 10, 12, 13, 15]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 4, 7, 8, 10, 13]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 4, 7, 8, 10, 13]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 3, 5, 6, 8, 10]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 3, 5, 6, 8, 10]
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:6
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:6
             @test li[1].local_bottom_vector_repeat_indices == [2, 4, 7, 9, 11]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [2, 4, 7, 9, 11]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === true
             @test li[2].block_sizes == [1, 2]
             @test li[2].nblock == [1, 1]
+            @test li[2].global_size == 11
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [8]
-            @test li[2].top_vector_offset_indices == [8]
-            @test li[2].local_top_vector_indices == [6]
-            @test li[2].local_top_vector_offset_indices == [6]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1; 1;;]
-            @test li[2].local_top_vector_a_block_indices == [[6]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[6]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[1, 3, 5, 8, 10]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 3, 5, 7, 9]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 3, 5, 7, 9]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 3, 5, 8, 10]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 3, 5, 8, 10]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [1, 1, 4, 4, 7, 7, 10, 10, 13, 13]
-            @test li[2].local_bottom_vector_indices == [1, 2, 3, 4, 5, 7, 8, 9, 10, 11]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1, 3, 5, 8, 10]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1, 3, 5, 7, 9]
+            @test li[2].bottom_vector_indices == [1, 1, 4, 4, 7, 8, 7, 10, 10, 13, 13]
+            @test li[2].bottom_vector_offset_indices == [1, 1, 4, 4, 7, 8, 7, 10, 10, 13, 13]
+            @test li[2].local_bottom_vector_indices == 1:11
+            @test li[2].local_bottom_vector_offset_indices == 1:11
+            @test li[2].local_bottom_vector_no_overlap_indices == [1, 3, 5, 6, 8, 10]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1, 3, 5, 6, 8, 10]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1, 3, 5, 6, 8, 10]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 3, 5, 6, 8, 10]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:6
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:6
             @test li[2].local_bottom_vector_repeat_indices == []
-            @test li[2].local_bottom_vector_periodic_pairs == [1 3 5 7 9; 2 4 7 9 11]
-            @test li[2].local_bottom_vector_offset_periodic_pairs == [1 3 5 7 9; 2 4 7 9 11]
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
+            @test li[2].local_bottom_vector_periodic_pairs == [1 3 5 8 10; 2 4 7 9 11]
+            @test li[2].local_bottom_vector_offset_periodic_pairs == [1 3 5 8 10; 2 4 7 9 11]
         end
     end
 
@@ -2094,9 +2611,11 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].has_periodic === true
             @test li[1].block_sizes == [1, 1]
             @test li[1].nblock == [1, 2]
+            @test li[1].global_size == 15
             @test li[1].global_offset == 0
             @test li[1].local_offset == 0
             @test li[1].local_bottom_vector_offset == 0
+            @test li[1].local_bottom_vector_resolved_repeats_offset == 0
             @test li[1].top_vector_indices == [5, 11]
             @test li[1].top_vector_offset_indices == [5, 11]
             @test li[1].local_top_vector_indices == [5, 11]
@@ -2111,38 +2630,54 @@ function test_split_indices_2d_1proc_periodic()
             @test li[1].subgroup_i == 0
             @test li[1].subgroup_size == 1
             @test li[1].bottom_vector_indices == [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15]
+            @test li[1].bottom_vector_offset_indices == [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15]
             @test li[1].local_bottom_vector_indices == [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15]
+            @test li[1].local_bottom_vector_offset_indices == [1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15]
             @test li[1].local_bottom_vector_no_overlap_indices == [1, 2, 4, 7, 8, 10]
+            @test li[1].local_bottom_vector_no_overlap_offset_indices == [1, 2, 4, 7, 8, 10]
             @test li[1].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2, 4, 6, 7, 9]
+            @test li[1].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2, 4, 6, 7, 9]
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:6
+            @test li[1].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:6
             @test li[1].local_bottom_vector_repeat_indices == [3, 5, 8, 10, 11, 12, 13]
+            @test li[1].local_bottom_vector_repeat_offset_indices == [3, 5, 8, 10, 11, 12, 13]
             @test li[1].local_bottom_vector_periodic_pairs == zeros(Int64, 2, 0)
             @test li[1].local_bottom_vector_offset_periodic_pairs == zeros(Int64, 2, 0)
             @test li[2].has_periodic === true
             @test li[2].block_sizes == [1, 2]
             @test li[2].nblock == [1, 1]
+            @test li[2].global_size == 13
             @test li[2].global_offset == 0
             @test li[2].local_offset == 0
             @test li[2].local_bottom_vector_offset == 0
-            @test li[2].top_vector_indices == [8]
-            @test li[2].top_vector_offset_indices == [8]
-            @test li[2].local_top_vector_indices == [7]
-            @test li[2].local_top_vector_offset_indices == [7]
+            @test li[2].local_bottom_vector_resolved_repeats_offset == 0
+            @test li[2].top_vector_indices == []
+            @test li[2].top_vector_offset_indices == []
+            @test li[2].local_top_vector_indices == []
+            @test li[2].local_top_vector_offset_indices == []
             @test li[2].iblock_list == [1; 1;;]
-            @test li[2].local_top_vector_a_block_indices == [[7]]
-            @test li[2].local_top_vector_a_block_offset_indices == [[7]]
+            @test li[2].local_top_vector_a_block_indices == [[]]
+            @test li[2].local_top_vector_a_block_offset_indices == [[]]
             @test li[2].a_block_off_diagonal_indices == [[1, 2, 4, 6, 9]]
-            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 2, 4, 6, 8]]
-            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2, 4, 6, 8]]
+            @test li[2].a_block_off_diagonal_bottom_vector_indices == [[1, 2, 4, 6, 9]]
+            @test li[2].a_block_off_diagonal_bottom_vector_offset_indices == [[1, 2, 4, 6, 9]]
             @test li[2].n_subgroups == 1
             @test li[2].subgroup_i == 0
             @test li[2].subgroup_size == 1
-            @test li[2].bottom_vector_indices == [1, 2, 1, 4, 4, 7, 7, 10, 10, 1, 2, 1]
-            @test li[2].local_bottom_vector_indices == [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13]
-            @test li[2].local_bottom_vector_no_overlap_indices == [1, 2, 4, 6, 9]
-            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2, 4, 6, 8]
+            @test li[2].bottom_vector_indices == [1, 2, 1, 4, 4, 7, 8, 7, 10, 10, 1, 2, 1]
+            @test li[2].bottom_vector_offset_indices == [1, 2, 1, 4, 4, 7, 8, 7, 10, 10, 1, 2, 1]
+            @test li[2].local_bottom_vector_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+            @test li[2].local_bottom_vector_offset_indices == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+            @test li[2].local_bottom_vector_no_overlap_indices == [1, 2, 4, 6, 7, 9]
+            @test li[2].local_bottom_vector_no_overlap_offset_indices == [1, 2, 4, 6, 7, 9]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_indices == [1, 2, 4, 6, 7, 9]
+            @test li[2].local_bottom_vector_no_overlap_sub_selection_offset_indices == [1, 2, 4, 6, 7, 9]
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_indices == 1:6
+            @test li[2].local_bottom_vector_resolved_repeats_sub_selection_offset_indices == 1:6
             @test li[2].local_bottom_vector_repeat_indices == []
-            @test li[2].local_bottom_vector_periodic_pairs == [1 1 1 2 4 6 8; 3 11 13 12 5 8 10]
-            @test li[2].local_bottom_vector_offset_periodic_pairs == [1 1 1 2 4 6 8; 3 11 13 12 5 8 10]
+            @test li[2].local_bottom_vector_repeat_offset_indices == []
+            @test li[2].local_bottom_vector_periodic_pairs == [1 1 1 2 4 6 9; 3 11 13 12 5 8 10]
+            @test li[2].local_bottom_vector_offset_periodic_pairs == [1 1 1 2 4 6 9; 3 11 13 12 5 8 10]
         end
     end
 
@@ -2204,7 +2739,7 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.colptr == [1, 1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2212,8 +2747,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.rowval == 1:1
+            @test buffer.colptr == [1, 2]
         end
     end
 
@@ -2284,7 +2819,7 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.colptr == [1, 1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2292,8 +2827,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.rowval == 1:1
+            @test buffer.colptr == [1, 2]
         end
     end
 
@@ -2364,7 +2899,7 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.colptr == [1, 1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2372,8 +2907,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.rowval == 1:1
+            @test buffer.colptr == [1, 2]
         end
     end
 
@@ -2434,8 +2969,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == [1, 1]
-            @test buffer.colptr == [1, 2, 3]
+            @test buffer.rowval == []
+            @test buffer.colptr == [1, 1, 1, 1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2443,8 +2978,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:2, 1:2)
-            @test buffer.colptr == [1, 3, 5]
+            @test buffer.rowval == vcat(1:3, 1:3, 1:3)
+            @test buffer.colptr == [1, 4, 7, 10]
         end
     end
 
@@ -2514,8 +3049,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == [1, 1]
-            @test buffer.colptr == [1, 2, 3]
+            @test buffer.rowval == []
+            @test buffer.colptr == [1, 1, 1, 1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2523,8 +3058,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:2, 1:2)
-            @test buffer.colptr == [1, 3, 5]
+            @test buffer.rowval == vcat(1:3, 1:3, 1:3)
+            @test buffer.colptr == [1, 4, 7, 10]
         end
     end
 
@@ -2594,8 +3129,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == [1, 1]
-            @test buffer.colptr == [1, 2, 3]
+            @test buffer.rowval == []
+            @test buffer.colptr == [1, 1, 1, 1]
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2603,8 +3138,8 @@ function test_get_shared_sparse_matrix_csc_buffer_1d_remove_boundaries()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:2, 1:2)
-            @test buffer.colptr == [1, 3, 5]
+            @test buffer.rowval == vcat(1:3, 1:3, 1:3)
+            @test buffer.colptr == [1, 4, 7, 10]
         end
     end
 
@@ -2675,7 +3210,7 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
             @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.colptr == ones(Int64, 10)
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2683,8 +3218,8 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == 1:0
-            @test buffer.colptr == [1]
+            @test buffer.rowval == vcat(fill(1:9, 9)...)
+            @test buffer.colptr == 1:9:82
         end
     end
 
@@ -2762,8 +3297,8 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5, 1:5)
-            @test buffer.colptr == [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56, 61, 66, 71, 76, 81]
+            @test buffer.rowval == []
+            @test buffer.colptr == ones(Int64, 22)
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2771,8 +3306,8 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16, 1:16)
-            @test buffer.colptr == [1, 17, 33, 49, 65, 81, 97, 113, 129, 145, 161, 177, 193, 209, 225, 241, 257]
+            @test buffer.rowval == vcat(fill(1:21, 21)...)
+            @test buffer.colptr == 1:21:442
         end
     end
 
@@ -2874,8 +3409,8 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.top_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3, 1:3)
-            @test buffer.colptr == [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61]
+            @test buffer.rowval == []
+            @test buffer.colptr == ones(Int64, 24)
 
             buffer =
                 get_shared_sparse_matrix_csc_buffer(dimensions, shared_comm,
@@ -2883,8 +3418,8 @@ function test_get_shared_sparse_matrix_csc_buffer_2d()
                                                     allocate_shared_int; block_sizes,
                                                     row_indices=level_info.bottom_vector_indices,
                                                     column_indices=level_info.bottom_vector_indices)
-            @test buffer.rowval == vcat(1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20, 1:20)
-            @test buffer.colptr == [1, 21, 41, 61, 81, 101, 121, 141, 161, 181, 201, 221, 241, 261, 281, 301, 321, 341, 361, 381, 401]
+            @test buffer.rowval == vcat(fill(1:23, 23)...)
+            @test buffer.colptr == 1:23:530
         end
     end
 
