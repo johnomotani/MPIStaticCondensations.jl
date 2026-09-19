@@ -1,13 +1,12 @@
 using LibGit2
 using MPIStaticCondensations
-using MPISchurComplements
 
 function print_git_info(io=nothing)
     if io === nothing
         io = stdout
     end
 
-    for mod ∈ (MPIStaticCondensations, MPISchurComplements)
+    for mod ∈ (MPIStaticCondensations,)
         print_git_info_for_module(io, mod)
     end
 

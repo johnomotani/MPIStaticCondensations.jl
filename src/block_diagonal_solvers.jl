@@ -1,8 +1,6 @@
-import MPISchurComplements: ldiv_Bmatrix!
-
 # Each process participates in the solution of only one of the blocks in the
 # block-diagonal solve, so only need to hold the solver and indices for that block.
-struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Tinds,Tvecinds} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverSerial{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},Nothing},Tinds,Tvecinds}
     n::Ti
     local_block_solver::Vector{Tsolver}
     block_indices::Tinds
@@ -61,7 +59,7 @@ Base.size(Alu::BlockDiagonalSolverSerial, d::Integer) = size(Alu)[d]
 
 # When this solver is used there are more processes than blocks, so we use multiple
 # processes to solve each block, with shared-memory parallelism.
-struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing,Missing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Tinds,Tsync} <: MPISchurComplementAFactorization{Tf}
+struct BlockDiagonalSolverShared{Nvar,Tf<:AbstractFloat,Ti<:Integer,Tsolver<:Union{Factorization{Tf},MPIDenseLU{Tf},Nothing,Missing},Tserialsolver<:Union{Factorization{Tf},Nothing},Tm,Tinds,Tsync}
     n::Ti
     local_block_solver::Tsolver
     local_block_serial_solver::Tserialsolver
