@@ -21,7 +21,7 @@ function test_multivariable_matrix(
              n_shared::Integer, random_seed::Integer, sparse_stencils::Bool,
              block_sizes_heuristic, reduce_proc_count_with_blocks::Bool,
              sparse_C_blocks::Bool, mumps_fill_in_threshold::AbstractFloat,
-             tol::AbstractFloat)
+             reduce_dense_boundaries_memory::Bool, tol::AbstractFloat)
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -44,7 +44,8 @@ function test_multivariable_matrix(
         @test_throws "reduce_proc_count_with_blocks=true is not compatible with using a MUMPS solver for the lowest level." begin
             mpi_static_condensation(dimensions; variable_dimensions,
                                     block_sizes_heuristic, reduce_proc_count_with_blocks,
-                                    sparse_C_blocks, mumps_fill_in_threshold, comm,
+                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                    reduce_dense_boundaries_memory, comm,
                                     distributed_comm, shared_comm, allocate_shared_float,
                                     allocate_shared_int, check_lu=true)
         end
@@ -55,17 +56,74 @@ function test_multivariable_matrix(
         @test_throws "MPIStaticCondensationMUMPS does not currently support periodicity." begin
             mpi_static_condensation(dimensions; variable_dimensions,
                                     block_sizes_heuristic, reduce_proc_count_with_blocks,
-                                    sparse_C_blocks, mumps_fill_in_threshold, comm,
+                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                    reduce_dense_boundaries_memory, comm,
                                     distributed_comm, shared_comm, allocate_shared_float,
                                     allocate_shared_int, check_lu=true)
         end
         cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
         return nothing
     end
+    if reduce_dense_boundaries_memory && mumps_fill_in_threshold < 1.0 && any(d.dense_boundaries for d ∈ dimensions)
+        @test_throws ("MPIStaticCondensationMUMPS does not currently support "
+                      * "reduce_dense_boundaries_memory.") begin
+            mpi_static_condensation(dimensions; variable_dimensions,
+                                    block_sizes_heuristic, reduce_proc_count_with_blocks,
+                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                    reduce_dense_boundaries_memory, comm,
+                                    distributed_comm, shared_comm, allocate_shared_float,
+                                    allocate_shared_int, check_lu=true)
+        end
+        cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
+        return nothing
+    end
+    if reduce_dense_boundaries_memory
+        for (idim, d) ∈ enumerate(dimensions)
+            if d.dense_boundaries
+                for vdims ∈ variable_dimensions
+                    if vdims !== nothing && idim ∉ vdims && vdims[1] < idim
+                        @test_throws ("When using reduce_dense_boundaries_memory, the case where some "
+                                      * "variable does not depend on the dimension with 'dense boundaries' "
+                                      * "but does include 'inner dimensions' (those for which all points "
+                                      * "would need to be included in the 'dense boundary') is not supported "
+                                      * "yet.") begin
+                            mpi_static_condensation(dimensions; variable_dimensions,
+                                                    block_sizes_heuristic,
+                                                    reduce_proc_count_with_blocks,
+                                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                                    reduce_dense_boundaries_memory, comm,
+                                                    distributed_comm, shared_comm,
+                                                    allocate_shared_float,
+                                                    allocate_shared_int, check_lu=true)
+                        end
+                        cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
+                        return nothing
+                    elseif vdims !== nothing && idim ∈ vdims && vdims[1] > idim && !all(i ∈ vdims for i ∈ idim:length(dimensions))
+                        @test_throws ("When using reduce_dense_boundaries_memory, any variable that depends "
+                                      * "on the 'dense boundaries' dimension and has any 'inner' dimensions "
+                                      * "(apart from the 'dense boundaries' dimension) must also include all "
+                                      * "the 'outer' dimensions.") begin
+                            mpi_static_condensation(dimensions; variable_dimensions,
+                                                    block_sizes_heuristic,
+                                                    reduce_proc_count_with_blocks,
+                                                    sparse_C_blocks, mumps_fill_in_threshold,
+                                                    reduce_dense_boundaries_memory, comm,
+                                                    distributed_comm, shared_comm,
+                                                    allocate_shared_float,
+                                                    allocate_shared_int, check_lu=true)
+                        end
+                        cleanup_shared_arrays!(local_win_store_float, local_win_store_int)
+                        return nothing
+                    end
+                end
+            end
+        end
+    end
     Alu = mpi_static_condensation(dimensions; variable_dimensions, block_sizes_heuristic,
                                   reduce_proc_count_with_blocks, sparse_C_blocks,
-                                  mumps_fill_in_threshold, comm, distributed_comm,
-                                  shared_comm, allocate_shared_float, allocate_shared_int,
+                                  mumps_fill_in_threshold, reduce_dense_boundaries_memory,
+                                  comm, distributed_comm, shared_comm,
+                                  allocate_shared_float, allocate_shared_int,
                                   check_lu=true)
 
     lu!(Alu, local_matrix)
@@ -171,17 +229,22 @@ function test_multivariable_dimension_combinations(
             println("* n_sh=$n_shared, ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks")
         end
 
-        @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
+        @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, rdbm=$reduce_dense_boundaries_memory, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
                 this_ngrid_list ∈ multiset_permutations(ngrid_list),
                 this_nrank_list ∈ get_nrank_permutations(this_nelement_list, distributed_comm_size),
                 periodic_list ∈ (all_periodic ? bool_perms : (fill(false, length(this_nelement_list)),)),
                 dense_boundaries_list ∈ (all_dense_boundaries ? bool_perms : (fill(false, length(this_nelement_list)),)),
+                reduce_dense_boundaries_memory ∈ (true, false),
                 block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ 1.0 #(1.0, 0.1) # MPIStaticCondensationMUMPS does not support multiple variables yet.
+            if !any(dense_boundaries_list) && reduce_dense_boundaries_memory === false
+                # Option has no effect when there are no dense boundaries, so skip.
+                continue
+            end
             #if rank == 0
-            #    println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
+            #    println("  - n_sh=$n_shared, sp_sten=$sparse_stencils, ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, rdbm=$reduce_dense_boundaries_memory, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
             #end
 
             this_irank_list = get_iranks(this_nrank_list, distributed_comm_rank)
@@ -194,7 +257,8 @@ function test_multivariable_dimension_combinations(
             test_multivariable_matrix(dimensions, variable_dimensions, n_shared,
                                       this_seed, sparse_stencils, block_sizes_heuristic,
                                       reduce_proc_count_with_blocks, sparse_C_blocks,
-                                      mumps_fill_in_threshold, tol)
+                                      mumps_fill_in_threshold,
+                                      reduce_dense_boundaries_memory, tol)
             this_seed += 1
         end
     end
@@ -215,38 +279,36 @@ function test_multivariable_finite_element_matrices()
                 variable_dimensions_1d = (nothing, [1], [1], [1])
                 test_multivariable_dimension_combinations([1], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1000)
                 test_multivariable_dimension_combinations([2], [2], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1001)
-                test_multivariable_dimension_combinations([2], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1001)
-                test_multivariable_dimension_combinations([2], [4], (nothing, nothing, nothing, nothing), rank, comm_size, n_shared, tol, 1002)
-                test_multivariable_dimension_combinations([2], [5], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1003; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1002)
+                test_multivariable_dimension_combinations([2], [4], (nothing, nothing, nothing, nothing), rank, comm_size, n_shared, tol, 1003)
                 test_multivariable_dimension_combinations([3], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1004; all_block_sizes_heuristics=false)
                 test_multivariable_dimension_combinations([4], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1005; all_block_sizes_heuristics=false)
                 test_multivariable_dimension_combinations([5], [2], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1006)
-                test_multivariable_dimension_combinations([5], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1006)
-                test_multivariable_dimension_combinations([6], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1007; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([7], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1008; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([8], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1009; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([16], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1010; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([32], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([5], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1007)
+                test_multivariable_dimension_combinations([6], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1008; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([7], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1009; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([8], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1010; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([16], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1011; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([32], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1012; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
                 tol = 4.0e-5
                 variable_dimensions_2d = (nothing, [2], [2], [2])
                 test_multivariable_dimension_combinations([1, 1], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2000)
-                test_multivariable_dimension_combinations([1, 2], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2001)
-                test_multivariable_dimension_combinations([1, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([1, 3], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2003; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([2, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2004; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([2, 3], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2005; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([2, 4], [2, 2], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2006; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([2, 4], [3, 5], ([1], nothing, [2], nothing), rank, comm_size, n_shared, tol, 2006; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([1, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2007; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([1, 16], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2008; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([2, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2009; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 2], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2001; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 3], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2002; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 2], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2003; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 3], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2004; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 4], [2, 2], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2005; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 4], [3, 3], ([1], nothing, [2], nothing), rank, comm_size, n_shared, tol, 2006; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 8], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2007; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 16], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2008; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 8], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2009; all_block_sizes_heuristics=false)
                 test_multivariable_dimension_combinations([4, 4], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2010; all_block_sizes_heuristics=false)
                 test_multivariable_dimension_combinations([4, 4], [5, 5], (nothing, nothing, nothing, [1, 2]), rank, comm_size, n_shared, tol, 2011)
-                test_multivariable_dimension_combinations([1, 32], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2012; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([2, 16], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2013; all_block_sizes_heuristics=false)
-                test_multivariable_dimension_combinations([4, 8], [3, 5], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2014; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([1, 32], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2012; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([2, 16], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2013; all_block_sizes_heuristics=false)
+                test_multivariable_dimension_combinations([4, 8], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2014; all_block_sizes_heuristics=false)
                 test_multivariable_dimension_combinations([4, 8], [5, 5], ([2], nothing, [1], [2]), rank, comm_size, n_shared, tol, 2015; all_block_sizes_heuristics=false)
                 test_multivariable_dimension_combinations([16, 15], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2016)
             end
@@ -254,16 +316,16 @@ function test_multivariable_finite_element_matrices()
                 tol = 2.0e-5
                 variable_dimensions_3d = (nothing, [3], [3], [3])
                 test_multivariable_dimension_combinations([1, 1, 1], [3, 3, 3], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3000; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
-                test_multivariable_dimension_combinations([2, 2, 2], [3, 4, 5], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_multivariable_dimension_combinations([2, 2, 2], [3, 3, 3], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3001; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_multivariable_dimension_combinations([2, 2, 3], [3, 3, 4], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3002; all_sparse_stencils=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], (nothing, nothing, nothing, nothing), rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
-                test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], ([1], [2], [3], nothing), rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
-                test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], ([1, 2], [2, 3], [1, 3], nothing), rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
-                test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], ([1, 3], nothing, [2], [3]), rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
-                test_multivariable_dimension_combinations([8, 8, 8], [3, 3, 3], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3003; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], ([1], [2], [3], nothing), rank, comm_size, n_shared, tol, 3004; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], ([1, 2], [2, 3], [1, 3], nothing), rank, comm_size, n_shared, tol, 3005; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_multivariable_dimension_combinations([4, 4, 4], [3, 3, 3], ([1, 3], nothing, [2], [3]), rank, comm_size, n_shared, tol, 3006; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
+                test_multivariable_dimension_combinations([8, 8, 8], [3, 3, 3], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3007; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, all_block_sizes_heuristics=false, both_remove_procs=false)
                 if comm_size ≥ 16
                     tol = 1.0e-4
-                    test_multivariable_dimension_combinations([9, 9, 32], [3, 3, 3], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3004; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
+                    test_multivariable_dimension_combinations([9, 9, 32], [3, 3, 3], variable_dimensions_3d, rank, comm_size, n_shared, tol, 3008; all_sparse_stencils=false, all_periodic=false, all_dense_boundaries=false, both_remove_procs=false)
                 end
             end
         end
