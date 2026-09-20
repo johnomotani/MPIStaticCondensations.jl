@@ -67,7 +67,7 @@ function run_MSC(x, matrix_data, rhs, rhs_global, dimensions, variable_dimension
                                   sparse_C_blocks, mumps_fill_in_threshold, comm,
                                   distributed_comm, shared_comm, allocate_shared_float,
                                   allocate_shared_int, schur_tile_size=nothing,
-                                  separate_Ainv_B=false, timer, check_lu=false)
+                                  timer, check_lu=false)
     t2 = time_ns()
     t_setup = (t2 - t1) * 1e-6 # in ms
 

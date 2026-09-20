@@ -81,8 +81,8 @@ function run_MUMPS(x, matrix_data, rhs, rhs_global, dimensions, variable_dimensi
 
     # The locally-owned vector entries should be given by the min/max of the matrix
     # indices in this_block_global_i or this_block_global_j.
-    indrange = extrema(this_block_global_i)
-    irhs = collect(indrange[1]:indrange[2])
+    #indrange = extrema(this_block_global_i)
+    #irhs = collect(indrange[1]:indrange[2])
     #isol = similar(irhs)
 
     t1 = time_ns()
