@@ -228,8 +228,8 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
     for p ∈ parameter_list
         label = case * "-" * sizes_dict[p]
 
-        setup_fig = Figure()
-        setup_ax = Axis(setup_fig[1,1]; xscale=log2, yscale=log10, title="$p setup")
+        setup_fig = Figure(; size=(1200,800))
+        setup_ax = Axis(setup_fig[1,1]; xscale=log2, yscale=log10, title="$p setup", xlabel="# cores", ylabel="time (ms)")
         if setup_dict !== nothing
             plot_scaling!(setup_ax, p, setup_dict)
         end
@@ -247,8 +247,8 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
             save(joinpath(results_directory, "setup-$label.png"), setup_fig)
         end
 
-        lu_fig = Figure()
-        lu_ax = Axis(lu_fig[1,1]; xscale=log2, yscale=log10, title="$p lu")
+        lu_fig = Figure(; size=(1200,800))
+        lu_ax = Axis(lu_fig[1,1]; xscale=log2, yscale=log10, title="$p lu", xlabel="# cores", ylabel="time (ms)")
         if lu_dict !== nothing
             plot_scaling!(lu_ax, p, lu_dict)
         end
@@ -266,8 +266,8 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
             save(joinpath(results_directory, "lu-$label.png"), lu_fig)
         end
 
-        solve_fig = Figure()
-        solve_ax = Axis(solve_fig[1,1]; xscale=log2, yscale=log10, title="$p solve")
+        solve_fig = Figure(; size=(1200,800))
+        solve_ax = Axis(solve_fig[1,1]; xscale=log2, yscale=log10, title="$p solve", xlabel="# cores", ylabel="time (ms)")
         if solve_dict !== nothing
             plot_scaling!(solve_ax, p, solve_dict)
         end
@@ -286,7 +286,7 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
         end
 
         if lu_dict !== nothing && MUMPS_lu_dict !== nothing
-            lu_speedup_fig = Figure()
+            lu_speedup_fig = Figure(; size=(1200,800))
             lu_speedup_ax = Axis(lu_speedup_fig[1,1]; xscale=log2, title="$p lu speedup",
                                  xlabel="# procs", ylabel="speedup")
             plot_speedup!(lu_speedup_ax, p, lu_dict, MUMPS_lu_dict)
@@ -300,7 +300,7 @@ function plot_comparison(case, interactive_parameter=nothing; datainspector_kwar
         end
 
         if solve_dict !== nothing && MUMPS_solve_dict !== nothing
-            solve_speedup_fig = Figure()
+            solve_speedup_fig = Figure(; size=(1200,800))
             solve_speedup_ax = Axis(solve_speedup_fig[1,1]; xscale=log2,
                                     title="$p solve speedup", xlabel="# procs",
                                     ylabel="speedup")
