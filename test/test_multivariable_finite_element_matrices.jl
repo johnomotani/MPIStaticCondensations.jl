@@ -8,9 +8,6 @@ using Primes
 using StableRNGs
 using Test
 
-include("generate_finite_element_matrices.jl")
-include("utils.jl")
-
 const stencil_matrix = ["element" "empty"   "point"   "element";
                         "element" "point"   "element" "empty";
                         "empty"   "element" "element" "point";
