@@ -304,7 +304,7 @@ abstract type BlockSizesHeuristic end
 
 """
     FastSlow{Ti<:Integer} <: BlockSizesHeuristic
-    FastSlow(fast_multiplier::Integer=2, slow_threshold::Ti=8)
+    FastSlow{Ti}(fast_multiplier=2, slow_threshold=8) where Ti <: Integer
 
 Algorithm for generating the block sizes at each level in MPIStaticCondensations.
 
@@ -329,12 +329,12 @@ struct FastSlow{Ti<:Integer} <: BlockSizesHeuristic
     fast_multiplier::Ti
     slow_threshold::Ti
 
-    function FastSlow(fast_multiplier::Ti=2, slow_threshold::Ti=8) where Ti
+    function FastSlow{Ti}(fast_multiplier=2, slow_threshold=8) where Ti <: Integer
         return new{Ti}(fast_multiplier, slow_threshold)
     end
 end
 
-function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
+function get_block_sizes(fs::FastSlow{Ti}, dimensions::Vector{<:Dimension},
                          nelement_local_list::Vector{Ti}) where Ti <: Integer
     fm = fs.fast_multiplier
     st = fs.slow_threshold
@@ -389,7 +389,7 @@ end
 
 """
     LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
-    LevelMultiplier(multiplier::Integer=2)
+    LevelMultiplier{Ti}(multiplier=2) where Ti <: Integer
 
 Algorithm for generating the block sizes at each level in MPIStaticCondensations.
 
@@ -402,7 +402,7 @@ the number of elements.
 struct LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
     multiplier::Ti
 
-    function LevelMultiplier(multiplier::Ti=2) where Ti
+    function LevelMultiplier{Ti}(multiplier=2) where Ti <: Integer
         return new{Ti}(multiplier)
     end
 end
@@ -423,7 +423,7 @@ function get_block_sizes(lm::LevelMultiplier, dimensions::Vector{<:Dimension},
     return block_sizes_list
 end
 
-DefaultBlockSizesHeuristic = FastSlow
+DefaultBlockSizesHeuristic{Ti} = FastSlow{Ti}
 
 include("shared_sparse_buffers.jl")
 include("block_S.jl")
@@ -1345,7 +1345,7 @@ end
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
                             variable_dimensions::Tuple=(nothing,),
-                            block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
+                            block_sizes_heuristic::Union{Nothing,BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=nothing,
                             reduce_proc_count_with_blocks::Bool=false,
                             sparse_C_blocks::Bool=true,
                             mumps_fill_in_threshold::Number=1.0,
@@ -1440,7 +1440,7 @@ matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  variable_dimensions::Tuple=(nothing,),
-                                 block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
+                                 block_sizes_heuristic::Union{Nothing,BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=nothing,
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=true,
                                  mumps_fill_in_threshold::Number=1.0,
@@ -1469,6 +1469,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     if comm_size % shared_comm_size != 0
         error("Size of shared_comm ($shared_comm_size) does not divide the size of comm "
               * "($comm_size).")
+    end
+
+    if block_sizes_heuristic === nothing
+        block_sizes_heuristic = DefaultBlockSizesHeuristic{ind_type}()
     end
 
     if mumps_fill_in_threshold < 1.0

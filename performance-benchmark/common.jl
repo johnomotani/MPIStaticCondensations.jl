@@ -32,14 +32,14 @@ struct BenchmarkParams{Tvdims<:Tuple}
     remove_boundaries_list::Vector{Union{Bool,Nothing}}
     sparse_C_blocks::Bool
     mumps_fill_in_threshold::Float64
-    block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}}}
+    block_sizes_heuristic::Union{MPIStaticCondensations.BlockSizesHeuristic,Vector{Vector{Int64}},Nothing}
 
     function BenchmarkParams(nelement_list, ngrid_list, sparse_stencils;
                              variable_dimensions=(nothing,), stencil_matrix=nothing,
                              dense_boundaries_list=nothing, periodic_list=nothing,
                              remove_boundaries_list=nothing, sparse_C_blocks=false,
                              mumps_fill_in_threshold=1.0,
-                             block_sizes_heuristic=MPIStaticCondensations.FastSlow())
+                             block_sizes_heuristic=nothing)
         n = length(nelement_list)
         if dense_boundaries_list === nothing
             dense_boundaries_list = fill(false, n)
