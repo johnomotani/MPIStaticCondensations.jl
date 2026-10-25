@@ -1355,7 +1355,6 @@ end
                             allocate_shared_float::F1=nothing,
                             allocate_shared_int::F2=nothing,
                             synchronize_shared::F3=nothing,
-                            schur_tile_size::Union{Nothing,Integer}=nothing,
                             timer::Union{Nothing,TimerOutput}=nothing,
                             check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
@@ -1412,9 +1411,10 @@ cases (or for performance verification) - this can be done by passing
 shared-memory block that this process belongs to - it must be a subset of `comm`, and its
 members must be able to create shared-memory arrays.
 
-`allocate_shared_float`, `allocate_shared_int`, and `synchronize_shared` are as required
-by `mpi_schur_complement()`. `schur_tile_size` is passed to the `tile_size` argument of
-`mpi_schur_complement()`.
+`allocate_shared_float` and `allocate_shared_int` are required and should allocate float
+and integer type arrays that are shared by the processes in `shared_comm`.
+`synchronize_shared` can be passed to use a custom function rather than `MPI.Barrier()`
+for synchronization.
 
 `optimize_schur_complement_size` sets the strategy used to pick which dimension to split
 at each level, when splitting between shared-memory processes (for distributed-memory the
@@ -1450,7 +1450,6 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  allocate_shared_float::F1=nothing,
                                  allocate_shared_int::F2=nothing,
                                  synchronize_shared::F3=nothing,
-                                 schur_tile_size::Union{Nothing,Integer}=nothing,
                                  timer::Union{Nothing,TimerOutput}=nothing,
                                  check_lu::Bool=false) where {F1<:Union{Function,Nothing}, F2<:Union{Function,Nothing}, F3<:Union{Function,Nothing}}
 
