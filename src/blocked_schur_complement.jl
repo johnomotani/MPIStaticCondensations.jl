@@ -235,16 +235,12 @@ function ldiv!(X::AbstractVector, y::AbstractVector, sc::BlockedSchurComplementS
             end
 
             @sc_timeit timer "v-C.Ainv.u" begin
-                for i ∈ bottom_sub_range
-                    y[i] = v[i]
-                end
-
-                mul_C_dot_Ainv_dot_u!(y, C, Ainv_dot_u)
+                mul_C_dot_Ainv_dot_u!(v, C, Ainv_dot_u)
                 synchronize_shared()
             end
 
             @sc_timeit timer "Sinv.(v-C.Ainv.u)" begin
-                ldiv!(schur_complement_solver, y)
+                ldiv!(y, schur_complement_solver, v)
                 synchronize_shared()
                 # MPIStaticCondensation takes care of copying the entries from `y` back
                 # into `X`.

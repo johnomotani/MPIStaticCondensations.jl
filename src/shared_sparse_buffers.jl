@@ -276,7 +276,7 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
         n = length(column_indices)
         if m == 0 || n == 0
             # No entries so do not need shared-memory allocation.
-            return (; m, n, colptr=ind_type[1], rowval_list=Vector{ind_type}[],
+            return (; m, n, colptr=ones(ind_type, n + 1), rowval_list=Vector{ind_type}[],
                     nzval_length=0)
         end
 
