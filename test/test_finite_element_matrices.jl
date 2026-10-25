@@ -8,9 +8,6 @@ using Primes
 using StableRNGs
 using Test
 
-include("generate_finite_element_matrices.jl")
-include("utils.jl")
-
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, sparse_stencils::Bool, block_sizes_heuristic,
                      reduce_proc_count_with_blocks::Bool, sparse_C_blocks::Bool,
