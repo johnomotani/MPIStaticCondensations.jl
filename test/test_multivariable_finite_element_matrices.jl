@@ -1,3 +1,7 @@
+module MultivariableFiniteElementMatricesTests
+
+export test_multivariable_finite_element_matrices
+
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
@@ -331,3 +335,8 @@ function test_multivariable_finite_element_matrices()
         end
     end
 end
+
+end # MultivariableFiniteElementMatricesTests
+
+using .MultivariableFiniteElementMatricesTests
+test_multivariable_finite_element_matrices()

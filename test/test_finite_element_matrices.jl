@@ -1,3 +1,7 @@
+module FiniteElementMatricesTests
+
+export test_finite_element_matrices
+
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
@@ -260,3 +264,8 @@ function test_finite_element_matrices()
         end
     end
 end
+
+end # FiniteElementMatricesTests
+
+using .FiniteElementMatricesTests
+test_finite_element_matrices()
