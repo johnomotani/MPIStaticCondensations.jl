@@ -8,9 +8,6 @@ using Primes
 using StableRNGs
 using Test
 
-include("generate_finite_element_matrices.jl")
-include("utils.jl")
-
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, sparse_stencils::Bool, block_sizes_heuristic,
                      reduce_proc_count_with_blocks::Bool, sparse_C_blocks::Bool,
@@ -160,9 +157,9 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
         sparse_stencils_list = (true,)
     end
     if all_block_sizes_heuristics
-        block_sizes_heuristic_list = (FastSlow(), LevelMultiplier())
+        block_sizes_heuristic_list = (nothing, FastSlow{Int64}(), LevelMultiplier{Int64}())
     else
-        block_sizes_heuristic_list = (FastSlow(), )
+        block_sizes_heuristic_list = (nothing, )
     end
     if both_remove_procs
         reduce_proc_count_with_blocks_list = (false, true)
