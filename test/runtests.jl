@@ -1,5 +1,8 @@
+using LinearAlgebra
 using MPIStaticCondensations
 using Test
+
+BLAS.set_num_threads(1)
 
 include("generate_finite_element_matrices.jl")
 include("utils.jl")
