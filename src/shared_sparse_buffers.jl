@@ -44,9 +44,14 @@ function get_dim_indices!(dimensions, block_sizes, flat_i)
         block_inds = zeros(Int64, length(dimensions))
         inner_inds = zeros(Int64, length(dimensions))
         for (i, d) ∈ enumerate(dimensions)
-            flat_i, dim_i = divrem(flat_i, d.n_local)
-            this_block_npoints = block_sizes[i] * (d.ngrid - 1)
-            block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+            if d.n_local == 1
+                block_inds[i] = 1
+                inner_inds[i] = 1
+            else
+                flat_i, dim_i = divrem(flat_i, d.n_local)
+                this_block_npoints = block_sizes[i] * (d.ngrid - 1)
+                block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+            end
         end
         return block_inds, inner_inds
     end
