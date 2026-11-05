@@ -1493,9 +1493,28 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
     end
 
+    # Drop any size-1 dimensions as they are redundant (all points have index 1 in any
+    # size-1 dimension), but having ngrid=1 might cause problems in some places.
+    dimensions_to_drop = [i for (i,d) ∈ enumerate(dimensions) if d.n == 1]
+    dimensions = [d for (i,d) ∈ enumerate(dimensions) if i ∉ dimensions_to_drop]
+    function filter_variable_dimensions(vdim)
+        if vdim === nothing
+            return 1:nd
+        end
+        vdim = Vector(vdim)
+        # Drop in reverse order, so that largest dimensions are dropped first, and any
+        # dimension still to be dropped is not renumbered.
+        for id ∈ reverse(dimensions_to_drop)
+            vdim = [vd > id ? vd - 1 : vd for vd ∈ vdim if vd != id]
+        end
+        if isempty(vdim)
+            error("Some variable has no dimensions, because all of its dimensions were "
+                  * "size-1 and have been dropped.")
+        end
+        return vdim
+    end
     nd = length(dimensions)
-    variable_dimensions = Tuple(vdim === nothing ? (1:nd) : vdim
-                                for vdim ∈ variable_dimensions)
+    variable_dimensions = map(filter_variable_dimensions, variable_dimensions)
     Nvar = length(variable_dimensions)
 
     n_blocks = comm_size ÷ shared_comm_size
@@ -1524,6 +1543,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                       * "Got block_sizes_list=$block_sizes_list.")
             end
         end
+        # Need to drop dimensions that were dropped because they are size-1.
+        block_sizes_list = [[bs for (i,bs) ∈ enumerate(level_sizes)
+                             if i ∉ dimensions_to_drop]
+                            for level_sizes ∈ block_sizes_list]
     end
     nblock_list = [(nelement_local_list .+ bs .- 1) .÷ bs for bs ∈ block_sizes_list]
     for (nb, bs) ∈ zip(nblock_list, block_sizes_list)
