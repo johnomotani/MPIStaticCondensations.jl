@@ -1492,9 +1492,22 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
     end
 
+    # Drop any size-1 dimensions as they are redundant (all points have index 1 in any
+    # size-1 dimension), but having ngrid=1 might cause problems in some places.
+    dimensions_to_drop = [i for (i,d) ∈ enumerate(dimensions) if d.n == 1]
+    dimensions = [d for (i,d) ∈ enumerate(dimensions) if i ∉ dimensions_to_drop]
+    function filter_variable_dimensions(vdim)
+        if vdim === nothing
+            return 1:nd
+        end
+        vdim = Vector(vdim)
+        for id ∈ dimensions_to_drop
+            vdim = [vd > id ? vd - 1 : vd for vd ∈ vdim if vd != id]
+        end
+        return vdim
+    end
     nd = length(dimensions)
-    variable_dimensions = Tuple(vdim === nothing ? (1:nd) : vdim
-                                for vdim ∈ variable_dimensions)
+    variable_dimensions = map(filter_variable_dimensions, variable_dimensions)
     Nvar = length(variable_dimensions)
 
     n_blocks = comm_size ÷ shared_comm_size
