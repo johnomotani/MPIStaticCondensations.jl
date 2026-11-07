@@ -38,6 +38,7 @@ jobs:
       - uses: julia-actions/cache@v3
         #- uses: julia-actions/julia-buildpkg@v1
       - run: |
+          export JULIA_HEAP_SIZE_HINT=2G
           julia --project -O3 -e 'import Pkg; Pkg.add(["MUMPS"])' # 17/9/2026 - if MUMPS is installed after MPIPreferences setup, or if the julia-buildpkg action is used, then MUMPS fails with linking errors (don't understand why, maybe this workaround will not be necessary in future?!?).
           julia --project -O3 -e 'import Pkg; Pkg.add(["MPI", "MPIPreferences"]); using MPIPreferences; MPIPreferences.use_jll_binary("OpenMPI_jll")'
           julia --project -O3 -e 'using MPI; MPI.install_mpiexecjl(; destdir="."); import Pkg; Pkg.add(["Combinatorics", "PackageCompiler", "StableRNGs", "Test"]); Pkg.precompile()'
