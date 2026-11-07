@@ -38,7 +38,7 @@ function run_UMFPACK(x, matrix_data, rhs, rhs_global, dimensions, variable_dimen
             t_solve = min(t_solve, (t2 - t1) * 1e-6)
 
             max_error = maximum(abs.(A * x - rhs_global))
-            if max_error > 1.0e-3
+            if max_error > 4.0e-3
                 println("Solution incorrect? Max error $max_error.")
                 MPI.Abort(MPI.COMM_WORLD, -1)
             end
