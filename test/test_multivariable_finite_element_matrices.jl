@@ -210,7 +210,7 @@ function test_multivariable_dimension_combinations(
         sparse_stencils_list = (true,)
     end
     if all_block_sizes_heuristics
-        block_sizes_heuristic_list = (nothing, FastSlow{Int64}(), LevelMultiplier{Int64}())
+        block_sizes_heuristic_list = (nothing, LevelMultiplier{Int64}())
     else
         block_sizes_heuristic_list = (nothing, )
     end
