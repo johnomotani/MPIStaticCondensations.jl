@@ -13,6 +13,7 @@ function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      reduce_proc_count_with_blocks::Bool, sparse_C_blocks::Bool,
                      mumps_fill_in_threshold::AbstractFloat,
                      reduce_dense_boundaries_memory::Bool, tol::AbstractFloat)
+println("test_matrix")
     comm, distributed_comm, distributed_nproc, distributed_rank, shared_comm,
         shared_nproc, shared_rank, allocate_shared_float, allocate_shared_int,
         local_win_store_float, local_win_store_int = get_comms(n_shared)
@@ -169,9 +170,9 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
     @testset "ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks" for
             sparse_stencils ∈ sparse_stencils_list,
             reduce_proc_count_with_blocks ∈ reduce_proc_count_with_blocks_list
-        if rank == 0
+        #if rank == 0
             println("* n_sh=$n_shared, ne=$nelement_list, ngr=$ngrid_list, sp_sten=$sparse_stencils, red_proc=$reduce_proc_count_with_blocks")
-        end
+        #end
 
         @testset "ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, rdbm=$reduce_dense_boundaries_memory, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold" for
                 this_nelement_list ∈ multiset_permutations(nelement_list),
@@ -183,6 +184,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
                 block_sizes_heuristic ∈ block_sizes_heuristic_list,
                 sparse_C_blocks ∈ (false, true),
                 mumps_fill_in_threshold ∈ (1.0, 0.1)
+println("ne=$this_nelement_list, ngr=$this_ngrid_list, nrank=$this_nrank_list, periodic=$periodic_list, dense_bndry=$dense_boundaries_list, rdbm=$reduce_dense_boundaries_memory, bs=$block_sizes_heuristic, spC=$sparse_C_blocks, mumps=$mumps_fill_in_threshold")
             if !any(dense_boundaries_list) && reduce_dense_boundaries_memory === false
                 # Option has no effect when there are no dense boundaries, so skip.
                 continue
@@ -208,6 +210,7 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
 end
 
 function test_finite_element_matrices()
+println("test_finite_element_matrices")
     if !MPI.Initialized()
         MPI.Init()
     end
@@ -217,9 +220,12 @@ function test_finite_element_matrices()
         comm_size = MPI.Comm_size(MPI.COMM_WORLD)
         # Temporarily disable distributed-memory MPI, until we re-enable support.
         @testset "n_shared=$n_shared" for n_shared ∈ comm_size #[prod(x) for x ∈ unique(combinations(factor(Vector, comm_size)))]
+println("n_shared=$n_shared")
             @testset "1D" begin
                 tol = 4.0e-11
+println("1D A")
                 test_dimension_combinations([1], [3], rank, comm_size, n_shared, tol, 1000)
+println("1D B")
                 test_dimension_combinations([2], [2], rank, comm_size, n_shared, tol, 1001)
                 test_dimension_combinations([2], [3], rank, comm_size, n_shared, tol, 1002)
                 test_dimension_combinations([3], [3], rank, comm_size, n_shared, tol, 1003; all_block_sizes_heuristics=false)
