@@ -57,7 +57,8 @@ is known, we can substitute back into the expression above for \$x\$
 """
 module MPIStaticCondensations
 
-export mpi_static_condensation, create_dimension, finalize_mpi_static_condensation!
+export mpi_static_condensation, create_dimension, get_shared_sparse_matrix_csc_buffer,
+       finalize_mpi_static_condensation!
 public BlockSizesHeuristic, LevelMultiplier, FastSlow
 
 using BlockArrays
@@ -249,7 +250,7 @@ end
 
 """
     create_dimension(; name::String, nelement::Integer, ngrid::Integer,
-                     nrank::Integer, irank::Integer, periodic::Bool,
+                     nrank::Integer=1, irank::Integer=0, periodic::Bool=false,
                      dense_boundaries::Bool=false,
                      remove_boundaries::Union{Bool,Nothing}=nothing)
 
@@ -286,7 +287,7 @@ can be split by removing any element boundary. `remove_boundaries` is set by def
 necessary to pass `remove_boundaries` explicitly.
 """
 function create_dimension(; name::String, nelement::Integer, ngrid::Integer,
-                          nrank::Integer, irank::Integer, periodic::Bool,
+                          nrank::Integer=1, irank::Integer=0, periodic::Bool=false,
                           dense_boundaries::Bool=false,
                           remove_boundaries::Union{Bool,Nothing}=nothing)
     return Dimension(; name, nelement, ngrid, nrank, irank, periodic, dense_boundaries,
