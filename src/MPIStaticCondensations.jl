@@ -304,7 +304,7 @@ abstract type BlockSizesHeuristic end
 
 """
     FastSlow{Ti<:Integer} <: BlockSizesHeuristic
-    FastSlow(fast_multiplier::Integer=2, slow_threshold::Ti=8)
+    FastSlow{Ti}(fast_multiplier=2, slow_threshold=8) where Ti <: Integer
 
 Algorithm for generating the block sizes at each level in MPIStaticCondensations.
 
@@ -329,12 +329,12 @@ struct FastSlow{Ti<:Integer} <: BlockSizesHeuristic
     fast_multiplier::Ti
     slow_threshold::Ti
 
-    function FastSlow(fast_multiplier::Ti=2, slow_threshold::Ti=8) where Ti
+    function FastSlow{Ti}(fast_multiplier=2, slow_threshold=8) where Ti <: Integer
         return new{Ti}(fast_multiplier, slow_threshold)
     end
 end
 
-function get_block_sizes(fs::FastSlow, dimensions::Vector{<:Dimension},
+function get_block_sizes(fs::FastSlow{Ti}, dimensions::Vector{<:Dimension},
                          nelement_local_list::Vector{Ti}) where Ti <: Integer
     fm = fs.fast_multiplier
     st = fs.slow_threshold
@@ -389,7 +389,7 @@ end
 
 """
     LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
-    LevelMultiplier(multiplier::Integer=2)
+    LevelMultiplier{Ti}(multiplier=2) where Ti <: Integer
 
 Algorithm for generating the block sizes at each level in MPIStaticCondensations.
 
@@ -402,7 +402,7 @@ the number of elements.
 struct LevelMultiplier{Ti<:Integer} <: BlockSizesHeuristic
     multiplier::Ti
 
-    function LevelMultiplier(multiplier::Ti=2) where Ti
+    function LevelMultiplier{Ti}(multiplier=2) where Ti <: Integer
         return new{Ti}(multiplier)
     end
 end
@@ -423,7 +423,7 @@ function get_block_sizes(lm::LevelMultiplier, dimensions::Vector{<:Dimension},
     return block_sizes_list
 end
 
-DefaultBlockSizesHeuristic = FastSlow
+DefaultBlockSizesHeuristic{Ti} = FastSlow{Ti}
 
 include("shared_sparse_buffers.jl")
 include("block_S.jl")
@@ -1345,7 +1345,7 @@ end
 """
     mpi_static_condensation(dimensions::Vector{<:Dimension};
                             variable_dimensions::Tuple=(nothing,),
-                            block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
+                            block_sizes_heuristic::Union{Nothing,BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=nothing,
                             reduce_proc_count_with_blocks::Bool=false,
                             sparse_C_blocks::Bool=true,
                             mumps_fill_in_threshold::Number=1.0,
@@ -1440,7 +1440,7 @@ matrices being factorized.
 """
 function mpi_static_condensation(dimensions::Vector{<:Dimension};
                                  variable_dimensions::Tuple=(nothing,),
-                                 block_sizes_heuristic::Union{BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=DefaultBlockSizesHeuristic,
+                                 block_sizes_heuristic::Union{Nothing,BlockSizesHeuristic,Vector{<:Vector{<:Integer}}}=nothing,
                                  reduce_proc_count_with_blocks::Bool=false,
                                  sparse_C_blocks::Bool=true,
                                  mumps_fill_in_threshold::Number=1.0,
@@ -1471,6 +1471,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
               * "($comm_size).")
     end
 
+    if block_sizes_heuristic === nothing
+        block_sizes_heuristic = DefaultBlockSizesHeuristic{ind_type}()
+    end
+
     if mumps_fill_in_threshold < 1.0
         if reduce_proc_count_with_blocks
             error("reduce_proc_count_with_blocks=true is not compatible with using a "
@@ -1489,9 +1493,28 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
         end
     end
 
+    # Drop any size-1 dimensions as they are redundant (all points have index 1 in any
+    # size-1 dimension), but having ngrid=1 might cause problems in some places.
+    dimensions_to_drop = [i for (i,d) ∈ enumerate(dimensions) if d.n == 1]
+    dimensions = [d for (i,d) ∈ enumerate(dimensions) if i ∉ dimensions_to_drop]
+    function filter_variable_dimensions(vdim)
+        if vdim === nothing
+            return 1:nd
+        end
+        vdim = Vector(vdim)
+        # Drop in reverse order, so that largest dimensions are dropped first, and any
+        # dimension still to be dropped is not renumbered.
+        for id ∈ reverse(dimensions_to_drop)
+            vdim = [vd > id ? vd - 1 : vd for vd ∈ vdim if vd != id]
+        end
+        if isempty(vdim)
+            error("Some variable has no dimensions, because all of its dimensions were "
+                  * "size-1 and have been dropped.")
+        end
+        return vdim
+    end
     nd = length(dimensions)
-    variable_dimensions = Tuple(vdim === nothing ? (1:nd) : vdim
-                                for vdim ∈ variable_dimensions)
+    variable_dimensions = map(filter_variable_dimensions, variable_dimensions)
     Nvar = length(variable_dimensions)
 
     n_blocks = comm_size ÷ shared_comm_size
@@ -1520,6 +1543,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
                       * "Got block_sizes_list=$block_sizes_list.")
             end
         end
+        # Need to drop dimensions that were dropped because they are size-1.
+        block_sizes_list = [[bs for (i,bs) ∈ enumerate(level_sizes)
+                             if i ∉ dimensions_to_drop]
+                            for level_sizes ∈ block_sizes_list]
     end
     nblock_list = [(nelement_local_list .+ bs .- 1) .÷ bs for bs ∈ block_sizes_list]
     for (nb, bs) ∈ zip(nblock_list, block_sizes_list)

@@ -136,7 +136,9 @@ function copy_B_submatrix!(Ainv_dot_B::BlockAinvDotBSerial,
         end
 
         block_rowinds = Ainv_dot_B.block_rowinds
+        block_row_ranges = Ainv_dot_B.block_row_ranges
         block_colinds = Ainv_dot_B.block_colinds
+        block_col_ranges = Ainv_dot_B.block_col_ranges
         for (rowinds, row_ranges, colinds, col_ranges, block) ∈
                 zip(block_rowinds, block_row_ranges, block_colinds, block_col_ranges,
                     blocks)
