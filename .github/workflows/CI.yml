@@ -47,7 +47,9 @@ jobs:
           ./mpiexecjl -np 1 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/runtests.jl
           ./mpiexecjl -np 2 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/runtests.jl
           ./mpiexecjl -np 3 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/runtests.jl
-          ./mpiexecjl -np 8 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/runtests.jl
+          ./mpiexecjl -np 8 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/test_indices.jl
+          ./mpiexecjl -np 8 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/test_finite_element_matrices.jl
+          ./mpiexecjl -np 8 --oversubscribe julia -J mpisc.so --project -O3 -t1 test/test_multivariable_finite_element_matrices.jl
           # Note: MPI.jl's default implementation is mpich, which has a similar option
           # `--with-device=ch3:sock`, but that needs to be set when compiling mpich.
         shell: bash
