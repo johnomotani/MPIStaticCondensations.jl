@@ -44,9 +44,14 @@ function get_dim_indices!(dimensions, block_sizes, flat_i)
         block_inds = zeros(Int64, length(dimensions))
         inner_inds = zeros(Int64, length(dimensions))
         for (i, d) ∈ enumerate(dimensions)
-            flat_i, dim_i = divrem(flat_i, d.n_local)
-            this_block_npoints = block_sizes[i] * (d.ngrid - 1)
-            block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+            if d.n_local == 1
+                block_inds[i] = 1
+                inner_inds[i] = 1
+            else
+                flat_i, dim_i = divrem(flat_i, d.n_local)
+                this_block_npoints = block_sizes[i] * (d.ngrid - 1)
+                block_inds[i], inner_inds[i] = divrem(dim_i, this_block_npoints) .+ 1
+            end
         end
         return block_inds, inner_inds
     end
@@ -253,10 +258,10 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
             column_dimensions = 1:length(dimensions)
         end
         if row_indices === nothing
-            row_indices = 1:prod(d.n_local for d ∈ dimensions[row_dimensions])
+            row_indices = 1:prod(dimensions[d].n_local for d ∈ row_dimensions)
         end
         if column_indices === nothing
-            column_indices = 1:prod(d.n_local for d ∈ dimensions[column_dimensions])
+            column_indices = 1:prod(dimensions[d].n_local for d ∈ column_dimensions)
         end
 
         # For any dimensions that are not shared between the row and column variables, all
@@ -297,7 +302,7 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
             # they are in the interior of the same element, or if they are the same point
             # (in case they are boundary points). Columns are equivalent if their
             # positions in every dimension are equivalent.
-            column_cartinds_list = CartesianIndices(Tuple(d.n_local for d ∈ dimensions[column_dimensions]))
+            column_cartinds_list = CartesianIndices(Tuple(dimensions[d].n_local for d ∈ column_dimensions))
             function get_equivalents_lookup(d, nblock, block_size)
                 eq_list = zeros(ind_type, d.n_local)
                 eq = ind_type(1)

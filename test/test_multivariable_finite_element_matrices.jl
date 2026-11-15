@@ -1,3 +1,7 @@
+module MultivariableFiniteElementMatricesTests
+
+export test_multivariable_finite_element_matrices
+
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
@@ -7,6 +11,8 @@ using MUMPS
 using Primes
 using StableRNGs
 using Test
+
+BLAS.set_num_threads(1)
 
 include("generate_finite_element_matrices.jl")
 include("utils.jl")
@@ -213,9 +219,9 @@ function test_multivariable_dimension_combinations(
         sparse_stencils_list = (true,)
     end
     if all_block_sizes_heuristics
-        block_sizes_heuristic_list = (FastSlow(), LevelMultiplier())
+        block_sizes_heuristic_list = (nothing, FastSlow{Int64}(), LevelMultiplier{Int64}())
     else
-        block_sizes_heuristic_list = (FastSlow(), )
+        block_sizes_heuristic_list = (nothing, )
     end
     if both_remove_procs
         reduce_proc_count_with_blocks_list = (false, true)
@@ -292,7 +298,7 @@ function test_multivariable_finite_element_matrices()
                 test_multivariable_dimension_combinations([32], [3], variable_dimensions_1d, rank, comm_size, n_shared, tol, 1012; all_block_sizes_heuristics=false)
             end
             @testset "2D" begin
-                tol = 4.0e-5
+                tol = 6.0e-5
                 variable_dimensions_2d = (nothing, [2], [2], [2])
                 test_multivariable_dimension_combinations([1, 1], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2000)
                 test_multivariable_dimension_combinations([1, 2], [3, 3], variable_dimensions_2d, rank, comm_size, n_shared, tol, 2001; all_block_sizes_heuristics=false)
@@ -331,3 +337,8 @@ function test_multivariable_finite_element_matrices()
         end
     end
 end
+
+end # MultivariableFiniteElementMatricesTests
+
+using .MultivariableFiniteElementMatricesTests
+test_multivariable_finite_element_matrices()

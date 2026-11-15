@@ -1,3 +1,7 @@
+module FiniteElementMatricesTests
+
+export test_finite_element_matrices
+
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
@@ -7,6 +11,8 @@ using MUMPS
 using Primes
 using StableRNGs
 using Test
+
+BLAS.set_num_threads(1)
 
 include("generate_finite_element_matrices.jl")
 include("utils.jl")
@@ -160,9 +166,9 @@ function test_dimension_combinations(nelement_list, ngrid_list, rank,
         sparse_stencils_list = (true,)
     end
     if all_block_sizes_heuristics
-        block_sizes_heuristic_list = (FastSlow(), LevelMultiplier())
+        block_sizes_heuristic_list = (nothing, FastSlow{Int64}(), LevelMultiplier{Int64}())
     else
-        block_sizes_heuristic_list = (FastSlow(), )
+        block_sizes_heuristic_list = (nothing, )
     end
     if both_remove_procs
         reduce_proc_count_with_blocks_list = (false, true)
@@ -260,3 +266,8 @@ function test_finite_element_matrices()
         end
     end
 end
+
+end # FiniteElementMatricesTests
+
+using .FiniteElementMatricesTests
+test_finite_element_matrices()
