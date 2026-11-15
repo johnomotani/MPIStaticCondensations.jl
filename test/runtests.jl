@@ -12,13 +12,9 @@ include("test_finite_element_matrices.jl")
 include("test_multivariable_finite_element_matrices.jl")
 
 function runtests()
-println("runtests")
     @testset "MPIStaticCondensations.jl" failfast=true begin
-println("bfore test_indices")
         test_indices()
-println("before test_finite_element_matrices")
         test_finite_element_matrices()
-println("before test_multivariable_finite_element_matrices")
         test_multivariable_finite_element_matrices()
     end
 end
