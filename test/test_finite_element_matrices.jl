@@ -1,3 +1,7 @@
+module FiniteElementMatricesTests
+
+export test_finite_element_matrices
+
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
@@ -7,6 +11,11 @@ using MUMPS
 using Primes
 using StableRNGs
 using Test
+
+BLAS.set_num_threads(1)
+
+include("generate_finite_element_matrices.jl")
+include("utils.jl")
 
 function test_matrix(dimensions::Vector{<:Dimension}, n_shared::Integer,
                      random_seed::Integer, sparse_stencils::Bool, block_sizes_heuristic,
@@ -257,3 +266,8 @@ function test_finite_element_matrices()
         end
     end
 end
+
+end # FiniteElementMatricesTests
+
+using .FiniteElementMatricesTests
+test_finite_element_matrices()

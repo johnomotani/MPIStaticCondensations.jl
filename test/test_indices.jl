@@ -1,6 +1,10 @@
+module IndicesTests
+
+export test_indices
+
 using MPIStaticCondensations
-using MPIStaticCondensations: FakeComm, get_level_info_for_variable, get_global_indices,
-                              get_shared_sparse_matrix_csc_buffer
+using MPIStaticCondensations: Dimension, FakeComm, get_level_info_for_variable,
+                              get_global_indices, get_shared_sparse_matrix_csc_buffer
 using Test
 
 # Notes
@@ -6781,3 +6785,8 @@ function test_indices()
         @testset "test_get_shared_sparse_matrix_csc_buffer_2d_off_diagonal_blocks" test_get_shared_sparse_matrix_csc_buffer_2d_off_diagonal_blocks()
     end
 end
+
+end # IndicesTests
+
+using .IndicesTests
+test_indices()

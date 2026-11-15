@@ -1,3 +1,7 @@
+module MultivariableFiniteElementMatricesTests
+
+export test_multivariable_finite_element_matrices
+
 using MPIStaticCondensations
 using MPIStaticCondensations: Dimension, FastSlow, LevelMultiplier
 using Combinatorics
@@ -7,6 +11,11 @@ using MUMPS
 using Primes
 using StableRNGs
 using Test
+
+BLAS.set_num_threads(1)
+
+include("generate_finite_element_matrices.jl")
+include("utils.jl")
 
 const stencil_matrix = ["element" "empty"   "point"   "element";
                         "element" "point"   "element" "empty";
@@ -328,3 +337,8 @@ function test_multivariable_finite_element_matrices()
         end
     end
 end
+
+end # MultivariableFiniteElementMatricesTests
+
+using .MultivariableFiniteElementMatricesTests
+test_multivariable_finite_element_matrices()
