@@ -1,6 +1,6 @@
 name = "MPIStaticCondensations"
 uuid = "1117417e-d6fb-49f6-b48a-789e42697a0a"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["John Omotani <john.omotani@ukaea.uk> and contributors"]
 
 [deps]
