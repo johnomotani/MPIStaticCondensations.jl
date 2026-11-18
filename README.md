@@ -8,7 +8,7 @@ finite element mesh", SIAM journal on numerical analysis 10.2
 (1973)\]](https://doi.org/10.1137/0710032).
 
 Assumes a structured finite-element-like grid, motivated by the discretisation
-used by https://github.com/KfT/KineticsforTransport.
+used by https://github.com/KineticsforTransport/KfT.
 
 Hybrid parallelism using shared- and distributed-memory MPI parallelism.
 
@@ -29,10 +29,14 @@ using Random
 
 MPI.Init()
 
-shared_nproc = 1 #4
 
 comm = MPI.COMM_WORLD
 nproc = MPI.Comm_size(comm)
+
+# Only use shared memory parallelism for now (distributed memory not supported
+# yet).
+shared_nproc = nproc
+
 rank = MPI.Comm_rank(comm)
 distributed_nproc, rem = divrem(nproc, shared_nproc)
 if rem != 0
