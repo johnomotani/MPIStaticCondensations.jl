@@ -482,6 +482,26 @@ function get_shared_sparse_matrix_info(dimensions::Vector{<:Dimension}, shared_c
     end
 end
 
+"""
+    get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
+                                        shared_comm, allocate_shared_float::F1,
+                                        allocate_shared_int::F2;
+                                        block_sizes::Union{Vector{<:Integer},Nothing}=nothing,
+                                        row_indices::Union{Vector{<:Integer},Nothing}=nothing,
+                                        column_indices::Union{Vector{<:Integer},Nothing}=nothing,
+                                        row_dimensions::Union{AbstractVector{<:Integer},Nothing}=nothing,
+                                        column_dimensions::Union{AbstractVector{<:Integer},Nothing}=nothing,
+                                        stencil::String="element",
+                                        ind_type::Type=Int64) where {F1, F2}
+
+Create a sparse matrix object, whose non-zero pattern is compatible with the
+discretization assumed by MPIStaticCondensations, so that it can be passed as the matrix
+argument to lu!(solver::MPIStaticCondensationParallel, A).
+
+`ind_type` should be the integer type of arrays allocated by `allocate_shared_int`.
+
+The returned matrix has type `FixedSparseCSC`.
+"""
 function get_shared_sparse_matrix_csc_buffer(dimensions::Vector{<:Dimension},
                                              shared_comm, allocate_shared_float::F1,
                                              allocate_shared_int::F2;

@@ -128,8 +128,8 @@ if shared_rank == 0
         MPI.Irecv!(@view(rhs[x.n_local*y.n_local+1]), distributed_comm, req[1]; tag=2)
     end
     if distributed_rank < distributed_nproc - 1
-        MPI.Send!(@view(rhs[(x.n_local)*y.n_local+1:x.n_local*y.n_local]), distributed_comm, req[1]; tag=1)
-        MPI.Send!(@view(rhs[end]), distributed_comm, req[1]; tag=2)
+        MPI.Send(@view(rhs[(x.n_local)*y.n_local+1:x.n_local*y.n_local]), distributed_comm, req[1]; tag=1)
+        MPI.Send(@view(rhs[end]), distributed_comm, req[1]; tag=2)
     end
     MPI.Waitall(req)
 end
@@ -141,8 +141,9 @@ lu!(mpisc, matrix)
 ldiv!(mpisc, rhs)
 
 
-# Free shared-memory arrays.
-############################
+# Finalize and free shared-memory arrays.
+#########################################
+finalize_mpi_static_condensation!(mpisc)
 for w ∈ local_win_store_float
     MPI.free(w)
 end
