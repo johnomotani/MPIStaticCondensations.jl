@@ -16,6 +16,7 @@ system as
 ```math
 \\begin{align}
 A\\cdot X &= U
+\\end{align}
 ```
 By reordering the entries of X and B so that the 'local blocks' are the first entries,
 with each local block being a continuous chunk, followed by the 'joining elements', the
@@ -54,6 +55,11 @@ is known, we can substitute back into the expression above for \$x\$
 & x = A^{-1}\\cdot u - A^{-1} \\cdot b \\cdot y \\\\
 \\end{align}
 ```
+
+To perform the matrix decomposition, this package assumes a structured-grid finite-element
+type discretization. When there are many elements in one or more dimensions, the solve can
+be performed efficiently by applying the 'static condensation' recursively, using larger
+groups of elements at each level.
 """
 module MPIStaticCondensations
 
@@ -1461,6 +1467,10 @@ function mpi_static_condensation(dimensions::Vector{<:Dimension};
     shared_comm_size = MPI.Comm_size(shared_comm)
     shared_comm_rank = MPI.Comm_rank(shared_comm)
 
+    if comm_size != shared_comm_size
+        error("Distributed memory parallelism is not supported yet.")
+    end
+
     if distributed_comm === missing
         # Create default distributed_comm
         distributed_comm = MPI.Comm_split(comm, shared_comm_rank == 0 ? 0 : nothing, 0)
@@ -2386,7 +2396,16 @@ function ldiv!(solver::MPIStaticCondensationNull{T},
 end
 
 """
-    lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
+    lu!(solver::MPIStaticCondensationParallel, A)
+
+Load the matrix `A` into the MPIStaticCondensationParallel solver object `solver` (that
+was created by a call to `mpi_static_condensation()`), and do the computations to make
+`solver` ready for future `ldiv!()` calls.
+
+Usually `A` should be a sparse matrix, with a particular non-zero pattern as returned by
+`get_shared_sparse_matrix_csc_buffer()`. `A` can also be a `Matrix`, but must still have a
+compatible non-zero pattern, and a dense `Matrix` will use a lot of memory for large
+matrices.
 
 Usually does not modify `A`, but may do if: `A` is a `Matrix`, some dimension is periodic,
 and all dimensions have nelement=1.
@@ -2557,10 +2576,13 @@ function lu!(solver::MPIStaticCondensationParallel{Nvar}, A) where Nvar
 end
 
 """
-    ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,T},
-          U::AbstractVector{T}) where {Nvar, T}
+    ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{T},
+          U::AbstractVector{T}) where T
 
-Modifies `U` if any dimension is periodic.
+Solve the linear system `A * X = U` for `X`, where `A` is the matrix that was passed to
+`lu!(solver, A)`.
+
+Modifies `U` if any dimension used to construct `solver` is periodic.
 """
 function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,T},
                U::AbstractVector{T}) where {Nvar, T}
@@ -2647,7 +2669,10 @@ function ldiv!(X::AbstractVector{T}, solver::MPIStaticCondensationParallel{Nvar,
 end
 
 """
-    ldiv!(solver::MPIStaticCondensationParallel{Nvar,T}, U::AbstractVector{T}) where {Nvar, T}
+    ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
+
+Solve the linear system `A * X = U` for `X`, where `A` is the matrix that was passed to
+`lu!(solver, A)`. The solution `X` is returned in `U`.
 """
 function ldiv!(solver::MPIStaticCondensationParallel{Nvar,T}, U::AbstractVector{T}) where {Nvar, T}
     @inbounds begin
@@ -2730,6 +2755,16 @@ function ldiv!(solver::MPIStaticCondensationParallel{Nvar,T}, U::AbstractVector{
         return nothing
     end
 end
+
+"""
+    ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensationParallel{T},
+          U::AbstractMatrix{T}) where T
+
+Solve the set of linear systems `A * X = U` for `X`, where `A` is the matrix that was
+passed to `lu!(solver, A)`.
+
+Modifies `U` if any dimension used to construct `solver` is periodic.
+"""
 function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensation{T},
                U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
@@ -2739,6 +2774,13 @@ function ldiv!(X::AbstractMatrix{T}, solver::MPIStaticCondensation{T},
     end
     return nothing
 end
+
+"""
+    ldiv!(solver::MPIStaticCondensationParallel{T}, U::AbstractVector{T}) where T
+
+Solve the set of linear systems `A * X = U` for `X`, where `A` is the matrix that was
+passed to `lu!(solver, A)`. The solution `X` is returned in `U`.
+"""
 function ldiv!(solver::MPIStaticCondensation{T}, U::AbstractMatrix{T}) where T
     @sc_timeit solver.timer "Static condensation ldiv! $(size(solver, 1))" begin
         # MPISchurComplement allows the RHS and solution vectors to be the same array.
@@ -2749,14 +2791,20 @@ function ldiv!(solver::MPIStaticCondensation{T}, U::AbstractMatrix{T}) where T
     return nothing
 end
 
-function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)
-    return nothing
-end
+"""
+    finalize_mpi_static_condensation!(solver::MPIStaticCondensation)
+
+Finalize the solver. Required when MUMPS is used, i.e. when
+`mumps_fill_in_threshold < 1.0`.
+"""
 function finalize_mpi_static_condensation!(solver::MPIStaticCondensation)
     schur_complement_solver = solver.schur_complement_solver
     if isa(schur_complement_solver, Union{MPIStaticCondensation,BlockedSchurComplementSolver})
         finalize_mpi_static_condensation!(schur_complement_solver)
     end
+    return nothing
+end
+function finalize_mpi_static_condensation!(::MPIStaticCondensationNull)
     return nothing
 end
 function finalize_mpi_static_condensation!(solver::BlockedSchurComplementSolver)
