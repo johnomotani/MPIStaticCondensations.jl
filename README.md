@@ -1,6 +1,6 @@
 # MPIStaticCondensations
 
-[![Build Status](https://github.com/johnomotani/MPIStaticCondensations.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/johnomotani/MPIStaticCondensations.jl/actions/workflows/CI.yml?query=branch%3Amain) [![codecov](https://codecov.io/github/johnomotani/MPIStaticCondensations.jl/graph/badge.svg?token=78511MX42D)](https://codecov.io/github/johnomotani/MPIStaticCondensations.jl)
+[![Build Status](https://github.com/johnomotani/MPIStaticCondensations.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/johnomotani/MPIStaticCondensations.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 Direct matrix solve, using a recursively applied static condensation approach,
 also known as 'nested dissection' [\[George "Nested dissection of a regular
